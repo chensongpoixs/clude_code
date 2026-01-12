@@ -1,0 +1,8 @@
+/.clude 
+/src/clude_code/__pycache__
+/src/clude_code/cli/__pycache__
+/src/clude_code/llm/__pycache__
+/src/clude_code/observability/__pycache__
+/src/clude_code/orchestrator/__pycache__
+/src/clude_code/policy/__pycache__
+/src/clude_code/tooling/__pycache__

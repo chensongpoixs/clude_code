@@ -2,6 +2,25 @@
 
 本仓库当前用于沉淀一套“业界 Claude Code/Code Agent CLI”形态的**功能分析 + 核心模块拆解 + 可实现的模块化开发文档**（偏工程落地，不是概念介绍）。
 
+## Day1 运行（Python 纯 CLI + llama.cpp HTTP）
+
+详见：`docs/21-llama-cpp-http.md`
+
+### conda（Windows / PowerShell）
+
+```powershell
+conda create -n clude_code python=3.11 -y
+conda activate clude_code
+pip install -e .
+
+$env:CLUDE_WORKSPACE_ROOT="D:\Work\AI\clude_code"
+$env:CLUDE_LLM__BASE_URL="http://127.0.0.1:8080"
+$env:CLUDE_LLM__API_MODE="openai_compat"   # 或 completion
+
+clude doctor
+clude chat
+```
+
 ## 快速开始（阅读顺序）
 
 1. 总览与范围：`docs/00-overview.md`

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/policy_decision.schema.json",
+  "title": "PolicyDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision"],
+  "properties": {
+    "decision": { "type": "string", "enum": ["ALLOW", "DENY", "REQUIRE_CONFIRMATION"] },
+    "reason": { "type": "string" },
+    "scope": { "type": "string", "enum": ["single_action", "session", "workspace"] }
+  }
+}
+
+

@@ -1,0 +1,2 @@
+[console_scripts]
+clude = clude_code.cli.main:app

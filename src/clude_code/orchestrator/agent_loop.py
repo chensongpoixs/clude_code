@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any
+
+from clude_code.config import CludeConfig
+from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
+from clude_code.observability.audit import AuditLogger
+from clude_code.policy.command_policy import evaluate_command
+from clude_code.tooling.local_tools import LocalTools, ToolResult
+
+
+SYSTEM_PROMPT = """\
+你是一个本地代码仓库的编程助手（纯 CLI 代理）。
+你可以通过“工具调用”来读取/搜索/写入文件以及执行命令。
+
+重要规则：
+- 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
+  {"tool":"<name>","args":{...}}
+- 不需要工具时，输出正常中文解释与步骤（不要输出 JSON）。
+- 可用工具：
+  - list_dir: {"path":"."}
+  - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
+  - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选)
+  - write_file: {"path":"a/b.txt","text":"..."}
+  - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
+"""
+
+
+@dataclass
+class AgentTurn:
+    assistant_text: str
+    tool_used: bool
+
+
+def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
+    text = text.strip()
+    if not text.startswith("{") or not text.endswith("}"):
+        return None
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    if "tool" not in obj or "args" not in obj:
+        return None
+    if not isinstance(obj["tool"], str) or not isinstance(obj["args"], dict):
+        return None
+    return obj
+
+
+def _tool_result_to_message(name: str, tr: ToolResult) -> str:
+    if tr.ok:
+        return json.dumps({"tool": name, "ok": True, "payload": tr.payload}, ensure_ascii=False)
+    return json.dumps({"tool": name, "ok": False, "error": tr.error}, ensure_ascii=False)
+
+
+class AgentLoop:
+    def __init__(self, cfg: CludeConfig) -> None:
+        self.cfg = cfg
+        # keep it simple & stable enough for MVP; later replace with uuid4
+        self.session_id = f"sess_{id(self)}"
+        self.llm = LlamaCppHttpClient(
+            base_url=cfg.llm.base_url,
+            api_mode=cfg.llm.api_mode,  # type: ignore[arg-type]
+            model=cfg.llm.model,
+            temperature=cfg.llm.temperature,
+            max_tokens=cfg.llm.max_tokens,
+            timeout_s=cfg.llm.timeout_s,
+        )
+        self.tools = LocalTools(
+            cfg.workspace_root,
+            max_file_read_bytes=cfg.limits.max_file_read_bytes,
+            max_output_bytes=cfg.limits.max_output_bytes,
+        )
+        self.audit = AuditLogger(cfg.workspace_root, self.session_id)
+        self.messages: list[ChatMessage] = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
+
+    def run_turn(self, user_text: str, *, confirm: callable[[str], bool]) -> AgentTurn:
+        trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
+        self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
+        self.messages.append(ChatMessage(role="user", content=user_text))
+
+        tool_used = False
+        for _ in range(20):  # hard stop to avoid infinite loops
+            assistant = self.llm.chat(self.messages)
+            tool_call = _try_parse_tool_call(assistant)
+            if tool_call is None:
+                self.messages.append(ChatMessage(role="assistant", content=assistant))
+                self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant})
+                return AgentTurn(assistant_text=assistant, tool_used=tool_used)
+
+            name = tool_call["tool"]
+            args = tool_call["args"]
+
+            # policy confirmations (MVP): only guard write/exec
+            if name in {"write_file"} and self.cfg.policy.confirm_write:
+                decision = confirm(f"确认写文件？tool={name} args={args}")
+                self.audit.write(trace_id=trace_id, event="confirm_write", data={"tool": name, "args": args, "allow": decision})
+                if not decision:
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
+                    self.messages.append(ChatMessage(role="user", content=msg))
+                    continue
+            if name in {"run_cmd"} and self.cfg.policy.confirm_exec:
+                decision = confirm(f"确认执行命令？tool={name} args={args}")
+                self.audit.write(trace_id=trace_id, event="confirm_exec", data={"tool": name, "args": args, "allow": decision})
+                if not decision:
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
+                    self.messages.append(ChatMessage(role="user", content=msg))
+                    continue
+
+            # minimal command policy (denylist)
+            if name == "run_cmd":
+                cmd = str(args.get("command", ""))
+                dec = evaluate_command(cmd, allow_network=self.cfg.policy.allow_network)
+                if not dec.ok:
+                    self.audit.write(trace_id=trace_id, event="policy_deny_cmd", data={"command": cmd, "reason": dec.reason})
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}))
+                    self.messages.append(ChatMessage(role="user", content=msg))
+                    continue
+
+            tool_used = True
+            result = self._dispatch_tool(name, args)
+            # feed tool result back to model as user message (works with most chat templates)
+            self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result)))
+            self.audit.write(trace_id=trace_id, event="tool_call", data={"tool": name, "args": args, "ok": result.ok, "error": result.error})
+
+        return AgentTurn(
+            assistant_text="达到本轮最大工具调用次数（20），已停止以避免死循环。请缩小任务或提供更多约束/入口文件。",
+            tool_used=tool_used,
+        )
+
+    def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
+        try:
+            if name == "list_dir":
+                return self.tools.list_dir(path=args.get("path", "."))
+            if name == "read_file":
+                return self.tools.read_file(path=args["path"], offset=args.get("offset"), limit=args.get("limit"))
+            if name == "grep":
+                return self.tools.grep(
+                    pattern=args["pattern"],
+                    path=args.get("path", "."),
+                    ignore_case=bool(args.get("ignore_case", False)),
+                    max_hits=int(args.get("max_hits", 200)),
+                )
+            if name == "write_file":
+                return self.tools.write_file(path=args["path"], text=args.get("text", ""))
+            if name == "run_cmd":
+                return self.tools.run_cmd(command=args["command"], cwd=args.get("cwd", "."))
+            return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"unknown tool: {name}"})
+        except KeyError as e:
+            return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})
+        except Exception as e:
+            return ToolResult(False, error={"code": "E_TOOL", "message": str(e)})
+
+

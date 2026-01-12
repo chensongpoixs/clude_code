@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/config.schema.json",
+  "title": "CludeConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workspace_root", "llm", "policy", "limits"],
+  "properties": {
+    "workspace_root": { "type": "string", "minLength": 1 },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "base_url", "api_mode", "model", "temperature", "max_tokens", "timeout_s"],
+      "properties": {
+        "provider": { "type": "string", "enum": ["llama_cpp_http"] },
+        "base_url": { "type": "string", "minLength": 1 },
+        "api_mode": { "type": "string", "enum": ["openai_compat", "completion"] },
+        "model": { "type": "string" },
+        "temperature": { "type": "number", "minimum": 0.0, "maximum": 2.0 },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "timeout_s": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow_network", "confirm_write", "confirm_exec"],
+      "properties": {
+        "allow_network": { "type": "boolean" },
+        "confirm_write": { "type": "boolean" },
+        "confirm_exec": { "type": "boolean" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_output_bytes", "max_file_read_bytes"],
+      "properties": {
+        "max_output_bytes": { "type": "integer", "minimum": 1024 },
+        "max_file_read_bytes": { "type": "integer", "minimum": 1024 }
+      }
+    }
+  }
+}
+
+
