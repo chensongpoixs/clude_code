@@ -7,7 +7,6 @@ from clude_code.tooling.local_tools import ToolResult
 
 
 def _tail_lines(text: str, max_lines: int = 30, max_chars: int = 4000) -> str:
-    """获取文本的尾部几行，用于在输出过长时进行截断显示。"""
     lines = text.splitlines()
     tail = "\n".join(lines[-max_lines:])
     if len(tail) > max_chars:
@@ -16,7 +15,6 @@ def _tail_lines(text: str, max_lines: int = 30, max_chars: int = 4000) -> str:
 
 
 def _head_items(items: list[dict[str, Any]], max_items: int = 20) -> list[dict[str, Any]]:
-    """获取目录列表的前几项，并精简字段。"""
     out = []
     for it in items[:max_items]:
         out.append({k: it.get(k) for k in ("name", "is_dir", "size_bytes")})
@@ -25,8 +23,8 @@ def _head_items(items: list[dict[str, Any]], max_items: int = 20) -> list[dict[s
 
 def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None = None) -> dict[str, Any]:
     """
-    将原始的 ToolResult 转换为紧凑、结构化的摘要，回传给 LLM。
-    核心理念：仅保留决策关键信号和引用，避免由于全量数据回送导致的上下文溢出。
+    Turn raw ToolResult into a compact, structured summary for feeding back to the LLM.
+    Key idea: keep only decision-critical signals + references, avoid dumping full payload.
     """
     if not tr.ok:
         return {"tool": tool, "ok": False, "error": tr.error}
@@ -34,11 +32,11 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     payload = tr.payload or {}
     summary: dict[str, Any] = {"tool": tool, "ok": True}
     
-    # 预处理关键字，用于后续的语义采样
+    # Pre-process keywords for search
     kw_list = [k.lower() for k in (keywords or []) if k]
 
     if tool == "list_dir":
-        # 目录列表摘要：显示统计信息和前 20 个条目
+        # ... (list_dir logic remains same as it's already compact)
         items = payload.get("items") or []
         if isinstance(items, list):
             dirs = sum(1 for it in items if isinstance(it, dict) and it.get("is_dir") is True)
@@ -56,10 +54,11 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         return summary
 
     if tool == "grep":
-        # Grep 搜索摘要：优先展示匹配关键字的行，限制展示数量
+        # ... (grep logic)
         hits = payload.get("hits") or []
         if isinstance(hits, list):
             head = []
+            # Prioritize hits that match keywords
             prioritized = []
             others = []
             for h in hits:
@@ -92,29 +91,29 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         return summary
 
     if tool == "read_file":
-        # 读取文件摘要：采用“语义窗口采样”技术
-        # 围绕关键字向上向下扩展 10 行，并保留 if/def/class 等逻辑锚点，
-        # 确保回传给模型的内容既紧凑又具备逻辑连贯性。
         text = str(payload.get("text") or "")
         lines = text.splitlines()
         
+        # Semantic Window Sampling: Balanced for depth & token economy
         windows = []
         if kw_list:
             for i, line in enumerate(lines):
-                # 即使没有匹配关键字，也保留逻辑流的关键行（if, for, while, return 等）
+                # Detect logical flow keywords even if they aren't user keywords
                 is_logic_anchor = any(anchor in line.lower() for anchor in ["if ", "for ", "while ", "try:", "return ", "class ", "def "])
                 is_user_hit = any(kw in line.lower() for kw in kw_list)
                 
                 if is_user_hit:
+                    # Give user hit more context
                     start = max(0, i - 10)
                     end = min(len(lines), i + 11)
                     windows.append((start, end))
                 elif is_logic_anchor and len(kw_list) > 0:
+                    # Keep logic flow near user hits
                     start = max(0, i - 2)
                     end = min(len(lines), i + 3)
                     windows.append((start, end))
         
-        # 合并重叠的显示窗口
+        # Merge overlapping windows
         merged = []
         if windows:
             windows.sort()
@@ -135,13 +134,15 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
             sampled_text = "\n\n".join(sampled_parts)
         
         if not sampled_text:
-            # 如果没有匹配关键字，默认展示文件头尾
+            # Fallback to head/tail if no keywords matched
             sampled_text = text[:800] + "\n...[gap]...\n" + _tail_lines(text, max_lines=15, max_chars=1200)
 
         summary["summary"] = {
             "path": payload.get("path"),
+            "offset": payload.get("offset"),
+            "limit": payload.get("limit"),
             "chars_total": len(text),
-            "content": sampled_text[:4000],
+            "content": sampled_text[:4000], # Final safety limit
             "truncated": len(text) > len(sampled_text) or len(text) > 4000,
         }
         return summary
