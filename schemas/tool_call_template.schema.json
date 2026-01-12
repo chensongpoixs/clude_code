@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/tool_call_template.schema.json",
+  "title": "ToolCallTemplate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "args_hint"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "args_hint": { "type": "object" },
+    "why": { "type": "string" }
+  }
+}
+
+

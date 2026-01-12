@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/step.schema.json",
+  "title": "Step",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step_id", "title", "intent", "status"],
+  "properties": {
+    "step_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "intent": { "type": "string", "minLength": 1 },
+    "tool_calls": {
+      "type": "array",
+      "items": { "$ref": "schemas/tool_call_template.schema.json" }
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "items": { "$ref": "schemas/artifact.schema.json" }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "done", "blocked", "skipped"]
+    },
+    "rollback_hint": { "type": "string" }
+  }
+}
+
+

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/token_budget.schema.json",
+  "title": "TokenBudget",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["total_estimate", "used_estimate", "limits"],
+  "properties": {
+    "total_estimate": { "type": "integer", "minimum": 0 },
+    "used_estimate": { "type": "integer", "minimum": 0 },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_snippets", "max_lines_per_snippet"],
+      "properties": {
+        "max_snippets": { "type": "integer", "minimum": 1 },
+        "max_lines_per_snippet": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
+
+

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/artifact.schema.json",
+  "title": "Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "value"],
+  "properties": {
+    "type": { "type": "string", "enum": ["file", "command", "note"] },
+    "value": { "type": "string" }
+  }
+}
+
+

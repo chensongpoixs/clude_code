@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/context_pack.schema.json",
+  "title": "ContextPack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workspace_summary", "constraints", "retrieval_hits", "code_snippets", "recent_actions", "token_budget"],
+  "properties": {
+    "workspace_summary": { "type": "string" },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "retrieval_hits": { "type": "array", "items": { "$ref": "schemas/retrieval_hit.schema.json" } },
+    "code_snippets": { "type": "array", "items": { "$ref": "schemas/code_snippet.schema.json" } },
+    "recent_actions": { "type": "array", "items": { "$ref": "schemas/tool_call_result.schema.json" } },
+    "token_budget": { "$ref": "schemas/token_budget.schema.json" }
+  }
+}
+
+

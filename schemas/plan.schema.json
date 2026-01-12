@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/plan.schema.json",
+  "title": "Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan_id", "goal", "constraints", "steps", "verification", "risk_level", "created_at"],
+  "properties": {
+    "plan_id": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "schemas/step.schema.json" }
+    },
+    "verification": { "$ref": "schemas/verification_policy.schema.json" },
+    "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
+    "created_at": { "type": "integer", "minimum": 0 }
+  }
+}
+
+

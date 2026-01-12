@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/verification_policy.schema.json",
+  "title": "VerificationPolicy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "commands", "required", "stop_on_fail"],
+  "properties": {
+    "mode": { "type": "string", "enum": ["none", "lint", "test", "build", "custom"] },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "required": { "type": "boolean" },
+    "stop_on_fail": { "type": "boolean" }
+  }
+}
+
+

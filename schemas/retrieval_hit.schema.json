@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/retrieval_hit.schema.json",
+  "title": "RetrievalHit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "path", "score", "summary"],
+  "properties": {
+    "source": { "type": "string", "enum": ["grep", "semantic", "symbol", "manual"] },
+    "path": { "type": "string", "minLength": 1 },
+    "score": { "type": "number" },
+    "summary": { "type": "string" },
+    "start_line": { "type": "integer", "minimum": 1 },
+    "end_line": { "type": "integer", "minimum": 1 }
+  }
+}
+
+

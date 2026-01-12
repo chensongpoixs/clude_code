@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/code_snippet.schema.json",
+  "title": "CodeSnippet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "start_line", "end_line", "content"],
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "start_line": { "type": "integer", "minimum": 1 },
+    "end_line": { "type": "integer", "minimum": 1 },
+    "content": { "type": "string" }
+  }
+}
+
+
