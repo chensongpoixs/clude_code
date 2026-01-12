@@ -454,15 +454,18 @@ class LocalTools:
             ".",
         ]
         
+        # Exclude node_modules, .venv, etc. to keep it fast
+        # Windows compatibility: use absolute path for cwd and properly quote paths
+        abs_root = str(self.workspace_root.resolve())
         try:
-            # Exclude node_modules, .venv, etc. to keep it fast
             cp = subprocess.run(
                 args,
-                cwd=str(self.workspace_root.resolve()),
+                cwd=abs_root,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                shell=(platform.system() == "Windows"), # Windows needs shell=True for some ctags installs
             )
         except Exception:
             return "Repo Map: Failed to execute ctags."

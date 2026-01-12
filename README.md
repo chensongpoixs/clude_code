@@ -4,7 +4,11 @@
 
 本仓库沉淀了从**功能分析**、**架构设计**到**模块化实现**的全过程文档与源码。
 
----
+
+
+[业界 Code Agent 技术原理深度白皮书 (Technical Whitepaper)](/src/INDUSTRY_CODE_AGENT_TECH_WHITEPAPER.md)
+
+
 
 ## 1. 核心特性 (Key Features)
 

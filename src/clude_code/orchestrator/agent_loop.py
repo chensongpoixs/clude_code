@@ -16,25 +16,25 @@ from clude_code.knowledge.vector_store import VectorStore
 
 
 SYSTEM_PROMPT = """\
-你是一个本地代码仓库的编程助手（纯 CLI 代理）。
-你可以通过“工具调用”来读取/搜索/写入文件以及执行命令。
+你不是一个简单的对话模型，你是一个部署在用户本地机器上的【工程执行代理 (Engineering Agent)】。你拥有对当前代码库的完整操作权限。
 
-重要规则：
-1. 你必须始终使用**中文**与用户交流，严禁输出英文回答。
-2. 你是一个具备行动能力的代理，如果用户询问环境、路径或系统信息，请优先尝试使用 `run_cmd` 等工具自行探测，而不是询问用户。
-3. 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
+核心行为准则：
+1. **拥有物理实体感**：你的所有能力都是通过下方列出的【工具】实现的。你【可以】且【必须】通过调用工具来阅读、搜索、修改代码。
+2. **严禁推诿任务**：绝对禁止说“我无法访问文件”、“我只是一个模型”或“请你提供代码片段”。如果你需要代码，请立即调用 `read_file` 或 `glob_file_search`。
+3. **自主探测**：面对宽泛任务，第一步永远是探测环境（list_dir / glob_file_search）。
+4. **思维链要求**：在执行工具调用前，先输出一段中文分析，描述你即将操作的物理路径和逻辑目标。
+5. **始终中文**：交流过程严禁出现英文回答。
+
+工具调用格式（必须输出纯 JSON 对象）：
   {"tool":"<name>","args":{...}}
-- 不需要工具时，输出正常中文解释与步骤（不要输出 JSON）。
-- 可用工具：
+
+可用工具清单：
   - list_dir: {"path":"."}
-    - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
-    - glob_file_search: {"glob_pattern":"**/*.py","target_directory":"."} (用于按名称模式查找文件，支持 ** 递归)
-    - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选；注意：不要直接搜索用户的中文提问，应搜索代码中可能的英文关键词)
-   - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
-   - undo_patch: {"undo_id":"undo_...","force":false}
-   - write_file: {"path":"a/b.txt","text":"..."}
-  - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
-  - search_semantic: {"query":"..."} (当 grep 噪音太多、找不到目标或需要根据功能描述查找时，请务必优先尝试此工具)
+  - read_file: {"path":"README.md","offset":1,"limit":200}
+  - glob_file_search: {"glob_pattern":"**/*.py"}
+  - grep: {"pattern":"...","path":"."}
+  - apply_patch: {"path":"...","old":"...","new":"..."}
+  - search_semantic: {"query":"..."}
  """
 
 
@@ -165,6 +165,12 @@ class AgentLoop:
         for _ in range(20):  # hard stop to avoid infinite loops
             _ev("llm_request", {"messages": len(self.messages)})
             assistant = self.llm.chat(self.messages)
+            
+            # Robustness: Detect repetitive/broken outputs (stuttering)
+            if assistant.count("[") > 50 or assistant.count("{") > 50:
+                assistant = "模型输出异常：检测到过多的重复字符，已强制截断。请重新描述你的需求或尝试缩小任务范围。"
+                _ev("stuttering_detected", {"length": len(assistant)})
+
             _ev("llm_response", {"text": assistant[:4000], "truncated": len(assistant) > 4000})
             tool_call = _try_parse_tool_call(assistant)
             if tool_call is None:
@@ -178,10 +184,12 @@ class AgentLoop:
             args = tool_call["args"]
             _ev("tool_call_parsed", {"tool": name, "args": args})
 
-            # IMPORTANT: llama.cpp chat templates often require strict alternation:
-            # user/assistant/user/assistant...
-            # Always record the assistant message before sending a user tool result.
-            self.messages.append(ChatMessage(role="assistant", content=assistant))
+            # Robustness: Keep assistant history clean. 
+            # If there's a tool call, we only store the JSON part in the message history
+            # to prevent the model from getting distracted by its own previous CoT/noise.
+            clean_assistant = json.dumps(tool_call, ensure_ascii=False)
+            self.messages.append(ChatMessage(role="assistant", content=clean_assistant))
+            
             _ev("assistant_tool_call_recorded", {"tool": name})
             self._trim_history(max_messages=30)
 
