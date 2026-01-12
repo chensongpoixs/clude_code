@@ -143,7 +143,14 @@ class AgentLoop:
             ChatMessage(role="system", content=combined_system_prompt),
         ]
 
-    def run_turn(self, user_text: str, *, confirm: Callable[[str], bool], debug: bool = False) -> AgentTurn:
+    def run_turn(
+        self,
+        user_text: str,
+        *,
+        confirm: Callable[[str], bool],
+        debug: bool = False,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentTurn:
         trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
         
         # Extract intent keywords for semantic windowing (MVP: simple regex)
@@ -162,6 +169,12 @@ class AgentLoop:
             if debug:
                 # keep trace log verbose, but trim huge fields
                 self.trace.write(trace_id=trace_id, step=step_idx, event=event, data=data)
+            if on_event is not None:
+                try:
+                    on_event(e)
+                except Exception:
+                    # Never allow UI callbacks to break the agent loop.
+                    pass
 
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
