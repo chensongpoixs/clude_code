@@ -6,6 +6,7 @@
 - [x] **LLM 输出解析增强**: 支持模型在 JSON 前后输出解释文字，自动提取 JSON。
 - [ ] **工具参数 Schema 校验**: 调用工具前强制检查参数格式。
 - [ ] **原子化文件写入**: 使用临时文件和 rename 确保 IO 安全。
+- [x] **可观测执行轨迹**: `clude chat --debug` 输出每步轨迹，并写入 `.clude/logs/trace.jsonl`。
 
 ## P1: 代码编辑与控制
 - [x] **实现 `apply_patch` 工具**: MVP 采用 old/new block 替换 + 唯一性保护（expected_replacements）。

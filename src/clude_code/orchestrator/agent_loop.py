@@ -7,6 +7,7 @@ from typing import Any
 from clude_code.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.observability.audit import AuditLogger
+from clude_code.observability.trace import TraceLogger
 from clude_code.policy.command_policy import evaluate_command
 from clude_code.tooling.local_tools import LocalTools, ToolResult
 
@@ -34,6 +35,8 @@ SYSTEM_PROMPT = """\
 class AgentTurn:
     assistant_text: str
     tool_used: bool
+    trace_id: str
+    events: list[dict[str, Any]]
 
 
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -107,39 +110,61 @@ class AgentLoop:
             max_output_bytes=cfg.limits.max_output_bytes,
         )
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
+        self.trace = TraceLogger(cfg.workspace_root, self.session_id)
         self.messages: list[ChatMessage] = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
 
-    def run_turn(self, user_text: str, *, confirm: callable[[str], bool]) -> AgentTurn:
+    def run_turn(self, user_text: str, *, confirm: callable[[str], bool], debug: bool = False) -> AgentTurn:
         trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
+        events: list[dict[str, Any]] = []
+        step_idx = 0
+
+        def _ev(event: str, data: dict[str, Any]) -> None:
+            nonlocal step_idx
+            step_idx += 1
+            e = {"step": step_idx, "event": event, "data": data}
+            events.append(e)
+            if debug:
+                # keep trace log verbose, but trim huge fields
+                self.trace.write(trace_id=trace_id, step=step_idx, event=event, data=data)
+
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
+        _ev("user_message", {"text": user_text})
         self.messages.append(ChatMessage(role="user", content=user_text))
 
         tool_used = False
         for _ in range(20):  # hard stop to avoid infinite loops
+            _ev("llm_request", {"messages": len(self.messages)})
             assistant = self.llm.chat(self.messages)
+            _ev("llm_response", {"text": assistant[:4000], "truncated": len(assistant) > 4000})
             tool_call = _try_parse_tool_call(assistant)
             if tool_call is None:
                 self.messages.append(ChatMessage(role="assistant", content=assistant))
                 self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant})
-                return AgentTurn(assistant_text=assistant, tool_used=tool_used)
+                _ev("final_text", {"text": assistant[:4000], "truncated": len(assistant) > 4000})
+                return AgentTurn(assistant_text=assistant, tool_used=tool_used, trace_id=trace_id, events=events)
 
             name = tool_call["tool"]
             args = tool_call["args"]
+            _ev("tool_call_parsed", {"tool": name, "args": args})
 
             # policy confirmations (MVP): only guard write/exec
             if name in {"write_file", "apply_patch", "undo_patch"} and self.cfg.policy.confirm_write:
                 decision = confirm(f"确认写文件？tool={name} args={args}")
                 self.audit.write(trace_id=trace_id, event="confirm_write", data={"tool": name, "args": args, "allow": decision})
+                _ev("confirm_write", {"tool": name, "allow": decision})
                 if not decision:
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
                     self.messages.append(ChatMessage(role="user", content=msg))
+                    _ev("denied_by_user", {"tool": name})
                     continue
             if name in {"run_cmd"} and self.cfg.policy.confirm_exec:
                 decision = confirm(f"确认执行命令？tool={name} args={args}")
                 self.audit.write(trace_id=trace_id, event="confirm_exec", data={"tool": name, "args": args, "allow": decision})
+                _ev("confirm_exec", {"tool": name, "allow": decision})
                 if not decision:
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
                     self.messages.append(ChatMessage(role="user", content=msg))
+                    _ev("denied_by_user", {"tool": name})
                     continue
 
             # minimal command policy (denylist)
@@ -148,23 +173,29 @@ class AgentLoop:
                 dec = evaluate_command(cmd, allow_network=self.cfg.policy.allow_network)
                 if not dec.ok:
                     self.audit.write(trace_id=trace_id, event="policy_deny_cmd", data={"command": cmd, "reason": dec.reason})
+                    _ev("policy_deny_cmd", {"command": cmd, "reason": dec.reason})
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}))
                     self.messages.append(ChatMessage(role="user", content=msg))
                     continue
 
             tool_used = True
             result = self._dispatch_tool(name, args)
+            _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload})
             # feed tool result back to model as user message (works with most chat templates)
             self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result)))
+            _ev("tool_result_fed_back", {"tool": name})
             audit_data: dict[str, Any] = {"tool": name, "args": args, "ok": result.ok, "error": result.error}
             if name in {"apply_patch", "undo_patch"} and result.ok and result.payload:
                 # record hashes/undo_id for traceability
                 audit_data["payload"] = result.payload
             self.audit.write(trace_id=trace_id, event="tool_call", data=audit_data)
 
+        _ev("stop_reason", {"reason": "max_tool_calls_reached", "limit": 20})
         return AgentTurn(
             assistant_text="达到本轮最大工具调用次数（20），已停止以避免死循环。请缩小任务或提供更多约束/入口文件。",
             tool_used=tool_used,
+            trace_id=trace_id,
+            events=events,
         )
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:

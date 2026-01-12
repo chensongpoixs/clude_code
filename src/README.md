@@ -16,7 +16,7 @@
 | **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
 | **工具箱** | `tooling/local_tools.py` | 78% | **中**: Patch-first + undo + hash 审计已具备；RAG/索引仍缺。 |
 | **安全策略** | `policy/command_policy.py` | 65% | **中**: Denylist 完备，缺动态权限流。 |
-| **审计追溯** | `observability/audit.py` | 68% | **中**: JSONL 全记录，patch/undo 含 hash 证据链；缺回放/可视化。 |
+| **审计追溯** | `observability/audit.py` + `observability/trace.py` | 72% | **中**: JSONL 全记录；patch/undo 含 hash 证据链；debug 轨迹可落盘；缺回放/可视化。 |
 
 ---
 
@@ -37,6 +37,7 @@
 ### 第一阶段：编辑稳定性 (P0)
 - **Patch Engine**: ✅ 已引入 `apply_patch`（支持多处/全量替换，含可选 fuzzy），并提供 `undo_patch` 回滚与 hash 证据链。下一步补“原子写”与“敏感信息脱敏”。
 - **Schema Guard**: 在工具执行前强制 Pydantic 校验，对 LLM 错误输出进行自动重试。
+ - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。
 
 ### 第二阶段：任务编排 (P1)
 - **Planning**: 让模型执行前先输出 `Plan`。

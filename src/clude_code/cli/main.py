@@ -24,6 +24,7 @@ def version() -> None:
 def chat(
     model: str = typer.Option("", help="指定 llama.cpp 的 model id（openai_compat 常需要）"),
     select_model: bool = typer.Option(False, "--select-model", help="启动时从 /v1/models 交互选择 model（openai_compat）"),
+    debug: bool = typer.Option(False, "--debug", help="显示 Agent 可观测执行轨迹（LLM输出/工具调用/确认/结果）并写入 .clude/logs/trace.jsonl"),
 ) -> None:
     """
     Start an interactive session (MVP placeholder).
@@ -76,9 +77,29 @@ def chat(
         if user_text.strip().lower() in {"exit", "quit"}:
             console.print("bye")
             return
-        turn = agent.run_turn(user_text, confirm=_confirm)
+        turn = agent.run_turn(user_text, confirm=_confirm, debug=debug)
         console.print("\n[bold]assistant[/bold]")
         console.print(turn.assistant_text)
+        if debug:
+            console.print(f"[dim]trace_id={turn.trace_id}（详见 .clude/logs/trace.jsonl）[/dim]")
+            console.print("[dim]--- agent 执行轨迹（可观测） ---[/dim]")
+            for e in turn.events:
+                step = e.get("step")
+                ev = e.get("event")
+                data = e.get("data", {})
+                # 控制台展示做摘要，避免刷屏
+                if ev in {"llm_response", "final_text"}:
+                    text = str(data.get("text", ""))
+                    console.print(f"[dim]{step}. {ev}[/dim] {text[:240]}{'…' if len(text) > 240 else ''}")
+                elif ev == "tool_call_parsed":
+                    console.print(f"[dim]{step}. tool[/dim] {data.get('tool')} args={data.get('args')}")
+                elif ev == "tool_result":
+                    console.print(
+                        f"[dim]{step}. result[/dim] tool={data.get('tool')} ok={data.get('ok')} "
+                        f"error={data.get('error')} payload_keys={list((data.get('payload') or {}).keys())}"
+                    )
+                else:
+                    console.print(f"[dim]{step}. {ev}[/dim] {data}")
         console.print("")
 
 
