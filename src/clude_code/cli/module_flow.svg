@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="400" height="200" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @keyframes move { 0% { transform: translateX(0); } 100% { transform: translateX(150px); } }
+    .node { fill: #fff; stroke: #333; stroke-width: 2; rx: 5; }
+    .text { font-family: sans-serif; font-size: 14px; font-weight: bold; }
+    .dot { fill: #2196f3; animation: move 2s linear infinite; }
+  </style>
+  <rect width="400" height="200" fill="#f9f9f9"/>
+  <g transform="translate(30, 70)">
+    <rect class="node" width="100" height="60"/>
+    <text x="50" y="35" class="text" text-anchor="middle">用户输入</text>
+  </g>
+  <circle class="dot" cx="140" cy="100" r="5"/>
+  <g transform="translate(250, 70)">
+    <rect class="node" width="120" height="60" style="fill: #e3f2fd;"/>
+    <text x="60" y="35" class="text" text-anchor="middle">CLI 命令分发</text>
+  </g>
+  <text x="200" y="30" class="text" text-anchor="middle">CLI 交互模块流程</text>
+</svg>
+

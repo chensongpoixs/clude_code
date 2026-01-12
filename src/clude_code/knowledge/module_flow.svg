@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="600" height="300" viewBox="0 0 600 300" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .node { fill: #fff; stroke: #333; stroke-width: 2; rx: 5; }
+    .text { font-family: sans-serif; font-size: 12px; font-weight: bold; }
+    .arrow { stroke: #666; stroke-width: 2; fill: none; stroke-dasharray: 5; }
+    .status { fill: #4caf50; animation: pulse 2s infinite; }
+  </style>
+  <rect width="600" height="300" fill="#f5f5f5"/>
+  <g transform="translate(20, 120)">
+    <rect class="node" width="100" height="60"/>
+    <text x="50" y="35" class="text" text-anchor="middle">Indexer</text>
+  </g>
+  <path class="arrow" d="M120 150 H180"/>
+  <g transform="translate(180, 120)">
+    <rect class="node" width="100" height="60" style="fill: #fff9c4;"/>
+    <text x="50" y="35" class="text" text-anchor="middle">Embedder</text>
+  </g>
+  <path class="arrow" d="M280 150 H340"/>
+  <g transform="translate(340, 120)">
+    <rect class="node" width="100" height="60" style="fill: #e8f5e9;"/>
+    <text x="50" y="35" class="text" text-anchor="middle">LanceDB</text>
+    <circle cx="90" cy="10" r="4" class="status"/>
+  </g>
+  <text x="300" y="40" class="text" font-size="16" text-anchor="middle">知识/RAG 模块流程 (异步索引与检索)</text>
+</svg>
+

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="400" height="200" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    .node { fill: #fff; stroke: #333; stroke-width: 2; rx: 5; }
+    .text { font-family: sans-serif; font-size: 12px; font-weight: bold; }
+    .rec { fill: #f44336; animation: blink 1s infinite; }
+  </style>
+  <rect width="400" height="200" fill="#fbe9e7"/>
+  <g transform="translate(50, 70)">
+    <rect class="node" width="100" height="60"/>
+    <text x="50" y="35" class="text" text-anchor="middle">事件流</text>
+    <circle cx="10" cy="10" r="5" class="rec"/>
+  </g>
+  <path d="M150 100 H250" stroke="#666" stroke-width="2" stroke-dasharray="5"/>
+  <g transform="translate(250, 70)">
+    <rect class="node" width="100" height="60" style="fill: #e0f2f1;"/>
+    <text x="50" y="25" class="text" text-anchor="middle">Audit / Trace</text>
+    <text x="50" y="45" class="text" font-size="10" text-anchor="middle">JSONL 日志</text>
+  </g>
+  <text x="200" y="30" class="text" text-anchor="middle">可观测性模块流程</text>
+</svg>
+

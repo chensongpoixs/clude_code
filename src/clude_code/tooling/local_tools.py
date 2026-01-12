@@ -326,6 +326,10 @@ class LocalTools:
         args = ["rg", "--json"]
         if ignore_case:
             args.append("-i")
+        
+        # DEFAULT IGNORES: Exclude agent's own logs and git metadata to reduce noise
+        args.extend(["-g", "!.clude/*", "-g", "!.git/*", "-g", "!node_modules/*", "-g", "!.venv/*"])
+        
         args.append(pattern)
         # run rg scoped to the given path, with cwd at workspace root to keep paths relative
         args.append(path)

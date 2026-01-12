@@ -30,8 +30,8 @@ SYSTEM_PROMPT = """\
    - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
    - undo_patch: {"undo_id":"undo_...","force":false}
    - write_file: {"path":"a/b.txt","text":"..."}
-   - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
-   - search_semantic: {"query":"..."} (基于向量库搜索最相关的代码片段)
+  - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
+  - search_semantic: {"query":"..."} (当 grep 噪音太多、找不到目标或需要根据功能描述查找时，请务必优先尝试此工具)
  """
 
 

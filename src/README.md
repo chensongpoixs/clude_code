@@ -51,7 +51,21 @@
 
 ---
 
-## 4. 实现流程图
+## 4. 模块详细文档 (Module Documentation)
+
+为了方便开发者深入理解各子系统的实现，我们在 `src/clude_code` 的每个子目录下都生成了专属的 `README.md` 和动画流程图：
+
+- [🚀 CLI 交互](./clude_code/cli/README.md)
+- [🧠 知识/RAG](./clude_code/knowledge/README.md)
+- [📡 LLM 适配](./clude_code/llm/README.md)
+- [👁️ 可观测性](./clude_code/observability/README.md)
+- [⚙️ 核心编排](./clude_code/orchestrator/README.md)
+- [🛡️ 安全策略](./clude_code/policy/README.md)
+- [🛠️ 工具箱与回馈](./clude_code/tooling/README.md)
+
+---
+
+## 5. 实现流程图
 
 ![Core Implementation Flow](assets/core_implementation_flow.svg)
 
