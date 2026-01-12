@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+  <desc>clude-code 核心实现链路动画</desc>
+  <style>
+    @keyframes flow { to { stroke-dashoffset: -20; } }
+    @keyframes glow {
+      0%, 100% { filter: drop-shadow(0 0 2px rgba(0,0,0,0.1)); }
+      50% { filter: drop-shadow(0 0 8px rgba(33,150,243,0.4)); stroke-width: 3; }
+    }
+    .node { fill: #ffffff; stroke: #333; stroke-width: 2; rx: 8; }
+    .text { font-family: "PingFang SC", sans-serif; font-size: 13px; font-weight: bold; fill: #333; }
+    .line { fill: none; stroke: #666; stroke-width: 2; stroke-dasharray: 5; animation: flow 1s linear infinite; }
+    
+    #n1 { animation: glow 4s infinite 0s; }
+    #n2 { animation: glow 4s infinite 1s; }
+    #n3 { animation: glow 4s infinite 2s; }
+    #n4 { animation: glow 4s infinite 3s; }
+  </style>
+
+  <rect width="800" height="200" fill="#ffffff"/>
+  
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#666" />
+    </marker>
+  </defs>
+
+  <g transform="translate(40, 70)">
+    <rect id="n1" class="node" width="120" height="60"/>
+    <text x="60" y="35" class="text" text-anchor="middle">用户输入 (CLI)</text>
+  </g>
+
+  <path class="line" d="M160 100 H220" marker-end="url(#arrow)"/>
+
+  <g transform="translate(220, 70)">
+    <rect id="n2" class="node" width="140" height="60" style="fill: #e3f2fd;"/>
+    <text x="70" y="35" class="text" text-anchor="middle">Agent 编排中心</text>
+  </g>
+
+  <path class="line" d="M360 100 H420" marker-end="url(#arrow)"/>
+
+  <g transform="translate(420, 70)">
+    <rect id="n3" class="node" width="140" height="60"/>
+    <text x="70" y="35" class="text" text-anchor="middle">工具执行 / RAG</text>
+  </g>
+
+  <path class="line" d="M560 100 H620" marker-end="url(#arrow)"/>
+
+  <g transform="translate(620, 70)">
+    <rect id="n4" class="node" width="120" height="60" style="fill: #fff9c4;"/>
+    <text x="60" y="35" class="text" text-anchor="middle">LLM (llama.cpp)</text>
+  </g>
+
+  <path class="line" d="M680 70 V40 H290 V70" marker-end="url(#arrow)"/>
+</svg>
+

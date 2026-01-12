@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import json
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, List, Dict, Optional
 
 from clude_code.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
@@ -11,6 +10,9 @@ from clude_code.observability.trace import TraceLogger
 from clude_code.policy.command_policy import evaluate_command
 from clude_code.tooling.feedback import format_feedback_message
 from clude_code.tooling.local_tools import LocalTools, ToolResult
+from clude_code.knowledge.indexer_service import IndexerService
+from clude_code.knowledge.embedder import CodeEmbedder
+from clude_code.knowledge.vector_store import VectorStore
 
 
 SYSTEM_PROMPT = """\
@@ -25,11 +27,12 @@ SYSTEM_PROMPT = """\
   - list_dir: {"path":"."}
   - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
   - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选)
-  - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
-  - undo_patch: {"undo_id":"undo_...","force":false}
-  - write_file: {"path":"a/b.txt","text":"..."}
-  - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
-"""
+   - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
+   - undo_patch: {"undo_id":"undo_...","force":false}
+   - write_file: {"path":"a/b.txt","text":"..."}
+   - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
+   - search_semantic: {"query":"..."} (基于向量库搜索最相关的代码片段)
+ """
 
 
 @dataclass
@@ -86,10 +89,10 @@ def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
     return obj
 
 
-def _tool_result_to_message(name: str, tr: ToolResult) -> str:
+def _tool_result_to_message(name: str, tr: ToolResult, keywords: set[str] | None = None) -> str:
     # Centralized structured feedback (industry-grade stability):
     # keep decision-critical fields + references, avoid dumping full payload.
-    return format_feedback_message(name, tr)
+    return format_feedback_message(name, tr, keywords=keywords)
 
 
 class AgentLoop:
@@ -112,10 +115,28 @@ class AgentLoop:
         )
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)
-        self.messages: list[ChatMessage] = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
+        
+        # Knowledge / RAG systems
+        self.indexer = IndexerService(cfg.workspace_root)
+        self.indexer.start() # Start background indexing
+        self.embedder = CodeEmbedder()
+        self.vector_store = VectorStore(cfg.workspace_root)
 
-    def run_turn(self, user_text: str, *, confirm: callable[[str], bool], debug: bool = False) -> AgentTurn:
+        # Initialize with Repo Map for better global context (Aider-style)
+        repo_map = self.tools.generate_repo_map()
+        self.messages: list[ChatMessage] = [
+            ChatMessage(role="system", content=SYSTEM_PROMPT),
+            ChatMessage(role="system", content=f"当前代码仓库符号概览：\n\n{repo_map}"),
+        ]
+
+    def run_turn(self, user_text: str, *, confirm: Callable[[str], bool], debug: bool = False) -> AgentTurn:
         trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
+        
+        # Extract intent keywords for semantic windowing (MVP: simple regex)
+        keywords = set(re.findall(r'\w{4,}', user_text.lower()))
+        # Filter common non-useful words
+        keywords -= {"please", "help", "find", "where", "change", "file", "code", "repo", "make"}
+        
         events: list[dict[str, Any]] = []
         step_idx = 0
 
@@ -164,7 +185,7 @@ class AgentLoop:
                 self.audit.write(trace_id=trace_id, event="confirm_write", data={"tool": name, "args": args, "allow": decision})
                 _ev("confirm_write", {"tool": name, "allow": decision})
                 if not decision:
-                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}), keywords=keywords)
                     self.messages.append(ChatMessage(role="user", content=msg))
                     _ev("denied_by_user", {"tool": name})
                     self._trim_history(max_messages=30)
@@ -174,7 +195,7 @@ class AgentLoop:
                 self.audit.write(trace_id=trace_id, event="confirm_exec", data={"tool": name, "args": args, "allow": decision})
                 _ev("confirm_exec", {"tool": name, "allow": decision})
                 if not decision:
-                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}), keywords=keywords)
                     self.messages.append(ChatMessage(role="user", content=msg))
                     _ev("denied_by_user", {"tool": name})
                     self._trim_history(max_messages=30)
@@ -187,7 +208,7 @@ class AgentLoop:
                 if not dec.ok:
                     self.audit.write(trace_id=trace_id, event="policy_deny_cmd", data={"command": cmd, "reason": dec.reason})
                     _ev("policy_deny_cmd", {"command": cmd, "reason": dec.reason})
-                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}))
+                    msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}), keywords=keywords)
                     self.messages.append(ChatMessage(role="user", content=msg))
                     self._trim_history(max_messages=30)
                     continue
@@ -196,7 +217,7 @@ class AgentLoop:
             result = self._dispatch_tool(name, args)
             _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload})
             # feed tool result back to model as user message (works with most chat templates)
-            self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result)))
+            self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result, keywords=keywords)))
             _ev("tool_result_fed_back", {"tool": name})
             self._trim_history(max_messages=30)
             audit_data: dict[str, Any] = {"tool": name, "args": args, "ok": result.ok, "error": result.error}
@@ -257,10 +278,31 @@ class AgentLoop:
                 return self.tools.write_file(path=args["path"], text=args.get("text", ""))
             if name == "run_cmd":
                 return self.tools.run_cmd(command=args["command"], cwd=args.get("cwd", "."))
+            if name == "search_semantic":
+                return self._semantic_search(query=args["query"])
             return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"unknown tool: {name}"})
         except KeyError as e:
             return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})
         except Exception as e:
             return ToolResult(False, error={"code": "E_TOOL", "message": str(e)})
+
+    def _semantic_search(self, query: str) -> ToolResult:
+        """Execute vector search and return chunks as ToolResult."""
+        try:
+            q_vector = self.embedder.embed_query(query)
+            hits = self.vector_store.search(q_vector, limit=5)
+            
+            payload_hits = []
+            for h in hits:
+                payload_hits.append({
+                    "path": h.get("path"),
+                    "start_line": h.get("start_line"),
+                    "end_line": h.get("end_line"),
+                    "text": h.get("text")
+                })
+            
+            return ToolResult(True, payload={"query": query, "hits": payload_hits})
+        except Exception as e:
+            return ToolResult(False, error={"code": "E_SEMANTIC_SEARCH", "message": str(e)})
 
 

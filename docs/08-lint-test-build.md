@@ -1,65 +1,39 @@
-# 08｜质量闭环：Lint / Test / Build（Verification Loop）
+# 08｜自动化校验与闭环自愈 (Lint, Test & Build)
 
-目标：把“验证”变成一等公民，形成自动修复闭环，减少“改完但跑不起来”的情况。
+本规范定义了 Agent 如何利用现有的工程基础设施进行“自我纠偏”。通过集成编译、静态检查与自动化测试，我们将 Agent 的产出从“看似正确”提升到“工程正确”。
 
-## 1. 子模块拆分
+---
 
-### 1.1 Detector（项目类型探测）
-- **输入**：文件树、常见配置文件
-- **输出**：`ProjectProfile`
-  - 语言与框架（node/python/go/java/…）
-  - 包管理器（npm/pnpm/yarn/pip/poetry/go mod/…）
-  - 测试框架（jest/pytest/go test/…）
-  - 可能的命令集合
+## 1. 质量门禁 (Quality Gates)
 
-### 1.2 Verifier（验证器）
-- **职责**：根据策略运行 lint/test/build
-- **输入**：`VerificationPolicy` + `ProjectProfile`
-- **输出**：`VerificationResult`
+在任务进入 `SUMMARIZING` 阶段前，必须经过以下校验：
 
-### 1.3 AutoFixer（自动修复器，可选）
-- **职责**：对可自动修复的 lint/format 问题执行 `--fix`
-- **策略**：
-  - 先 `format` 再 `lint --fix`
-  - 修复后重新验证一次（避免引入新问题）
+| 校验级别 | 工具示例 | 目的 |
+| :--- | :--- | :--- |
+| **L0: 静态分析** | `eslint`, `ruff`, `pyright`, `go vet` | 发现语法错误、未定义变量及拼写问题 |
+| **L1: 构建校验** | `npm run build`, `make`, `cargo check` | 确保模块间接口协议与类型定义的一致性 |
+| **L2: 功能测试** | `jest`, `pytest`, `go test` | 验证业务逻辑是否符合预期，防止回归错误 |
 
-## 2. 数据结构
+---
 
-### 2.1 ProjectProfile
-- `stack: string[]`
-- `commands: { lint?: string[], test?: string[], build?: string[] }`
-- `default_verify_order: ("lint"|"test"|"build")[]`
+## 2. 闭环自愈机制 (Self-Healing)
 
-### 2.2 VerificationResult
-- `ok: boolean`
-- `stage: lint|test|build|custom`
-- `exit_code: number`
-- `summary: string`
-- `issues: Issue[]`（可选结构化）
+当校验工具报错时，Agent 自动进入 `RECOVERING` 循环：
+1. **解析错误**: 从 `stderr` 中精准提取文件名与行号。
+2. **读取现场**: 自动对报错位置进行 `read_file`。
+3. **修复尝试**: 模型分析错误堆栈，生成修复 Patch。
+4. **再次验证**: 重新运行失败的校验项，直到通过或达到最大尝试次数（默认 3 次）。
 
-### 2.3 Issue（建议）
-- `type: lint|test|build`
-- `path?: string`
-- `line?: number`
-- `rule?: string`
-- `message: string`
+---
 
-## 3. 执行策略
+## 3. 性能优化 (Optimization)
 
-### 3.1 默认顺序（可配置）
-- 前端：lint → test → build
-- 后端：test → lint → build（按团队习惯）
+- **局部验证**: 优先运行与修改文件“强相关”的测试集（基于目录邻近度或 Git 变更关联）。
+- **并行校验**: 在不冲突的前提下，同时启动 Lint 与类型检查。
+- **缓存感知**: 尊重项目的构建缓存（如 `.next/cache`, `.pytest_cache`），避免重复计算。
 
-### 3.2 快速验证（Fast Path）
-- 小改动默认只跑 lint 或受影响测试（需要符号/依赖图支持）
+---
 
-### 3.3 失败闭环
-- 验证失败 → 解析错误 → 生成修复步骤 → 应用 patch → 再验证
-- 连续失败超过阈值（如 3 次）停止自动修复，输出手工建议
+## 4. 结论 (Conclusion)
 
-## 4. MVP 实现建议
-- 先做：从常见配置推断命令（package.json / pyproject / go.mod）
-- 再做：结构化解析（提取文件与行号）
-- 最后做：增量测试/影响分析（依赖图）
-
-
+“没有自检的 Agent 产出代码不可靠”。通过将 Lint、Test 与 Build 深度集成到编排循环中，我们赋予了 Agent 独立发现并修复错误的能力，显著降低了开发者的 Code Review 负担。

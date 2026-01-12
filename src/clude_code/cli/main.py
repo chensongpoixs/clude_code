@@ -1,5 +1,7 @@
-from pathlib import Path
 import shutil
+import sys
+import subprocess
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -105,22 +107,41 @@ def chat(
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    fix: bool = typer.Option(False, "--fix", help="尝试交互式自动修复缺失的依赖项")
+) -> None:
     """Basic diagnostics: workspace + llama.cpp connectivity."""
     from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 
     cfg = CludeConfig()
     console.print("[bold]clude doctor[/bold]")
-    console.print(f"- workspace_root: {cfg.workspace_root}")
+    
+    missing_tools = []
+
+    # 1. 检查 rg
+    rg = shutil.which("rg")
+    console.print(f"- ripgrep (rg): {rg or '[red]NOT FOUND[/red]'}")
+    if not rg:
+        missing_tools.append("ripgrep")
+
+    # 2. 检查 ctags
+    ctags = shutil.which("ctags")
+    console.print(f"- universal-ctags (ctags): {ctags or '[red]NOT FOUND[/red]'}")
+    if not ctags:
+        missing_tools.append("universal-ctags")
+
+    if missing_tools and fix:
+        console.print(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")
+        _try_fix_missing_tools(missing_tools)
+        # 修复后重新检查
+        return doctor(fix=False)
+
+    if missing_tools and not fix:
+        console.print("\n[yellow]提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。[/yellow]")
+
+    console.print(f"\n- workspace_root: {cfg.workspace_root}")
     console.print(f"- llama base_url: {cfg.llm.base_url}")
     console.print(f"- llama api_mode: {cfg.llm.api_mode}")
-    rg = shutil.which("rg")
-    console.print(f"- ripgrep (rg): {rg or 'NOT FOUND'}")
-    if not rg:
-        console.print("[yellow]建议安装 ripgrep 以获得业界同等的搜索性能/稳定性：[/yellow]")
-        console.print("[yellow]- conda: conda install -c conda-forge ripgrep -y[/yellow]")
-        console.print("[yellow]- choco: choco install ripgrep -y[/yellow]")
-        console.print("[yellow]- scoop: scoop install ripgrep[/yellow]")
 
     # workspace checks
     wr = Path(cfg.workspace_root)
@@ -161,6 +182,85 @@ def doctor() -> None:
         console.print(f"[red]llama.cpp 连通失败：{e}[/red]")
         raise typer.Exit(code=3)
 
+    # workspace checks
+    wr = Path(cfg.workspace_root)
+    if not wr.exists():
+        console.print("[red]workspace_root 不存在[/red]")
+        raise typer.Exit(code=2)
+    try:
+        p = wr / ".clude" / "doctor.tmp"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("ok", encoding="utf-8")
+        p.unlink(missing_ok=True)
+        console.print("[green]workspace 可读写 OK[/green]")
+    except Exception as e:
+        console.print(f"[red]workspace 写入失败：{e}[/red]")
+        raise typer.Exit(code=2)
+
+    # llama connectivity
+    try:
+        client = LlamaCppHttpClient(
+            base_url=cfg.llm.base_url,
+            api_mode=cfg.llm.api_mode,  # type: ignore[arg-type]
+            model=cfg.llm.model,
+            temperature=0.0,
+            max_tokens=32,
+            timeout_s=cfg.llm.timeout_s,
+        )
+        if cfg.llm.api_mode == "openai_compat":
+            mid = client.try_get_first_model_id()
+            console.print(f"- openai_compat /v1/models first_id: {mid!r}")
+        out = client.chat(
+            [
+                ChatMessage(role="system", content="你是诊断助手，只输出 OK。"),
+                ChatMessage(role="user", content="ping"),
+            ]
+        ).strip()
+        console.print(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
+    except Exception as e:
+        console.print(f"[red]llama.cpp 连通失败：{e}[/red]")
+        raise typer.Exit(code=3)
+
+
+def _try_fix_missing_tools(tools: list[str]) -> None:
+    import platform
+    os_name = platform.system()
+    
+    commands = []
+    
+    if os_name == "Windows":
+        # 优先使用 conda (如果在环境下)，其次 choco, scoop
+        has_conda = shutil.which("conda")
+        if has_conda:
+            pkg_list = " ".join(tools)
+            commands.append(f"conda install -c conda-forge {pkg_list} -y")
+        else:
+            if shutil.which("choco"):
+                pkg_list = " ".join(["ripgrep" if t == "ripgrep" else "universal-ctags" for t in tools])
+                commands.append(f"choco install {pkg_list} -y")
+            elif shutil.which("scoop"):
+                pkg_list = " ".join(tools)
+                commands.append(f"scoop install {pkg_list}")
+    elif os_name == "Darwin": # Mac
+        if shutil.which("brew"):
+            pkg_list = " ".join(tools)
+            commands.append(f"brew install {pkg_list}")
+    elif os_name == "Linux":
+        if shutil.which("apt-get"):
+            pkg_list = " ".join(["ripgrep" if t == "ripgrep" else "universal-ctags" for t in tools])
+            commands.append(f"sudo apt-get update && sudo apt-get install -y {pkg_list}")
+
+    if not commands:
+        console.print("[red]未能自动匹配到适合您系统的包管理器。请参考文档手动安装。[/red]")
+        return
+
+    for cmd in commands:
+        if Confirm.ask(f"是否执行安装命令: [bold cyan]{cmd}[/bold cyan]?", default=True):
+            try:
+                subprocess.run(cmd, shell=True, check=True)
+                console.print("[green]安装指令已执行完成。[/green]")
+            except Exception as e:
+                console.print(f"[red]执行失败: {e}[/red]")
 
 @app.command()
 def models() -> None:

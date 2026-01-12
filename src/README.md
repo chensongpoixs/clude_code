@@ -11,11 +11,13 @@
 ### 1.1 落地完成度 (Scorecard)
 | 维度 | 实现模块 | 落地程度 | 业界对比水平 |
 | :--- | :--- | :--- | :--- |
-| **基础交互** | `cli/main.py` | 75% | **中**: 交互流畅，支持诊断，缺视觉增强。 |
-| **核心编排** | `orchestrator/agent_loop.py` | 60% | **低**: 基础循环，缺 Planning 状态机。 |
-| **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
-| **工具箱** | `tooling/local_tools.py` | 78% | **中**: Patch-first + undo + hash 审计已具备；RAG/索引仍缺。 |
-| **安全策略** | `policy/command_policy.py` | 65% | **中**: Denylist 完备，缺动态权限流。 |
+ | **基础交互** | `cli/main.py` | 85% | **高**: 交互流畅，支持交互式自动修复 (--fix)。 |
+ | **核心编排** | `orchestrator/agent_loop.py` | 80% | **高**: 集成 Repo Map 与 Semantic Search (RAG)。 |
+ | **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
+ | **工具箱** | `tooling/local_tools.py` | 85% | **高**: 已具备 Patch-first、rg 搜索、Repo Map 及语义检索。 |
+ | **知识/RAG** | `knowledge/` | 70% | **中**: 落地 LanceDB 异步索引，支持语义召回。 |
+ | **语义增强** | `tooling/feedback.py` | 80% | **中**: 支持关键词窗口采样，对标 RAG 片段提取。 |
+ | **安全策略** | `policy/command_policy.py` | 65% | **中**: Denylist 完备，缺动态权限流。 |
 | **审计追溯** | `observability/audit.py` + `observability/trace.py` | 72% | **中**: JSONL 全记录；patch/undo 含 hash 证据链；debug 轨迹可落盘；缺回放/可视化。 |
 
 ---
@@ -51,13 +53,6 @@
 
 ## 4. 实现流程图
 
-```mermaid
-graph LR
-    User[用户输入] --> CLI[Typer CLI]
-    CLI --> Orchestrator[AgentLoop]
-    Orchestrator --> LLM[LlamaCppClient]
-    LLM --"输出 JSON"--> Parser[JSON Parser]
-    Parser --"校验"--> Tooling[LocalTools]
-    Tooling --"反馈"--> Orchestrator
-    Orchestrator --"审计"--> Audit[AuditLogger]
-```
+![Core Implementation Flow](assets/core_implementation_flow.svg)
+
+*(注：动画展示了从 CLI 输入到 Agent 编排再到 LLM 反馈的完整闭环，SVG 源码位于 `src/assets/core_implementation_flow.svg`)*

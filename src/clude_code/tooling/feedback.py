@@ -21,7 +21,7 @@ def _head_items(items: list[dict[str, Any]], max_items: int = 20) -> list[dict[s
     return out
 
 
-def summarize_tool_result(tool: str, tr: ToolResult) -> dict[str, Any]:
+def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None = None) -> dict[str, Any]:
     """
     Turn raw ToolResult into a compact, structured summary for feeding back to the LLM.
     Key idea: keep only decision-critical signals + references, avoid dumping full payload.
@@ -31,8 +31,12 @@ def summarize_tool_result(tool: str, tr: ToolResult) -> dict[str, Any]:
 
     payload = tr.payload or {}
     summary: dict[str, Any] = {"tool": tool, "ok": True}
+    
+    # Pre-process keywords for search
+    kw_list = [k.lower() for k in (keywords or []) if k]
 
     if tool == "list_dir":
+        # ... (list_dir logic remains same as it's already compact)
         items = payload.get("items") or []
         if isinstance(items, list):
             dirs = sum(1 for it in items if isinstance(it, dict) and it.get("is_dir") is True)
@@ -50,10 +54,22 @@ def summarize_tool_result(tool: str, tr: ToolResult) -> dict[str, Any]:
         return summary
 
     if tool == "grep":
+        # ... (grep logic)
         hits = payload.get("hits") or []
         if isinstance(hits, list):
             head = []
-            for h in hits[:20]:
+            # Prioritize hits that match keywords
+            prioritized = []
+            others = []
+            for h in hits:
+                preview = (h.get("preview") or "").lower()
+                if any(kw in preview for kw in kw_list):
+                    prioritized.append(h)
+                else:
+                    others.append(h)
+            
+            combined = (prioritized + others)[:20]
+            for h in combined:
                 if isinstance(h, dict):
                     head.append(
                         {
@@ -76,16 +92,52 @@ def summarize_tool_result(tool: str, tr: ToolResult) -> dict[str, Any]:
 
     if tool == "read_file":
         text = str(payload.get("text") or "")
+        lines = text.splitlines()
+        
+        # Semantic Window Sampling
+        windows = []
+        if kw_list:
+            for i, line in enumerate(lines):
+                if any(kw in line.lower() for kw in kw_list):
+                    start = max(0, i - 5)
+                    end = min(len(lines), i + 6)
+                    windows.append((start, end))
+        
+        # Merge overlapping windows
+        merged = []
+        if windows:
+            windows.sort()
+            curr_s, curr_e = windows[0]
+            for next_s, next_e in windows[1:]:
+                if next_s <= curr_e:
+                    curr_e = max(curr_e, next_e)
+                else:
+                    merged.append((curr_s, curr_e))
+                    curr_s, curr_e = next_s, next_e
+            merged.append((curr_s, curr_e))
+        
+        sampled_text = ""
+        if merged:
+            sampled_parts = []
+            for s, e in merged:
+                sampled_parts.append(f"--- lines {s+1}-{e} ---\n" + "\n".join(lines[s:e]))
+            sampled_text = "\n\n".join(sampled_parts)
+        
+        if not sampled_text:
+            # Fallback to head/tail if no keywords matched
+            sampled_text = text[:800] + "\n...[gap]...\n" + _tail_lines(text, max_lines=15, max_chars=1200)
+
         summary["summary"] = {
             "path": payload.get("path"),
             "offset": payload.get("offset"),
             "limit": payload.get("limit"),
-            "chars": len(text),
-            "text_head": text[:800],
-            "text_tail": _tail_lines(text, max_lines=15, max_chars=1200),
-            "truncated": len(text) > 2000,
+            "chars_total": len(text),
+            "content": sampled_text[:4000], # Final safety limit
+            "truncated": len(text) > len(sampled_text) or len(text) > 4000,
         }
         return summary
+
+    # ... (rest of the logic)
 
     if tool == "run_cmd":
         out = str(payload.get("output") or "")
@@ -122,16 +174,32 @@ def summarize_tool_result(tool: str, tr: ToolResult) -> dict[str, Any]:
         summary["summary"] = keep
         return summary
 
+    if tool == "search_semantic":
+        hits = payload.get("hits") or []
+        summary["summary"] = {
+            "query": payload.get("query"),
+            "hits_total": len(hits),
+            "hits": [
+                {
+                    "path": h.get("path"),
+                    "lines": f"{h.get('start_line')}-{h.get('end_line')}",
+                    "preview": (h.get("text") or "")[:200]
+                }
+                for h in hits[:5]
+            ]
+        }
+        return summary
+
     # default: pass a small view
     summary["summary"] = {"keys": sorted(list(payload.keys()))[:30]}
     return summary
 
 
-def format_feedback_message(tool: str, tr: ToolResult) -> str:
+def format_feedback_message(tool: str, tr: ToolResult, keywords: set[str] | None = None) -> str:
     """
     JSON string fed back to the model as a user message.
     Must remain compact and structured.
     """
-    return json.dumps(summarize_tool_result(tool, tr), ensure_ascii=False)
+    return json.dumps(summarize_tool_result(tool, tr, keywords=keywords), ensure_ascii=False)
 
 

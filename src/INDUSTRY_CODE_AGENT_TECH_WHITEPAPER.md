@@ -161,9 +161,9 @@ Code Agent 的本质是 **LLM 驱动的闭环控制系统**。其核心循环遵
 - **Patch-first 编辑**：✅ 已落地（`apply_patch` 支持多处/全量替换与可选 fuzzy；并提供 `undo_patch` 回滚）
 - **工具调用解析鲁棒性**：✅ 已增强（支持混合文本/```json 代码块提取）
 - **Policy-first（最小形态）**：✅ 已具备（workspace 路径边界 + 命令 denylist + 写/执行确认）
-- **Audit（最小形态）**：✅ 已具备（`.clude/logs/audit.jsonl`，patch/undo 记录 before/after hash 与 undo_id 证据链）
-- **Verify-first**：⏳ 未实现（计划引入 `verification/` 并接入 test/lint）
-- **Repo Map / RAG / LSP**：⏳ 未实现（计划从 repo map/rg 开始）
+ - **Audit（最小形态）**：✅ 已具备（`.clude/logs/audit.jsonl`，patch/undo 记录 before/after hash 与 undo_id 证据链）
+ - **Verify-first**：⏳ 未实现（计划引入 `verification/` 并接入 test/lint）
+ - **Repo Map / RAG / LSP**：✅ 已落地（支持 ctags 符号地图与 LanceDB 语义检索）
 
 > 对标业界稳健性的下一步落地点：**结构化工具回喂 + rg 搜索**（见 `src/IMPLEMENTATION_PLAN_RAG_RIPGREP.md`）
 

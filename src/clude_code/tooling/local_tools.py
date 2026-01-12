@@ -369,6 +369,80 @@ class LocalTools:
                         return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": True})
         return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": False})
 
+    def generate_repo_map(self) -> str:
+        """
+        Generate a concise map of the repository's symbols using ctags.
+        Returns a formatted string describing classes and functions in the codebase.
+        """
+        ctags_exe = shutil.which("ctags")
+        if not ctags_exe:
+            return "Repo Map: ctags not found. Global symbol context unavailable."
+
+        # Scan key source files, exclude known large/irrelevant dirs
+        # Using a simplified approach: run ctags on the whole workspace
+        args = [
+            ctags_exe,
+            "--languages=Python,JavaScript,TypeScript,Go,Java,Rust,C,C++,C#",
+            "--output-format=json",
+            "--fields=+n",
+            "-R",
+            ".",
+        ]
+        
+        try:
+            # Exclude node_modules, .venv, etc. to keep it fast
+            cp = subprocess.run(
+                args,
+                cwd=str(self.workspace_root.resolve()),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception:
+            return "Repo Map: Failed to execute ctags."
+
+        if cp.returncode != 0:
+            return f"Repo Map: ctags failed with code {cp.returncode}."
+
+        symbols_by_file: dict[str, list[str]] = {}
+        for line in cp.stdout.splitlines():
+            try:
+                obj = json.loads(line)
+                if not isinstance(obj, dict): continue
+                
+                path = obj.get("path")
+                name = obj.get("name")
+                kind = obj.get("kind")
+                line_no = obj.get("line")
+                
+                if not all([path, name, kind]): continue
+                
+                # Filter noise: only keep high-level symbols
+                if kind not in ("class", "function", "method", "member", "interface", "struct"):
+                    continue
+                
+                if path not in symbols_by_file:
+                    symbols_by_file[path] = []
+                
+                symbols_by_file[path].append(f"{kind[0].upper()}| {name} (L{line_no})")
+            except json.JSONDecodeError:
+                continue
+
+        lines = ["# Repository Map (Symbols)"]
+        # Limit to 100 most relevant files to keep token usage sane
+        sorted_files = sorted(symbols_by_file.keys())[:100]
+        for f in sorted_files:
+            lines.append(f"## {f}")
+            # Limit symbols per file
+            syms = symbols_by_file[f][:15]
+            for s in syms:
+                lines.append(f"  - {s}")
+            if len(symbols_by_file[f]) > 15:
+                lines.append("  - ...")
+        
+        return "\n".join(lines)
+
     def run_cmd(self, command: str, cwd: str = ".") -> ToolResult:
         wd = _resolve_in_workspace(self.workspace_root, cwd)
         try:
