@@ -12,11 +12,11 @@
 | 维度 | 实现模块 | 落地程度 | 业界对比水平 |
 | :--- | :--- | :--- | :--- |
  | **基础交互** | `cli/main.py` | 85% | **高**: 交互流畅，支持交互式自动修复 (--fix)。 |
- | **核心编排** | `orchestrator/agent_loop.py` | 80% | **高**: 集成 Repo Map 与 Semantic Search (RAG)。 |
+ | **核心编排** | `orchestrator/agent_loop.py` | 85% | **高**: 已具备人格硬化、吐字防抖、CoT 自动剥离及历史压缩。 |
  | **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
- | **工具箱** | `tooling/local_tools.py` | 85% | **高**: 已具备 Patch-first、rg 搜索、Repo Map 及语义检索。 |
+ | **工具箱** | `tooling/local_tools.py` | 88% | **高**: 增强了 apply_patch 的多点模糊匹配与 undo_patch 的哈希追踪。 |
  | **知识/RAG** | `knowledge/` | 70% | **中**: 落地 LanceDB 异步索引，支持语义召回。 |
- | **语义增强** | `tooling/feedback.py` | 80% | **中**: 支持关键词窗口采样，对标 RAG 片段提取。 |
+ | **语义增强** | `tooling/feedback.py` | 85% | **中**: 实现了语义逻辑锚点（if/for/return）及动态 20 行采样窗口。 |
  | **安全策略** | `policy/command_policy.py` | 65% | **中**: Denylist 完备，缺动态权限流。 |
 | **审计追溯** | `observability/audit.py` + `observability/trace.py` | 72% | **中**: JSONL 全记录；patch/undo 含 hash 证据链；debug 轨迹可落盘；缺回放/可视化。 |
 
