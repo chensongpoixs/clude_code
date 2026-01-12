@@ -65,16 +65,29 @@ class LocalTools:
                 return ToolResult(False, error={"code": "E_NOT_FILE", "message": f"not a file: {path}"})
             
             # Robust reading: handle encoding issues and large files
-            # For MVP, we use errors="replace" to prevent crash on binary/mixed encoding
+            file_size = p.stat().st_size
             data = p.read_bytes()
+            
+            truncated = False
             if len(data) > self.max_file_read_bytes:
                 data = data[: self.max_file_read_bytes]
+                truncated = True
             
             text = data.decode("utf-8", errors="replace")
             lines = text.splitlines()
             
+            res_payload: dict[str, Any] = {
+                "path": path,
+                "total_size": file_size,
+                "read_size": len(data),
+                "truncated": truncated
+            }
+            if truncated:
+                res_payload["warning"] = f"File is too large ({file_size} bytes). Output truncated to {self.max_file_read_bytes} bytes."
+
             if offset is None and limit is None:
-                return ToolResult(True, payload={"path": path, "text": text})
+                res_payload["text"] = text
+                return ToolResult(True, payload=res_payload)
             
             # Ensure index safety
             start = max((offset or 1) - 1, 0)
@@ -82,7 +95,10 @@ class LocalTools:
             end = min(start + count, len(lines))
             
             sliced = "\n".join(lines[start:end])
-            return ToolResult(True, payload={"path": path, "offset": offset, "limit": limit, "text": sliced})
+            res_payload["text"] = sliced
+            res_payload["offset"] = offset
+            res_payload["limit"] = limit
+            return ToolResult(True, payload=res_payload)
         except Exception as e:
             return ToolResult(False, error={"code": "E_READ", "message": str(e)})
 
