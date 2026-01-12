@@ -94,13 +94,23 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         text = str(payload.get("text") or "")
         lines = text.splitlines()
         
-        # Semantic Window Sampling
+        # Semantic Window Sampling: Balanced for depth & token economy
         windows = []
         if kw_list:
             for i, line in enumerate(lines):
-                if any(kw in line.lower() for kw in kw_list):
-                    start = max(0, i - 5)
-                    end = min(len(lines), i + 6)
+                # Detect logical flow keywords even if they aren't user keywords
+                is_logic_anchor = any(anchor in line.lower() for anchor in ["if ", "for ", "while ", "try:", "return ", "class ", "def "])
+                is_user_hit = any(kw in line.lower() for kw in kw_list)
+                
+                if is_user_hit:
+                    # Give user hit more context
+                    start = max(0, i - 10)
+                    end = min(len(lines), i + 11)
+                    windows.append((start, end))
+                elif is_logic_anchor and len(kw_list) > 0:
+                    # Keep logic flow near user hits
+                    start = max(0, i - 2)
+                    end = min(len(lines), i + 3)
                     windows.append((start, end))
         
         # Merge overlapping windows
