@@ -13,9 +13,11 @@ src/clude_code/llm/__init__.py
 src/clude_code/llm/llama_cpp_http.py
 src/clude_code/observability/__init__.py
 src/clude_code/observability/audit.py
+src/clude_code/observability/trace.py
 src/clude_code/orchestrator/__init__.py
 src/clude_code/orchestrator/agent_loop.py
 src/clude_code/policy/__init__.py
 src/clude_code/policy/command_policy.py
 src/clude_code/tooling/__init__.py
+src/clude_code/tooling/feedback.py
 src/clude_code/tooling/local_tools.py

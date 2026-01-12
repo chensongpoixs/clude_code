@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import typer
 from rich.console import Console
@@ -113,6 +114,13 @@ def doctor() -> None:
     console.print(f"- workspace_root: {cfg.workspace_root}")
     console.print(f"- llama base_url: {cfg.llm.base_url}")
     console.print(f"- llama api_mode: {cfg.llm.api_mode}")
+    rg = shutil.which("rg")
+    console.print(f"- ripgrep (rg): {rg or 'NOT FOUND'}")
+    if not rg:
+        console.print("[yellow]建议安装 ripgrep 以获得业界同等的搜索性能/稳定性：[/yellow]")
+        console.print("[yellow]- conda: conda install -c conda-forge ripgrep -y[/yellow]")
+        console.print("[yellow]- choco: choco install ripgrep -y[/yellow]")
+        console.print("[yellow]- scoop: scoop install ripgrep[/yellow]")
 
     # workspace checks
     wr = Path(cfg.workspace_root)

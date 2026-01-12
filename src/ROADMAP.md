@@ -7,11 +7,13 @@
 - [ ] **工具参数 Schema 校验**: 调用工具前强制检查参数格式。
 - [ ] **原子化文件写入**: 使用临时文件和 rename 确保 IO 安全。
 - [x] **可观测执行轨迹**: `clude chat --debug` 输出每步轨迹，并写入 `.clude/logs/trace.jsonl`。
+- [x] **结构化工具回喂**: 工具结果回喂给 LLM 时只发送“摘要 + 关键引用”，避免整段 payload。
 
 ## P1: 代码编辑与控制
 - [x] **实现 `apply_patch` 工具**: MVP 采用 old/new block 替换 + 唯一性保护（expected_replacements）。
 - [x] **实现 `undo_patch` 能力**: 记录每次修改的备份与 before/after hash，支持基于 undo_id 回滚（含冲突检测/force）。
 - [ ] **敏感信息过滤**: 在审计日志和发送给 LLM 的上下文中自动遮蔽 API Key。
+- [x] **Ripgrep 替换 Python grep**: 优先使用 `rg --json` 获取稳定/高性能搜索结果，缺失时降级。
 
 ## P2: 任务规划与验证
 - [ ] **Plan 阶段引入**: 模型先给出执行步骤，由用户整体确认。

@@ -165,3 +165,5 @@ Code Agent 的本质是 **LLM 驱动的闭环控制系统**。其核心循环遵
 - **Verify-first**：⏳ 未实现（计划引入 `verification/` 并接入 test/lint）
 - **Repo Map / RAG / LSP**：⏳ 未实现（计划从 repo map/rg 开始）
 
+> 对标业界稳健性的下一步落地点：**结构化工具回喂 + rg 搜索**（见 `src/IMPLEMENTATION_PLAN_RAG_RIPGREP.md`）
+

@@ -9,6 +9,7 @@ from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
 from clude_code.policy.command_policy import evaluate_command
+from clude_code.tooling.feedback import format_feedback_message
 from clude_code.tooling.local_tools import LocalTools, ToolResult
 
 
@@ -86,9 +87,9 @@ def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
 
 
 def _tool_result_to_message(name: str, tr: ToolResult) -> str:
-    if tr.ok:
-        return json.dumps({"tool": name, "ok": True, "payload": tr.payload}, ensure_ascii=False)
-    return json.dumps({"tool": name, "ok": False, "error": tr.error}, ensure_ascii=False)
+    # Centralized structured feedback (industry-grade stability):
+    # keep decision-critical fields + references, avoid dumping full payload.
+    return format_feedback_message(name, tr)
 
 
 class AgentLoop:
@@ -130,6 +131,8 @@ class AgentLoop:
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
         self.messages.append(ChatMessage(role="user", content=user_text))
+        # Keep history bounded to reduce context size
+        self._trim_history(max_messages=30)
 
         tool_used = False
         for _ in range(20):  # hard stop to avoid infinite loops
@@ -141,11 +144,19 @@ class AgentLoop:
                 self.messages.append(ChatMessage(role="assistant", content=assistant))
                 self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant})
                 _ev("final_text", {"text": assistant[:4000], "truncated": len(assistant) > 4000})
+                self._trim_history(max_messages=30)
                 return AgentTurn(assistant_text=assistant, tool_used=tool_used, trace_id=trace_id, events=events)
 
             name = tool_call["tool"]
             args = tool_call["args"]
             _ev("tool_call_parsed", {"tool": name, "args": args})
+
+            # IMPORTANT: llama.cpp chat templates often require strict alternation:
+            # user/assistant/user/assistant...
+            # Always record the assistant message before sending a user tool result.
+            self.messages.append(ChatMessage(role="assistant", content=assistant))
+            _ev("assistant_tool_call_recorded", {"tool": name})
+            self._trim_history(max_messages=30)
 
             # policy confirmations (MVP): only guard write/exec
             if name in {"write_file", "apply_patch", "undo_patch"} and self.cfg.policy.confirm_write:
@@ -156,6 +167,7 @@ class AgentLoop:
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
                     self.messages.append(ChatMessage(role="user", content=msg))
                     _ev("denied_by_user", {"tool": name})
+                    self._trim_history(max_messages=30)
                     continue
             if name in {"run_cmd"} and self.cfg.policy.confirm_exec:
                 decision = confirm(f"确认执行命令？tool={name} args={args}")
@@ -165,6 +177,7 @@ class AgentLoop:
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}))
                     self.messages.append(ChatMessage(role="user", content=msg))
                     _ev("denied_by_user", {"tool": name})
+                    self._trim_history(max_messages=30)
                     continue
 
             # minimal command policy (denylist)
@@ -176,6 +189,7 @@ class AgentLoop:
                     _ev("policy_deny_cmd", {"command": cmd, "reason": dec.reason})
                     msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}))
                     self.messages.append(ChatMessage(role="user", content=msg))
+                    self._trim_history(max_messages=30)
                     continue
 
             tool_used = True
@@ -184,6 +198,7 @@ class AgentLoop:
             # feed tool result back to model as user message (works with most chat templates)
             self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result)))
             _ev("tool_result_fed_back", {"tool": name})
+            self._trim_history(max_messages=30)
             audit_data: dict[str, Any] = {"tool": name, "args": args, "ok": result.ok, "error": result.error}
             if name in {"apply_patch", "undo_patch"} and result.ok and result.payload:
                 # record hashes/undo_id for traceability
@@ -197,6 +212,19 @@ class AgentLoop:
             trace_id=trace_id,
             events=events,
         )
+
+    def _trim_history(self, *, max_messages: int) -> None:
+        """
+        Keep chat history bounded to reduce context size.
+        We always keep the first system message, and the most recent (max_messages-1) others.
+        """
+        if len(self.messages) <= max_messages:
+            return
+        if not self.messages:
+            return
+        system = self.messages[0]
+        tail = self.messages[-(max_messages - 1) :]
+        self.messages = [system, *tail]
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         try:

@@ -38,6 +38,7 @@
 - **Patch Engine**: ✅ 已引入 `apply_patch`（支持多处/全量替换，含可选 fuzzy），并提供 `undo_patch` 回滚与 hash 证据链。下一步补“原子写”与“敏感信息脱敏”。
 - **Schema Guard**: 在工具执行前强制 Pydantic 校验，对 LLM 错误输出进行自动重试。
  - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。
+ - **结构化回喂 + rg**: ✅ 已落地（`tooling/feedback.py` + grep 优先 `rg --json` + doctor 检测 rg）。分析见 `src/IMPLEMENTATION_ANALYSIS_FEEDBACK_RIPGREP.md`。
 
 ### 第二阶段：任务编排 (P1)
 - **Planning**: 让模型执行前先输出 `Plan`。

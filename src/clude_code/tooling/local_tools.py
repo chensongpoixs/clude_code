@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -276,6 +277,70 @@ class LocalTools:
         )
 
     def grep(self, pattern: str, path: str = ".", ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
+        """
+        Prefer ripgrep (rg) for deterministic performance and structured output.
+        Fallback to Python rglob+regex if rg is not available.
+        """
+        if shutil.which("rg"):
+            tr = self._rg_grep(pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
+            if tr.ok:
+                return tr
+        return self._python_grep(pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
+
+    def _rg_grep(self, *, pattern: str, path: str, ignore_case: bool, max_hits: int) -> ToolResult:
+        root = _resolve_in_workspace(self.workspace_root, path)
+        if not root.exists():
+            return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
+
+        args = ["rg", "--json"]
+        if ignore_case:
+            args.append("-i")
+        args.append(pattern)
+        # run rg scoped to the given path, with cwd at workspace root to keep paths relative
+        args.append(path)
+
+        try:
+            cp = subprocess.run(
+                args,
+                cwd=str(self.workspace_root.resolve()),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+            )
+        except Exception as e:
+            return ToolResult(False, error={"code": "E_RG_EXEC", "message": str(e)})
+
+        # rg returns 1 when no matches; treat as ok with empty hits
+        if cp.returncode not in (0, 1):
+            return ToolResult(
+                False,
+                error={"code": "E_RG", "message": "rg failed", "details": {"stderr": (cp.stderr or "")[:2000]}},
+            )
+
+        hits: list[dict[str, Any]] = []
+        for line in (cp.stdout or "").splitlines():
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict) or obj.get("type") != "match":
+                continue
+            data = obj.get("data") or {}
+            p = (((data.get("path") or {}).get("text")) if isinstance(data.get("path"), dict) else None) or ""
+            ln = (((data.get("line_number"))) if "line_number" in data else None)
+            lines = (data.get("lines") or {}).get("text") if isinstance(data.get("lines"), dict) else ""
+            hits.append({"path": p, "line": ln, "preview": str(lines)[:300]})
+
+        truncated = False
+        if len(hits) > max_hits:
+            truncated = True
+            hits = hits[:max_hits]
+
+        return ToolResult(True, payload={"pattern": pattern, "engine": "rg", "hits": hits, "truncated": truncated})
+
+    def _python_grep(self, *, pattern: str, path: str, ignore_case: bool, max_hits: int) -> ToolResult:
         root = _resolve_in_workspace(self.workspace_root, path)
         if not root.exists():
             return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
@@ -301,8 +366,8 @@ class LocalTools:
                     rel = str(fp.resolve().relative_to(self.workspace_root.resolve()))
                     hits.append({"path": rel, "line": i, "preview": line[:300]})
                     if len(hits) >= max_hits:
-                        return ToolResult(True, payload={"pattern": pattern, "hits": hits, "truncated": True})
-        return ToolResult(True, payload={"pattern": pattern, "hits": hits, "truncated": False})
+                        return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": True})
+        return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": False})
 
     def run_cmd(self, command: str, cwd: str = ".") -> ToolResult:
         wd = _resolve_in_workspace(self.workspace_root, cwd)
