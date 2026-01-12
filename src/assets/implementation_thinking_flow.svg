@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="920" height="520" viewBox="0 0 920 520" xmlns="http://www.w3.org/2000/svg">
+  <desc>实现思考流程（需求→设计→实现→验证→回滚/发布）动画流程图</desc>
+  <!--
+    使用说明：
+    - 该图用“高亮节点 + 流动连线”演示一个工程任务从需求到交付的最佳实现思考流程。
+    - 适用于 Code Agent/CLI 项目的迭代开发，也适用于一般工程交付。
+  -->
+  <style>
+    @keyframes dash { to { stroke-dashoffset: -24; } }
+    @keyframes glow {
+      0%, 100% { filter: drop-shadow(0 0 2px rgba(0,0,0,0.1)); opacity: 0.85; }
+      50% { filter: drop-shadow(0 0 12px rgba(33,150,243,0.35)); opacity: 1; }
+    }
+    @keyframes step {
+      0%, 100% { stroke-width: 2; }
+      50% { stroke-width: 4; }
+    }
+
+    .bg { fill: #ffffff; }
+    .node { fill: #fff; stroke: #2b2b2b; stroke-width: 2; rx: 12; }
+    .title { font-family: "PingFang SC","Microsoft YaHei",sans-serif; font-size: 16px; font-weight: 700; fill: #222; }
+    .desc { font-family: "PingFang SC","Microsoft YaHei",sans-serif; font-size: 12px; fill: #555; }
+    .note { font-family: "PingFang SC","Microsoft YaHei",sans-serif; font-size: 11px; fill: #777; }
+    .flow { stroke: #4a4a4a; stroke-width: 2; fill: none; stroke-dasharray: 7; animation: dash 1.1s linear infinite; }
+    .flow-slow { stroke: #4a4a4a; stroke-width: 2; fill: none; stroke-dasharray: 7; animation: dash 1.8s linear infinite; }
+
+    /* 节点依次高亮（一个周期 14s） */
+    #n1 { animation: glow 14s infinite 0s; }
+    #n2 { animation: glow 14s infinite 2s; }
+    #n3 { animation: glow 14s infinite 4s; }
+    #n4 { animation: glow 14s infinite 6s; }
+    #n5 { animation: glow 14s infinite 8s; }
+    #n6 { animation: glow 14s infinite 10s; }
+    #n7 { animation: glow 14s infinite 12s; }
+
+    /* 失败回路强调 */
+    #failLoop { stroke: #e53935; animation: dash 1.2s linear infinite, step 2.0s ease-in-out infinite; }
+    #rollback { stroke: #e53935; animation: dash 1.6s linear infinite; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="920" height="520"/>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#4a4a4a" />
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#e53935" />
+    </marker>
+  </defs>
+
+  <!-- 节点布局（横向主链 + 下方回路） -->
+  <!-- 1 需求澄清 -->
+  <g>
+    <rect id="n1" class="node" x="40" y="80" width="240" height="110"/>
+    <text x="60" y="115" class="title">1) 需求澄清 / 边界</text>
+    <text x="60" y="145" class="desc">输入是什么？输出是什么？验收标准？</text>
+    <text x="60" y="168" class="desc">风险点：写文件/执行命令/网络/安全</text>
+  </g>
+
+  <!-- 2 仓库勘察 -->
+  <g>
+    <rect id="n2" class="node" x="320" y="80" width="240" height="110"/>
+    <text x="340" y="115" class="title">2) 仓库勘察 / 召回</text>
+    <text x="340" y="145" class="desc">入口文件、搜索命中、相关模块边界</text>
+    <text x="340" y="168" class="desc">确定最小改动面（1~3 个文件优先）</text>
+  </g>
+
+  <!-- 3 设计与计划 -->
+  <g>
+    <rect id="n3" class="node" x="600" y="80" width="280" height="110"/>
+    <text x="620" y="115" class="title">3) 设计 / 计划（Plan）</text>
+    <text x="620" y="145" class="desc">拆分步骤（可回滚），定义验证命令</text>
+    <text x="620" y="168" class="desc">优先 Patch-first，避免整文件重写</text>
+  </g>
+
+  <!-- 4 实现（Patch-first） -->
+  <g>
+    <rect id="n4" class="node" x="110" y="250" width="260" height="110"/>
+    <text x="130" y="285" class="title">4) 实现（Patch-first）</text>
+    <text x="130" y="315" class="desc">apply_patch：old/new 代码块替换</text>
+    <text x="130" y="338" class="desc">必要时写文件，但保持最小变更</text>
+  </g>
+
+  <!-- 5 运行与验证 -->
+  <g>
+    <rect id="n5" class="node" x="420" y="250" width="260" height="110"/>
+    <text x="440" y="285" class="title">5) 运行 / 验证</text>
+    <text x="440" y="315" class="desc">lint/test/build（或最小复现命令）</text>
+    <text x="440" y="338" class="desc">结构化失败摘要 → 回喂修复</text>
+  </g>
+
+  <!-- 6 复盘与文档 -->
+  <g>
+    <rect id="n6" class="node" x="730" y="250" width="150" height="110"/>
+    <text x="750" y="285" class="title">6) 复盘</text>
+    <text x="750" y="315" class="desc">总结改动</text>
+    <text x="750" y="338" class="desc">风险/回滚</text>
+  </g>
+
+  <!-- 7 交付（可选 Git/PR） -->
+  <g>
+    <rect id="n7" class="node" x="600" y="390" width="280" height="90"/>
+    <text x="620" y="425" class="title">7) 交付</text>
+    <text x="620" y="452" class="desc">commit / PR 描述 / 发布说明（可选）</text>
+  </g>
+
+  <!-- 主链路连线 -->
+  <path class="flow" d="M280 135 H320" marker-end="url(#arrow)"/>
+  <path class="flow" d="M560 135 H600" marker-end="url(#arrow)"/>
+  <path class="flow" d="M740 190 V220 H240 V250" marker-end="url(#arrow)"/>
+  <path class="flow" d="M370 305 H420" marker-end="url(#arrow)"/>
+  <path class="flow" d="M680 305 H730" marker-end="url(#arrow)"/>
+  <path class="flow-slow" d="M805 360 V390" marker-end="url(#arrow)"/>
+
+  <!-- 失败回路：验证失败 → 回到实现（或回到计划） -->
+  <path id="failLoop" class="flow" d="M550 360 V410 H240 V360" marker-end="url(#arrowRed)"/>
+  <text x="255" y="405" class="note" fill="#e53935">失败：定位→最小修复→再验证</text>
+
+  <!-- 回滚提示 -->
+  <path id="rollback" class="flow-slow" d="M420 470 H110 V360" marker-end="url(#arrowRed)"/>
+  <text x="120" y="470" class="note" fill="#e53935">必要时回滚（undo/restore）</text>
+
+  <!-- 标题 -->
+  <text x="460" y="40" class="title" text-anchor="middle">实现思考流程（工程版 Golden Path）</text>
+  <text x="460" y="62" class="note" text-anchor="middle">目标：可控（Policy）/可回滚（Patch）/可验证（Verify）/可追溯（Audit）</text>
+</svg>
+
+

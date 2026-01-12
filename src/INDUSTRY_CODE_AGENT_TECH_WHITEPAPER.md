@@ -97,6 +97,12 @@ Code Agent 的本质是 **LLM 驱动的闭环控制系统**。其核心循环遵
 
 *(注：动画演示了从用户输入、任务规划到执行自检的完整闭环，SVG 源码位于 `src/assets/code_agent_flow.svg`)*
 
+### 3.2 实现思考流程图（工程落地 Golden Path）
+
+![Implementation Thinking Flow](assets/implementation_thinking_flow.svg)
+
+*(注：该动画图用于指导“从需求到落地”的工程实现顺序，SVG 源码位于 `src/assets/implementation_thinking_flow.svg`)*
+
 ---
 
 ## 4. 技术路径深度对比
@@ -145,4 +151,17 @@ Code Agent 的本质是 **LLM 驱动的闭环控制系统**。其核心循环遵
 ![Agent Reasoning Loop](assets/code_agent_loop.svg)
 
 *(注：SVG 源码已提取至 `src/assets/code_agent_loop.svg`)*
+
+---
+
+## 7. 与本项目（clude-code）当前实现的映射（进度对齐）
+
+本节把白皮书“黄金路径”的关键能力与 clude-code 当前实现对齐，方便跟踪进度。
+
+- **Patch-first 编辑**：✅ 已落地（`apply_patch` 支持多处/全量替换与可选 fuzzy；并提供 `undo_patch` 回滚）
+- **工具调用解析鲁棒性**：✅ 已增强（支持混合文本/```json 代码块提取）
+- **Policy-first（最小形态）**：✅ 已具备（workspace 路径边界 + 命令 denylist + 写/执行确认）
+- **Audit（最小形态）**：✅ 已具备（`.clude/logs/audit.jsonl`，patch/undo 记录 before/after hash 与 undo_id 证据链）
+- **Verify-first**：⏳ 未实现（计划引入 `verification/` 并接入 test/lint）
+- **Repo Map / RAG / LSP**：⏳ 未实现（计划从 repo map/rg 开始）
 

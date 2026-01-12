@@ -23,6 +23,8 @@ SYSTEM_PROMPT = """\
   - list_dir: {"path":"."}
   - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
   - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选)
+  - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
+  - undo_patch: {"undo_id":"undo_...","force":false}
   - write_file: {"path":"a/b.txt","text":"..."}
   - run_cmd: {"command":"...","cwd":"."} (cwd 可省略)
 """
@@ -36,11 +38,40 @@ class AgentTurn:
 
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
     text = text.strip()
-    if not text.startswith("{") or not text.endswith("}"):
-        return None
-    try:
-        obj = json.loads(text)
-    except json.JSONDecodeError:
+    # Allow the model to include explanations; try to extract JSON object from:
+    # 1) raw text that is a JSON object
+    # 2) fenced ```json ... ``` block
+    # 3) first {...} object in the text (best-effort)
+    candidates: list[str] = []
+    if text.startswith("{") and text.endswith("}"):
+        candidates.append(text)
+    if "```" in text:
+        for fence in ("```json", "```JSON", "```"):
+            if fence in text:
+                parts = text.split(fence, 1)
+                if len(parts) == 2:
+                    body = parts[1]
+                    body = body.split("```", 1)[0]
+                    body = body.strip()
+                    if body.startswith("{") and body.endswith("}"):
+                        candidates.append(body)
+    # best-effort: find first JSON-ish object
+    if "{" in text and "}" in text:
+        start = text.find("{")
+        end = text.rfind("}")
+        if 0 <= start < end:
+            candidates.append(text[start : end + 1].strip())
+
+    obj = None
+    for c in candidates:
+        try:
+            parsed = json.loads(c)
+            if isinstance(parsed, dict):
+                obj = parsed
+                break
+        except json.JSONDecodeError:
+            continue
+    if obj is None:
         return None
     if not isinstance(obj, dict):
         return None
@@ -96,7 +127,7 @@ class AgentLoop:
             args = tool_call["args"]
 
             # policy confirmations (MVP): only guard write/exec
-            if name in {"write_file"} and self.cfg.policy.confirm_write:
+            if name in {"write_file", "apply_patch", "undo_patch"} and self.cfg.policy.confirm_write:
                 decision = confirm(f"确认写文件？tool={name} args={args}")
                 self.audit.write(trace_id=trace_id, event="confirm_write", data={"tool": name, "args": args, "allow": decision})
                 if not decision:
@@ -125,7 +156,11 @@ class AgentLoop:
             result = self._dispatch_tool(name, args)
             # feed tool result back to model as user message (works with most chat templates)
             self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result)))
-            self.audit.write(trace_id=trace_id, event="tool_call", data={"tool": name, "args": args, "ok": result.ok, "error": result.error})
+            audit_data: dict[str, Any] = {"tool": name, "args": args, "ok": result.ok, "error": result.error}
+            if name in {"apply_patch", "undo_patch"} and result.ok and result.payload:
+                # record hashes/undo_id for traceability
+                audit_data["payload"] = result.payload
+            self.audit.write(trace_id=trace_id, event="tool_call", data=audit_data)
 
         return AgentTurn(
             assistant_text="达到本轮最大工具调用次数（20），已停止以避免死循环。请缩小任务或提供更多约束/入口文件。",
@@ -144,6 +179,20 @@ class AgentLoop:
                     path=args.get("path", "."),
                     ignore_case=bool(args.get("ignore_case", False)),
                     max_hits=int(args.get("max_hits", 200)),
+                )
+            if name == "apply_patch":
+                return self.tools.apply_patch(
+                    path=args["path"],
+                    old=args["old"],
+                    new=args["new"],
+                    expected_replacements=int(args.get("expected_replacements", 1)),
+                    fuzzy=bool(args.get("fuzzy", False)),
+                    min_similarity=float(args.get("min_similarity", 0.92)),
+                )
+            if name == "undo_patch":
+                return self.tools.undo_patch(
+                    undo_id=args["undo_id"],
+                    force=bool(args.get("force", False)),
                 )
             if name == "write_file":
                 return self.tools.write_file(path=args["path"], text=args.get("text", ""))
