@@ -20,13 +20,15 @@ SYSTEM_PROMPT = """\
 你可以通过“工具调用”来读取/搜索/写入文件以及执行命令。
 
 重要规则：
-- 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
+1. 你必须始终使用**中文**与用户交流，严禁输出英文回答。
+2. 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
   {"tool":"<name>","args":{...}}
 - 不需要工具时，输出正常中文解释与步骤（不要输出 JSON）。
 - 可用工具：
   - list_dir: {"path":"."}
-  - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
-  - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选)
+    - read_file: {"path":"README.md","offset":1,"limit":200}  (offset/limit 可省略)
+    - glob_file_search: {"glob_pattern":"**/*.py","target_directory":"."} (用于按名称模式查找文件，支持 ** 递归)
+    - grep: {"pattern":"...","path":"."} (ignore_case/max_hits 可选；注意：不要直接搜索用户的中文提问，应搜索代码中可能的英文关键词)
    - apply_patch: {"path":"a/b.py","old":"<旧代码块>","new":"<新代码块>","expected_replacements":1,"fuzzy":false,"min_similarity":0.92}
    - undo_patch: {"undo_id":"undo_...","force":false}
    - write_file: {"path":"a/b.txt","text":"..."}
@@ -262,6 +264,8 @@ class AgentLoop:
                 return self.tools.list_dir(path=args.get("path", "."))
             if name == "read_file":
                 return self.tools.read_file(path=args["path"], offset=args.get("offset"), limit=args.get("limit"))
+            if name == "glob_file_search":
+                return self.tools.glob_file_search(glob_pattern=args["glob_pattern"], target_directory=args.get("target_directory", "."))
             if name == "grep":
                 return self.tools.grep(
                     pattern=args["pattern"],

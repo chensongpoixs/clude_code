@@ -307,6 +307,30 @@ class LocalTools:
             },
         )
 
+    def glob_file_search(self, glob_pattern: str, target_directory: str = ".") -> ToolResult:
+        """
+        Search for files matching a glob pattern (e.g. "**/*.py").
+        Useful for finding files by name.
+        """
+        root = _resolve_in_workspace(self.workspace_root, target_directory)
+        if not root.exists() or not root.is_dir():
+            return ToolResult(False, error={"code": "E_NOT_DIR", "message": f"not a directory: {target_directory}"})
+        
+        matches = []
+        # Support recursive glob if pattern starts with **/
+        try:
+            for p in root.glob(glob_pattern):
+                if p.is_file():
+                    rel = str(p.resolve().relative_to(self.workspace_root.resolve()))
+                    # Filter noise
+                    if any(part in p.parts for part in {".git", ".clude", "node_modules", ".venv", "dist", "build"}):
+                        continue
+                    matches.append(rel)
+        except Exception as e:
+            return ToolResult(False, error={"code": "E_GLOB", "message": str(e)})
+            
+        return ToolResult(True, payload={"pattern": glob_pattern, "matches": sorted(matches)})
+
     def grep(self, pattern: str, path: str = ".", ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
         """
         Prefer ripgrep (rg) for deterministic performance and structured output.
@@ -386,9 +410,15 @@ class LocalTools:
             return ToolResult(False, error={"code": "E_INVALID_REGEX", "message": str(e)})
 
         hits = []
+        noise_dirs = {".git", ".clude", "node_modules", ".venv", "dist", "build"}
         for fp in root.rglob("*"):
             if fp.is_dir():
                 continue
+            
+            # Skip noise dirs
+            if any(part in fp.parts for part in noise_dirs):
+                continue
+
             # skip very large/binary-ish files
             try:
                 if fp.stat().st_size > 2_000_000:
