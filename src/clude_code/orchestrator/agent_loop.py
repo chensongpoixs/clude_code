@@ -124,9 +124,10 @@ class AgentLoop:
 
         # Initialize with Repo Map for better global context (Aider-style)
         repo_map = self.tools.generate_repo_map()
+        combined_system_prompt = f"{SYSTEM_PROMPT}\n\n当前代码仓库符号概览：\n\n{repo_map}"
+        
         self.messages: list[ChatMessage] = [
-            ChatMessage(role="system", content=SYSTEM_PROMPT),
-            ChatMessage(role="system", content=f"当前代码仓库符号概览：\n\n{repo_map}"),
+            ChatMessage(role="system", content=combined_system_prompt),
         ]
 
     def run_turn(self, user_text: str, *, confirm: Callable[[str], bool], debug: bool = False) -> AgentTurn:
@@ -237,14 +238,22 @@ class AgentLoop:
     def _trim_history(self, *, max_messages: int) -> None:
         """
         Keep chat history bounded to reduce context size.
-        We always keep the first system message, and the most recent (max_messages-1) others.
+        We always keep the first system message, and ensure the first message
+        after system is a 'user' message to satisfy strict chat templates.
         """
         if len(self.messages) <= max_messages:
             return
-        if not self.messages:
-            return
+        
         system = self.messages[0]
-        tail = self.messages[-(max_messages - 1) :]
+        # We need an odd number of messages in the tail if the last one is 'user'
+        # or just ensure the first message of the tail is 'user'.
+        tail_start_idx = len(self.messages) - (max_messages - 1)
+        
+        # Move forward until we find a 'user' message to keep parity
+        while tail_start_idx < len(self.messages) and self.messages[tail_start_idx].role != "user":
+            tail_start_idx += 1
+            
+        tail = self.messages[tail_start_idx:]
         self.messages = [system, *tail]
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:

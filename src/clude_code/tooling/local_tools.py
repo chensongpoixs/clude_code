@@ -56,20 +56,35 @@ class LocalTools:
         return ToolResult(True, payload={"path": path, "items": items})
 
     def read_file(self, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
-        p = _resolve_in_workspace(self.workspace_root, path)
-        if not p.exists() or not p.is_file():
-            return ToolResult(False, error={"code": "E_NOT_FILE", "message": f"not a file: {path}"})
-        data = p.read_bytes()
-        if len(data) > self.max_file_read_bytes:
-            data = data[: self.max_file_read_bytes]
-        text = data.decode("utf-8", errors="replace")
-        lines = text.splitlines()
-        if offset is None and limit is None:
-            return ToolResult(True, payload={"path": path, "text": text})
-        start = max((offset or 1) - 1, 0)
-        end = start + (limit or 200)
-        sliced = "\n".join(lines[start:end])
-        return ToolResult(True, payload={"path": path, "offset": offset, "limit": limit, "text": sliced})
+        """
+        Reads a file with robust encoding handling and size limits.
+        """
+        try:
+            p = _resolve_in_workspace(self.workspace_root, path)
+            if not p.exists() or not p.is_file():
+                return ToolResult(False, error={"code": "E_NOT_FILE", "message": f"not a file: {path}"})
+            
+            # Robust reading: handle encoding issues and large files
+            # For MVP, we use errors="replace" to prevent crash on binary/mixed encoding
+            data = p.read_bytes()
+            if len(data) > self.max_file_read_bytes:
+                data = data[: self.max_file_read_bytes]
+            
+            text = data.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+            
+            if offset is None and limit is None:
+                return ToolResult(True, payload={"path": path, "text": text})
+            
+            # Ensure index safety
+            start = max((offset or 1) - 1, 0)
+            count = limit or 200
+            end = min(start + count, len(lines))
+            
+            sliced = "\n".join(lines[start:end])
+            return ToolResult(True, payload={"path": path, "offset": offset, "limit": limit, "text": sliced})
+        except Exception as e:
+            return ToolResult(False, error={"code": "E_READ", "message": str(e)})
 
     def write_file(self, path: str, text: str) -> ToolResult:
         p = _resolve_in_workspace(self.workspace_root, path)
@@ -444,7 +459,17 @@ class LocalTools:
         return "\n".join(lines)
 
     def run_cmd(self, command: str, cwd: str = ".") -> ToolResult:
+        """
+        Execute a terminal command in a safe way.
+        Env is scrubbed to prevent leaking sensitive tokens.
+        """
+        import os
         wd = _resolve_in_workspace(self.workspace_root, cwd)
+        
+        # Scrub env: only keep safe common vars
+        safe_keys = {"PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "PWD", "SHELL"}
+        scrubbed_env = {k: v for k, v in os.environ.items() if k.upper() in safe_keys or k.startswith("PYTHON")}
+
         try:
             cp = subprocess.run(
                 command,
@@ -454,6 +479,7 @@ class LocalTools:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env=scrubbed_env,
             )
         except Exception as e:
             return ToolResult(False, error={"code": "E_EXEC", "message": str(e)})
