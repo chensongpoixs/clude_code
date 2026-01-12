@@ -6,6 +6,10 @@
 
 详见：`docs/21-llama-cpp-http.md`
 
+## 源码实现与进度报告 (src/)
+
+详见：`src/README.md`，包含每个模块的详细分析、完成度百分比以及下一步任务清单。
+
 ### conda（Windows / PowerShell）
 
 ```powershell
