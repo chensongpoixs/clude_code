@@ -21,7 +21,8 @@ SYSTEM_PROMPT = """\
 
 重要规则：
 1. 你必须始终使用**中文**与用户交流，严禁输出英文回答。
-2. 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
+2. 你是一个具备行动能力的代理，如果用户询问环境、路径或系统信息，请优先尝试使用 `run_cmd` 等工具自行探测，而不是询问用户。
+3. 当你需要使用工具时，你必须输出且只输出一个 JSON 对象，格式如下：
   {"tool":"<name>","args":{...}}
 - 不需要工具时，输出正常中文解释与步骤（不要输出 JSON）。
 - 可用工具：
@@ -125,8 +126,10 @@ class AgentLoop:
         self.vector_store = VectorStore(cfg.workspace_root)
 
         # Initialize with Repo Map for better global context (Aider-style)
+        import platform
         repo_map = self.tools.generate_repo_map()
-        combined_system_prompt = f"{SYSTEM_PROMPT}\n\n当前代码仓库符号概览：\n\n{repo_map}"
+        env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
+        combined_system_prompt = f"{SYSTEM_PROMPT}\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
         
         self.messages: list[ChatMessage] = [
             ChatMessage(role="system", content=combined_system_prompt),

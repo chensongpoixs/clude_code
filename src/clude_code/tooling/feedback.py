@@ -139,6 +139,16 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
 
     # ... (rest of the logic)
 
+    if tool == "glob_file_search":
+        matches = payload.get("matches") or []
+        summary["summary"] = {
+            "pattern": payload.get("pattern"),
+            "matches_total": len(matches),
+            "matches": matches[:50],  # Give a good chunk for selection
+            "truncated": len(matches) > 50,
+        }
+        return summary
+
     if tool == "run_cmd":
         out = str(payload.get("output") or "")
         summary["summary"] = {
