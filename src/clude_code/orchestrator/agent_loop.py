@@ -17,6 +17,7 @@ from clude_code.knowledge.vector_store import VectorStore
 from clude_code.verification.runner import Verifier
 from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
 from clude_code.orchestrator.state_m import AgentState
+from clude_code.orchestrator.classifier import IntentClassifier, IntentCategory
 
 
 SYSTEM_PROMPT = """\
@@ -219,6 +220,7 @@ class AgentLoop:
         self.embedder = CodeEmbedder()
         self.vector_store = VectorStore(cfg.workspace_root)
         self.verifier = Verifier(cfg.workspace_root)
+        self.classifier = IntentClassifier(self.llm, file_only_logger=self.file_only_logger)
 
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
@@ -410,11 +412,25 @@ class AgentLoop:
                 payload.update(info)
             _ev("state", payload)
 
+        # ---- Phase 4: Intent Classification & Decision Gate ----
+        _set_state(AgentState.INTAKE, {"step": "classifying"})
+        classification = self.classifier.classify(user_text)
+        self.logger.info(f"[bold cyan]意图识别结果: {classification.category.value}[/bold cyan] (置信度: {classification.confidence})")
+        _ev("intent_classified", classification.model_dump())
+
+        # 决策门：根据意图动态调整编排策略
+        enable_planning = self.cfg.orchestrator.enable_planning
+        if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):
+            if enable_planning:
+                self.logger.info("[dim]检测到能力询问或通用对话，跳过显式规划阶段。[/dim]")
+                enable_planning = False
+
+        # ---- Phase 3: Explicit Planning & Two-level Orchestration ----
         # 注意：llama.cpp 的 chat template 可能要求严格 user/assistant 交替。
         # 因此在“规划阶段”我们不能再额外插入一个连续的 user 消息。
         # 做法：把“进入规划”的提示并入同一条 user 消息内容中（仍保留原始 user_text 的审计记录）。
         planning_prompt = None
-        if self.cfg.orchestrator.enable_planning:
+        if enable_planning:
             planning_prompt = (
                 "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
                 "JSON 必须符合以下结构：\n"
@@ -447,7 +463,7 @@ class AgentLoop:
 
         # 1) 规划阶段：尝试生成显式 Plan（跨文件任务更稳健）
         plan: Plan | None = None
-        if self.cfg.orchestrator.enable_planning:
+        if enable_planning:
             _set_state(AgentState.PLANNING, {"reason": "enable_planning"})
             self.logger.info("[bold magenta]🧩 进入规划阶段：生成显式 Plan[/bold magenta]")
 

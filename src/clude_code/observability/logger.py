@@ -129,26 +129,30 @@ def get_logger(
     )
     
     # 根据配置决定是否添加控制台处理器
-    if log_to_console and not has_console_handler:
-        # 创建 Rich 控制台处理器（支持颜色和格式化）
-        console = Console(stderr=True, force_terminal=True)  # force_terminal 确保颜色显示
-        console_handler = FileLineRichHandler(
-            console=console,
-            show_time=False,  # 不显示时间
-            show_path=False,  # 不显示路径
-            rich_tracebacks=True,
-            markup=True,  # 支持 Rich markup（颜色、样式）
-            show_level=False,  # 不显示级别，只显示消息内容
-        )
-        
-        # 设置格式化器（只格式化级别，消息由 Rich 处理）
-        formatter = logging.Formatter(
-            fmt="%(message)s",  # Rich 会处理格式和颜色，这里只传递消息
-            datefmt="",
-        )
-        console_handler.setFormatter(formatter)
-        
-        logger.addHandler(console_handler)
+    if log_to_console:
+        if not has_console_handler:
+            # 创建 Rich 控制台处理器（支持颜色和格式化）
+            console = Console(stderr=True, force_terminal=True)  # force_terminal 确保颜色显示
+            console_handler = FileLineRichHandler(
+                console=console,
+                show_time=False,  # 不显示时间
+                show_path=False,  # 不显示路径
+                rich_tracebacks=True,
+                markup=True,  # 支持 Rich markup（颜色、样式）
+                show_level=False,  # 不显示级别，只显示消息内容
+            )
+            
+            # 设置格式化器（只格式化级别，消息由 Rich 处理）
+            formatter = logging.Formatter(
+                fmt="%(message)s",  # Rich 会处理格式和颜色，这里只传递消息
+                datefmt="",
+            )
+            console_handler.setFormatter(formatter)
+            
+            logger.addHandler(console_handler)
+    else:
+        # 核心修复点：如果不输出到控制台，则禁止消息向上传递给带有控制台处理器的父 logger
+        logger.propagate = False
     
     # 确定日志文件路径
     if not log_file and workspace_root:

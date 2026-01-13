@@ -57,23 +57,28 @@ messages = [
 
 ## 二、用户输入处理（run_turn 开始）
 
-### 2.1 输入预处理
+### 2.1 意图识别与决策门（Phase 4 新增）
 
 ```
-1. 生成 trace_id
-   trace_id = hash(session_id + user_text)
+1. 意图分类（Intent Classification）
+   - 使用 IntentClassifier（LLM 驱动 + 启发式）对输入进行语义分类。
+   - 标签包括：CODING_TASK, CAPABILITY_QUERY, REPO_ANALYSIS, GENERAL_CHAT, UNCERTAIN。
+   - 目的：在进入复杂规划前，识别用户真实意图。
 
-2. 提取关键词（用于语义窗口采样）
-   - 使用正则表达式提取长度 >= 4 的单词
-   - 过滤常见无意义词（please, help, find 等）
-   - 用于后续工具结果的结构化反馈
+2. 决策门（Decision Gate）
+   - 根据意图结果动态调整策略：
+     - 若为 CAPABILITY_QUERY (能力询问) 或 GENERAL_CHAT (通用对话)：
+       - 强制将 enable_planning 设为 False。
+       - 跳过显式规划阶段，直接进入单层对话或简易工具探测。
+     - 若为 CODING_TASK (代码任务)：
+       - 保持 enable_planning=True（如果配置开启）。
+       - 准备进入 Phase 3 的“显式规划”流程。
 
-3. 初始化事件追踪
-   - events: []  # 事件列表
-   - step_idx: 0  # 步骤计数器
+3. 记录事件
+   - intent_classified: 记录分类结果、理由和置信度。
 ```
 
-### 2.2 消息历史更新
+### 2.2 输入预处理（原有流程）
 
 ```
 1. 记录用户消息到审计日志

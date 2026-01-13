@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  文件: src/assets/user_query_capabilities_flow_animated.svg
+  说明: 用户问“你可以干嘛啊？”时，Agent 的正确分析/决策流程图（动画版）
+  目标: 让排障/验收时能看见“分类 → 决策 → 输出”的路径，而不是泄露模型内部思维链
+  注意:
+  - 这里展示的是“可执行的高层流程”，不展示模型逐 token 的推理细节（业界也是如此）
+  - 动画为演示用途：依次高亮关键步骤
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs>
+    <style>
+      /* ===== 视觉风格 ===== */
+      .title { font: 700 26px "Microsoft YaHei", "PingFang SC", sans-serif; fill: #111; }
+      .subtitle { font: 400 14px "Microsoft YaHei", "PingFang SC", sans-serif; fill: #444; }
+      .box { fill: #ffffff; stroke: #222; stroke-width: 2; rx: 14; }
+      .box-soft { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 14; }
+      .box-warn { fill: #fff7ed; stroke: #9a3412; stroke-width: 2; rx: 14; }
+      .box-ok { fill: #ecfdf5; stroke: #065f46; stroke-width: 2; rx: 14; }
+      .txt { font: 600 14px "Microsoft YaHei", "PingFang SC", sans-serif; fill: #111; }
+      .txt2 { font: 400 13px "Microsoft YaHei", "PingFang SC", sans-serif; fill: #222; }
+      .muted { fill: #64748b; font: 400 12px "Microsoft YaHei", "PingFang SC", sans-serif; }
+      .arrow { stroke: #111; stroke-width: 2.2; fill: none; marker-end: url(#mArrow); }
+      .dash { stroke-dasharray: 6 6; }
+
+      /* ===== 动画：依次高亮关键节点 ===== */
+      .hl { filter: none; }
+      .pulse { animation: pulse 2.8s infinite; }
+      @keyframes pulse {
+        0%   { stroke-width: 2; }
+        50%  { stroke-width: 5; }
+        100% { stroke-width: 2; }
+      }
+
+      /* 依次出现（不滚屏，适合 README 预览） */
+      .step1 { animation: fadeIn 0.6s ease 0.2s both; }
+      .step2 { animation: fadeIn 0.6s ease 0.8s both; }
+      .step3 { animation: fadeIn 0.6s ease 1.4s both; }
+      .step4 { animation: fadeIn 0.6s ease 2.0s both; }
+      .step5 { animation: fadeIn 0.6s ease 2.6s both; }
+      .step6 { animation: fadeIn 0.6s ease 3.2s both; }
+      .step7 { animation: fadeIn 0.6s ease 3.8s both; }
+      .step8 { animation: fadeIn 0.6s ease 4.4s both; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0px); }
+      }
+    </style>
+
+    <marker id="mArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111"/>
+    </marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="40" y="56" class="title">用户问“你可以干嘛啊？”——正确分析/决策流程（不泄露思维链）</text>
+  <text x="40" y="82" class="subtitle">核心目标：把“能力询问”识别为元问题 → 禁止无意义工具调用 → 输出可验证的能力清单与使用方式（并保证 llama.cpp role 交替契约）。</text>
+
+  <!-- 主流程框 -->
+  <!-- 1. 输入 -->
+  <g class="step1">
+    <rect x="60" y="120" width="310" height="92" class="box-soft hl pulse"/>
+    <text x="80" y="154" class="txt">① INTAKE：接收用户问题</text>
+    <text x="80" y="178" class="txt2">输入：你可以干嘛啊？</text>
+    <text x="80" y="200" class="muted">记录审计(trace_id)、提取关键词（可选）</text>
+  </g>
+
+  <!-- 2. 分类 -->
+  <g class="step2">
+    <rect x="430" y="120" width="320" height="92" class="box"/>
+    <text x="450" y="154" class="txt">② 分类器：识别问题类型</text>
+    <text x="450" y="178" class="txt2">判定为“能力/帮助/指令集说明”</text>
+    <text x="450" y="200" class="muted">不是代码任务，不需要读仓库/跑命令</text>
+  </g>
+
+  <!-- 3. 决策：是否进入 Plan/Execute -->
+  <g class="step3">
+    <rect x="810" y="120" width="330" height="92" class="box-warn"/>
+    <text x="830" y="154" class="txt">③ 决策门：是否启用规划/工具？</text>
+    <text x="830" y="178" class="txt2">能力询问 → 默认“禁止工具/禁止规划”</text>
+    <text x="830" y="200" class="muted">避免无意义 list_dir/grep（业界同款）</text>
+  </g>
+
+  <!-- 箭头 1->2->3 -->
+  <path class="arrow step2" d="M 370 166 L 430 166"/>
+  <path class="arrow step3" d="M 750 166 L 810 166"/>
+
+  <!-- 4. 构造回答策略 -->
+  <g class="step4">
+    <rect x="60" y="260" width="520" height="130" class="box-ok"/>
+    <text x="80" y="292" class="txt">④ 生成“能力清单”回答结构（模板化）</text>
+    <text x="80" y="318" class="txt2">- 我能做什么：文件/搜索/补丁/命令/验证/规划</text>
+    <text x="80" y="342" class="txt2">- 我不能做什么：越权/危险命令/泄露敏感信息</text>
+    <text x="80" y="366" class="txt2">- 你怎么用：给一个例子（如何提问更高效）</text>
+  </g>
+
+  <!-- 5. 调用 LLM（统一出口） -->
+  <g class="step5">
+    <rect x="640" y="260" width="500" height="130" class="box"/>
+    <text x="660" y="292" class="txt">⑤ 生成输出：通过统一出口调用 LLM</text>
+    <text x="660" y="318" class="txt2">调用：_llm_chat(stage=&quot;capabilities&quot;)</text>
+    <text x="660" y="342" class="txt2">发送前：messages_normalized（合并 user/user）</text>
+    <text x="660" y="366" class="muted">保证 llama.cpp role 交替契约，不再 500</text>
+  </g>
+
+  <path class="arrow step4" d="M 980 212 L 980 260"/>
+  <path class="arrow step4" d="M 580 325 L 640 325"/>
+
+  <!-- 6. 输出校验：不要工具调用 -->
+  <g class="step6">
+    <rect x="60" y="430" width="520" height="120" class="box-warn"/>
+    <text x="80" y="462" class="txt">⑥ 输出校验：避免“误触工具调用”</text>
+    <text x="80" y="488" class="txt2">若模型返回 tool_call JSON → 追加纠错提示 → 再生成一次</text>
+    <text x="80" y="512" class="muted">能力询问必须给自然语言说明，不要执行工具</text>
+  </g>
+
+  <!-- 7. 最终回复 -->
+  <g class="step7">
+    <rect x="640" y="430" width="500" height="120" class="box-ok"/>
+    <text x="660" y="462" class="txt">⑦ 最终输出（示例结构）</text>
+    <text x="660" y="488" class="txt2">- 我可以：列目录/读文件/搜索/打补丁/运行命令/验证</text>
+    <text x="660" y="512" class="txt2">- 我会：先探测→再修改→再验证→给报告与文件同步</text>
+  </g>
+
+  <path class="arrow step6" d="M 890 390 L 890 430"/>
+  <path class="arrow step6" d="M 580 490 L 640 490"/>
+
+  <!-- 8. 结束与可观测 -->
+  <g class="step8">
+    <rect x="60" y="590" width="1080" height="120" class="box-soft"/>
+    <text x="80" y="622" class="txt">⑧ 结束：记录可观测事件（便于你看 50 行实时 UI）</text>
+    <text x="80" y="648" class="txt2">事件示例：state=INTAKE → (capabilities_mode) → messages_normalized → final_text</text>
+    <text x="80" y="672" class="muted">不输出思维链，只输出可验证的结构化信息与能力说明（符合业界“可解释但不泄露 CoT”原则）</text>
+  </g>
+
+  <path class="arrow step8" d="M 320 550 L 320 590"/>
+  <path class="arrow step8" d="M 900 550 L 900 590"/>
+</svg>
+
+

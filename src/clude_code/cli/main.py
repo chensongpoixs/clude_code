@@ -646,8 +646,12 @@ def chat(
                 file_only_logger.info(f"调用 run_turn 前 - 参数: debug={debug}, live={live}")
                 file_only_logger.info(f"调用 run_turn 前 - 配置: model={cfg.llm.model}, api_mode={cfg.llm.api_mode}, base_url={cfg.llm.base_url}")
                 file_only_logger.info(f"调用 run_turn 前 - 工作区: {cfg.workspace_root}")
-                
-                turn = agent.run_turn(user_text, confirm=_confirm, debug=debug, on_event=_on_event)
+                try:
+                    turn = agent.run_turn(user_text, confirm=_confirm, debug=debug, on_event=_on_event)
+                except Exception:
+                    # 异常只写入文件：不在屏幕输出 traceback（避免污染 live UI）
+                    file_only_logger.exception("agent.run_turn 运行异常（live 模式）。user_text=%r", user_text, exc_info=True)
+                    raise typer.Exit(code=1)
                 
                 # 记录调用流程日志（只写入文件）
                 file_only_logger.info(f"调用 run_turn 后 - trace_id={turn.trace_id}, tool_used={turn.tool_used}, events_count={len(turn.events)}")
@@ -665,8 +669,12 @@ def chat(
             file_only_logger.info(f"调用 run_turn 前 - 参数: debug={debug}")
             file_only_logger.info(f"调用 run_turn 前 - 配置: model={cfg.llm.model}, api_mode={cfg.llm.api_mode}, base_url={cfg.llm.base_url}")
             file_only_logger.info(f"调用 run_turn 前 - 工作区: {cfg.workspace_root}")
-            
-            turn = agent.run_turn(user_text, confirm=_confirm, debug=debug)
+            try:
+                turn = agent.run_turn(user_text, confirm=_confirm, debug=debug)
+            except Exception:
+                # 异常只写入文件：不在屏幕输出 traceback
+                file_only_logger.exception("agent.run_turn 运行异常（非 live 模式）。user_text=%r", user_text, exc_info=True)
+                raise typer.Exit(code=1)
             
             # 记录调用流程日志（只写入文件）
             file_only_logger.info(f"调用 run_turn 后 - trace_id={turn.trace_id}, tool_used={turn.tool_used}, events_count={len(turn.events)}")

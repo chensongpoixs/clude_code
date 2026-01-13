@@ -50,6 +50,11 @@
 - **详细流程文档**: [`AGENT_FLOW_DETAILED.md`](AGENT_FLOW_DETAILED.md) - 包含完整的流程说明、设计决策和关键机制
 - **动画流程图**: ![Agent Complete Flow](../../assets/agent_complete_flow_animated.svg) - 可视化展示从初始化到返回结果的完整执行路径
 
+## 用户问题流程图（专项）
+
+- **用户问「你可以干嘛啊？」的正确分析流程**: [`USER_QUERY_你可以干嘛啊_分析流程.md`](USER_QUERY_你可以干嘛啊_分析流程.md)
+  - 流程图（动画 SVG）: ![用户能力询问分析流程](../../assets/user_query_capabilities_flow_animated.svg)
+
 ## 与业界标准对比分析
 
 详细的对比分析文档，识别当前实现与业界标准（Claude Code、Aider、Cursor）的差距：
