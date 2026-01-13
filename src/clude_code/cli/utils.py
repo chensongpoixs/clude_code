@@ -40,5 +40,5 @@ def select_model_interactively(cfg: CludeConfig, logger: logging.Logger) -> None
         except ValueError:
             logger.warning("输入无效，继续使用当前模型。")
     except Exception as e:
-        logger.error(f"获取模型列表时出错: {e}")
+        logger.error(f"获取模型列表失败: {e}", exc_info=True)
 

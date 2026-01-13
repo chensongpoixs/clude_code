@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Role 说明：
@@ -63,7 +66,8 @@ class LlamaCppHttpClient:
                 r = client.get(url)
                 r.raise_for_status()
                 data = r.json()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"获取模型 ID 失败 (try_get_first_model_id): {e}")
             return None
 
         # OpenAI style: {"data":[{"id":"..."}]}
@@ -71,7 +75,8 @@ class LlamaCppHttpClient:
             items = data.get("data") or []
             if items and isinstance(items, list) and isinstance(items[0], dict) and "id" in items[0]:
                 return str(items[0]["id"])
-        except Exception:
+        except Exception as e:
+            logger.warning(f"解析模型列表失败: {e}")
             return None
         return None
 
@@ -86,7 +91,8 @@ class LlamaCppHttpClient:
                 r = client.get(url)
                 r.raise_for_status()
                 data = r.json()
-        except Exception:
+        except Exception as e:
+            logger.error(f"无法从 {url} 获取模型列表: {e}", exc_info=True)
             return []
 
         out: list[str] = []
@@ -96,7 +102,8 @@ class LlamaCppHttpClient:
                 for it in items:
                     if isinstance(it, dict) and "id" in it:
                         out.append(str(it["id"]))
-        except Exception:
+        except Exception as e:
+            logger.error(f"解析模型列表异常: {e}", exc_info=True)
             return []
         return out
 

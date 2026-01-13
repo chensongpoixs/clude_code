@@ -68,8 +68,9 @@ class ChatHandler:
                 live_view.update(display.render())
                 
                 self._print_assistant_response(turn, debug=True, show_trace=True)
-            except Exception:
-                self.file_only_logger.exception("AgentLoop 运行异常 (Live)", exc_info=True)
+            except Exception as e:
+                self.logger.error(f"AgentLoop 运行异常 (Live): {e}", exc_info=True)
+                self.file_only_logger.exception("AgentLoop 运行异常 (Live)")
                 raise typer.Exit(code=1)
 
     def _run_simple(self, user_text: str, debug: bool) -> None:
@@ -82,8 +83,9 @@ class ChatHandler:
             turn = self.agent.run_turn(user_text, confirm=_confirm, debug=debug)
             self._log_turn_end(turn)
             self._print_assistant_response(turn, debug=debug, show_trace=not debug)
-        except Exception:
-            self.file_only_logger.exception("AgentLoop 运行异常 (Simple)", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"AgentLoop 运行异常 (Simple): {e}", exc_info=True)
+            self.file_only_logger.exception("AgentLoop 运行异常 (Simple)")
             raise typer.Exit(code=1)
 
     def _log_turn_start(self, user_text: str, debug: bool, live: bool) -> None:

@@ -80,7 +80,7 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
         p.unlink(missing_ok=True)
         logger.info("[green]workspace 可读写 OK[/green]")
     except Exception as e:
-        logger.error(f"workspace 写入失败：{e}")
+        logger.error(f"workspace 写入失败: {e}", exc_info=True)
         raise typer.Exit(code=2)
 
     # 3) 检查 Llama.cpp 连通性
@@ -99,7 +99,7 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
         ]).strip()
         logger.info(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
     except Exception as e:
-        logger.error(f"llama.cpp 连通失败：{e}")
+        logger.error(f"llama.cpp 连通失败: {e}", exc_info=True)
         raise typer.Exit(code=3)
 
 def _try_fix_missing_tools(tools: list[str], logger: logging.Logger) -> None:
@@ -132,5 +132,5 @@ def _try_fix_missing_tools(tools: list[str], logger: logging.Logger) -> None:
                 subprocess.run(cmd, shell=True, check=True)
                 logger.info("[green]安装指令已执行完成。[/green]")
             except Exception as e:
-                logger.error(f"执行失败: {e}")
+                logger.error(f"安装指令执行失败: {e}", exc_info=True)
 

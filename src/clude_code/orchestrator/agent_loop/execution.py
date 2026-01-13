@@ -198,7 +198,7 @@ def handle_replanning(
         loop.file_only_logger.info("重规划计划:\n" + render_plan_markdown(new_plan))
         return new_plan, replans_used
     except Exception as e:
-        loop.logger.warning(f"[yellow]⚠ 重规划解析失败: {e}[/yellow]")
+        loop.logger.error(f"[red]✗ 重规划计划解析失败: {e}[/red]", exc_info=True)
         _ev("stop_reason", {"reason": "replan_parse_failed"})
         return None, replans_used
 

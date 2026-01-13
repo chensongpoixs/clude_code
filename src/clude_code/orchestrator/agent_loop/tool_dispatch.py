@@ -386,8 +386,10 @@ def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolRes
             return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"tool not callable: {name}"})
         return spec.handler(loop, args)
     except KeyError as e:
+        logger.error(f"[red]✗ 参数缺失: {e}[/red]", exc_info=True)
         return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})
     except Exception as e:
+        logger.error(f"[red]✗ 工具执行异常: {e}[/red]", exc_info=True)
         return ToolResult(False, error={"code": "E_TOOL", "message": str(e)})
 
 
