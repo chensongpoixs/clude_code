@@ -540,8 +540,11 @@ class AgentLoop:
 
                 # 每个步骤内部，允许若干次工具调用（防止死循环）
                 for iteration in range(self.cfg.orchestrator.max_step_tool_calls):
+                    # 日志中增加更详细的上下文信息：描述 + 预期工具，便于排查问题
+                    tools_hint = ", ".join(step.tools_expected) if step.tools_expected else "（未指定，模型自选）"
                     self.logger.info(
-                        f"[bold yellow]→ 执行步骤 {step_cursor + 1}/{len(plan.steps)}: {step.id}（轮次 {iteration + 1}/{self.cfg.orchestrator.max_step_tool_calls}）[/bold yellow]"
+                        f"[bold yellow]→ 执行步骤 {step_cursor + 1}/{len(plan.steps)}: {step.id}（轮次 {iteration + 1}/{self.cfg.orchestrator.max_step_tool_calls}）[/bold yellow] "
+                        f"[描述] {step.description} [建议工具] {tools_hint}"
                     )
                     _ev("llm_request", {"messages": len(self.messages), "step_id": step.id, "iteration": iteration + 1})
 
@@ -575,6 +578,15 @@ class AgentLoop:
                         step.status = "done"
                         self.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
                         _ev("plan_step_done", {"step_id": step.id})
+                        # 详细日志：步骤完成
+                        self.logger.info(
+                            f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description} "
+                            f"[轮次] {iteration + 1}/{self.cfg.orchestrator.max_step_tool_calls}"
+                        )
+                        self.file_only_logger.info(
+                            f"步骤完成详情 [step_id={step.id}] [description={step.description}] "
+                            f"[iteration={iteration + 1}] [tools_used={tool_used}]"
+                        )
                         break
                     # 容错匹配 REPLAN
                     if "REPLAN" in a_strip or "【REPLAN】" in a_strip or a_strip.upper().startswith("REPLAN"):
@@ -583,6 +595,15 @@ class AgentLoop:
                         step.status = "failed"
                         self.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
                         _ev("plan_step_replan_requested", {"step_id": step.id})
+                        # 详细日志：步骤请求重规划
+                        self.logger.warning(
+                            f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description} "
+                            f"[轮次] {iteration + 1}/{self.cfg.orchestrator.max_step_tool_calls} [原因] 模型输出【REPLAN】标记"
+                        )
+                        self.file_only_logger.info(
+                            f"步骤请求重规划详情 [step_id={step.id}] [description={step.description}] "
+                            f"[iteration={iteration + 1}] [replans_used={replans_used}]"
+                        )
                         break
 
                     # 尝试解析工具调用
@@ -603,6 +624,16 @@ class AgentLoop:
                     name = tool_call["tool"]
                     args = tool_call["args"]
                     _ev("tool_call_parsed", {"tool": name, "args": args, "step_id": step.id})
+                    
+                    # 详细日志：工具调用详情（便于日志分析）
+                    args_summary = self._format_args_summary(name, args)
+                    self.logger.info(
+                        f"[bold blue]🔧 解析到工具调用: {name}[/bold blue] "
+                        f"[步骤] {step.id} [参数] {args_summary}"
+                    )
+                    self.file_only_logger.info(
+                        f"工具调用详情 [step_id={step.id}] [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]"
+                    )
 
                     # 记录 assistant 的工具调用 JSON（保持 llama.cpp role 交替）
                     clean_assistant = json.dumps(tool_call, ensure_ascii=False)
@@ -651,6 +682,23 @@ class AgentLoop:
                     if result.ok and name in {"write_file", "apply_patch", "undo_patch", "run_cmd"}:
                         v_res = self.verifier.run_verify()
                         _ev("autofix_check", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary, "step_id": step.id})
+                        
+                        # 详细日志：验证结果（便于日志分析）
+                        if v_res.ok:
+                            self.logger.info(
+                                f"[green]✓ 验证通过[/green] [步骤] {step.id} [工具] {name} "
+                                f"[类型] {v_res.type} [摘要] {v_res.summary}"
+                            )
+                        else:
+                            error_details = "; ".join([f"{err.file}:{err.line} {err.message}" for err in (v_res.errors or [])[:3]])
+                            self.logger.warning(
+                                f"[yellow]⚠ 验证失败[/yellow] [步骤] {step.id} [工具] {name} "
+                                f"[类型] {v_res.type} [摘要] {v_res.summary} [错误] {error_details}"
+                            )
+                            self.file_only_logger.info(
+                                f"验证失败详情 [step_id={step.id}] [tool={name}] [errors={json.dumps([{'file': err.file, 'line': err.line, 'message': err.message} for err in (v_res.errors or [])], ensure_ascii=False)}]"
+                            )
+                        
                         if not v_res.ok:
                             v_msg = f"\n\n[验证失败 - 自动自检结果]\n状态: {v_res.summary}\n"
                             if v_res.errors:
@@ -662,6 +710,23 @@ class AgentLoop:
                             else:
                                 result.payload["verification_error"] = v_msg
 
+                    # 详细日志：工具执行结果（便于日志分析）
+                    result_summary = self._format_result_summary(name, result)
+                    if result.ok:
+                        self.logger.info(
+                            f"[green]✓ 工具执行成功: {name}[/green] [步骤] {step.id} [结果] {result_summary}"
+                        )
+                    else:
+                        error_msg = result.error.get("message", str(result.error)) if isinstance(result.error, dict) else str(result.error)
+                        self.logger.error(
+                            f"[red]✗ 工具执行失败: {name}[/red] [步骤] {step.id} [错误] {error_msg} [结果] {result_summary}"
+                        )
+                    self.file_only_logger.info(
+                        f"工具执行结果 [step_id={step.id}] [tool={name}] [ok={result.ok}] "
+                        f"[error={json.dumps(result.error, ensure_ascii=False) if result.error else None}] "
+                        f"[payload_keys={list(result.payload.keys()) if result.payload else []}]"
+                    )
+                    
                     _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "step_id": step.id})
                     self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result, keywords=keywords)))
                     self._trim_history(max_messages=30)
@@ -669,7 +734,15 @@ class AgentLoop:
 
                 # 步骤迭代循环结束后强制熔断：如果状态仍是 in_progress，标记为 failed（防止无限循环）
                 if step.status == "in_progress":
-                    self.logger.warning(f"[yellow]⚠ 步骤 {step.id} 达到最大迭代次数但未完成，强制标记为 failed[/yellow]")
+                    self.logger.warning(
+                        f"[yellow]⚠ 步骤达到最大迭代次数但未完成，强制标记为 failed[/yellow] "
+                        f"[步骤] {step.id} [描述] {step.description} "
+                        f"[最大迭代] {self.cfg.orchestrator.max_step_tool_calls} [工具使用] {tool_used}"
+                    )
+                    self.file_only_logger.warning(
+                        f"步骤达到最大迭代次数 [step_id={step.id}] [description={step.description}] "
+                        f"[max_iter={self.cfg.orchestrator.max_step_tool_calls}] [tools_used={tool_used}]"
+                    )
                     step.status = "failed"
                     self.audit.write(trace_id=trace_id, event="plan_step_max_iter", data={"step_id": step.id, "max_iter": self.cfg.orchestrator.max_step_tool_calls})
                     _ev("plan_step_max_iter", {"step_id": step.id, "max_iter": self.cfg.orchestrator.max_step_tool_calls})
@@ -682,7 +755,15 @@ class AgentLoop:
                 # 如果步骤要求重规划：限制次数，避免无限循环
                 if step.status == "failed":
                     if replans_used >= self.cfg.orchestrator.max_replans:
-                        self.logger.warning("[red]⚠ 达到最大重规划次数，停止[/red]")
+                        self.logger.warning(
+                            f"[red]⚠ 达到最大重规划次数，停止[/red] "
+                            f"[当前步骤] {step.id} [描述] {step.description} "
+                            f"[已用重规划] {replans_used}/{self.cfg.orchestrator.max_replans}"
+                        )
+                        self.file_only_logger.warning(
+                            f"达到最大重规划次数 [step_id={step.id}] [replans_used={replans_used}] "
+                            f"[max_replans={self.cfg.orchestrator.max_replans}]"
+                        )
                         _ev("stop_reason", {"reason": "max_replans_reached", "limit": self.cfg.orchestrator.max_replans})
                         return AgentTurn(
                             assistant_text="达到最大重规划次数，已停止。请缩小任务或提供更明确的入口文件/目标。",
@@ -695,7 +776,17 @@ class AgentLoop:
                     # 先进入 RECOVERING 状态（用于 UI 展示和审计）
                     _set_state(AgentState.RECOVERING, {"reason": "step_failed", "step_id": step.id, "replans_used": replans_used})
                     _set_state(AgentState.PLANNING, {"reason": "replan", "replans_used": replans_used})
-                    self.logger.info(f"[bold magenta]🔁 触发重规划（第 {replans_used} 次）[/bold magenta]")
+                    completed_count = len([s for s in plan.steps if s.status == "done"])
+                    self.logger.info(
+                        f"[bold magenta]🔁 触发重规划（第 {replans_used} 次）[/bold magenta] "
+                        f"[失败步骤] {step.id} [描述] {step.description} "
+                        f"[已完成步骤] {completed_count}/{len(plan.steps)}"
+                    )
+                    self.file_only_logger.info(
+                        f"触发重规划 [replans_used={replans_used}] [failed_step_id={step.id}] "
+                        f"[description={step.description}] "
+                        f"[completed_steps={completed_count}/{len(plan.steps)}]"
+                    )
 
                     replan_prompt = (
                         "出现阻塞/失败，需要重规划。请输出新的 Plan JSON（严格 JSON，不要解释，不要调用工具）。\n"
@@ -717,11 +808,27 @@ class AgentLoop:
                             data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps], "replans_used": replans_used},
                         )
                         _ev("plan_replanned", {"title": plan.title, "steps": len(plan.steps), "replans_used": replans_used})
+                        plan_summary = render_plan_markdown(plan)
+                        self.logger.info(
+                            f"[green]✓ 重规划成功[/green] [标题] {plan.title} [步骤数] {len(plan.steps)} "
+                            f"[重规划次数] {replans_used}/{self.cfg.orchestrator.max_replans}"
+                        )
+                        self.file_only_logger.info(
+                            f"重规划成功 [title={plan.title}] [steps={len(plan.steps)}] "
+                            f"[replans_used={replans_used}] [plan_summary={plan_summary[:500]}]"
+                        )
                         _set_state(AgentState.EXECUTING, {"steps": len(plan.steps)})
                         step_cursor = 0
                         continue
                     except Exception as e:
-                        self.logger.warning(f"[yellow]⚠ 重规划解析失败: {e}[/yellow]")
+                        self.logger.warning(
+                            f"[yellow]⚠ 重规划解析失败[/yellow] [错误] {str(e)} "
+                            f"[重规划次数] {replans_used}/{self.cfg.orchestrator.max_replans}"
+                        )
+                        self.file_only_logger.exception(
+                            f"重规划解析失败 [replans_used={replans_used}] [error={str(e)}]",
+                            exc_info=True,
+                        )
                         self.audit.write(trace_id=trace_id, event="plan_replan_parse_failed", data={"error": str(e)})
                         _ev("plan_replan_parse_failed", {"error": str(e)})
                         # 失败则降级退出
@@ -759,9 +866,28 @@ class AgentLoop:
             # 3) 最终验证阶段（如果本轮有修改代码）
             _set_state(AgentState.VERIFYING, {"did_modify_code": did_modify_code})
             if did_modify_code:
-                self.logger.info("[bold magenta]🔍 进入最终验证阶段[/bold magenta]")
+                self.logger.info(
+                    "[bold magenta]🔍 进入最终验证阶段[/bold magenta] "
+                    f"[已完成步骤] {len([s for s in plan.steps if s.status == 'done'])}/{len(plan.steps)}"
+                )
                 v_res = self.verifier.run_verify()
                 _ev("final_verify", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
+                
+                # 详细日志：最终验证结果
+                if v_res.ok:
+                    self.logger.info(
+                        f"[green]✓ 最终验证通过[/green] [类型] {v_res.type} [摘要] {v_res.summary}"
+                    )
+                else:
+                    error_details = "; ".join([f"{err.file}:{err.line} {err.message}" for err in (v_res.errors or [])[:5]])
+                    self.logger.warning(
+                        f"[yellow]⚠ 最终验证失败[/yellow] [类型] {v_res.type} [摘要] {v_res.summary} "
+                        f"[错误] {error_details}"
+                    )
+                    self.file_only_logger.warning(
+                        f"最终验证失败 [type={v_res.type}] [summary={v_res.summary}] "
+                        f"[errors={json.dumps([{'file': err.file, 'line': err.line, 'message': err.message} for err in (v_res.errors or [])], ensure_ascii=False)}]"
+                    )
                 if not v_res.ok:
                     # 最终验证失败：作为最终输出返回（也可在未来引入自动修复回合）
                     text = f"最终验证失败：{v_res.summary}\n"
@@ -828,7 +954,10 @@ class AgentLoop:
             }
             self.file_only_logger.info(f"大模型返回数据: {json.dumps(response_data, ensure_ascii=False, indent=2)}")
             if tool_call is None:
-                self.logger.info("[bold green]✓ LLM 返回最终回复（无工具调用）[/bold green]")
+                self.logger.info(
+                    "[bold green]✓ LLM 返回最终回复（无工具调用）[/bold green] "
+                    f"[轮次] {iteration + 1}/20 [响应长度] {len(assistant)} 字符"
+                )
                 self.messages.append(ChatMessage(role="assistant", content=assistant))
                 self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant})
                 _ev("final_text", {"text": assistant[:4000], "truncated": len(assistant) > 4000})
@@ -837,8 +966,14 @@ class AgentLoop:
 
             name = tool_call["tool"]
             args = tool_call["args"]
-            self.logger.info(f"[bold blue]🔧 解析到工具调用: {name}[/bold blue]")
-            self.logger.debug(f"[dim]工具参数: {json.dumps(args, ensure_ascii=False, indent=2)[:200]}[/dim]")
+            args_summary = self._format_args_summary(name, args)
+            self.logger.info(
+                f"[bold blue]🔧 解析到工具调用: {name}[/bold blue] "
+                f"[轮次] {iteration + 1}/20 [参数] {args_summary}"
+            )
+            self.file_only_logger.info(
+                f"工具调用详情 [iteration={iteration + 1}] [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]"
+            )
             _ev("tool_call_parsed", {"tool": name, "args": args})
 
             # Robustness: Keep assistant history clean. 
@@ -896,18 +1031,50 @@ class AgentLoop:
                     self.logger.debug(f"[dim]策略检查通过: {cmd}[/dim]")
 
             tool_used = True
-            self.logger.info(f"[bold cyan]▶ 执行工具: {name}[/bold cyan]")
+            self.logger.info(f"[bold cyan]▶ 执行工具: {name}[/bold cyan] [轮次] {iteration + 1}/20")
             result = self._dispatch_tool(name, args)
+            
+            # 详细日志：工具执行结果（便于日志分析）
+            result_summary = self._format_result_summary(name, result)
+            if result.ok:
+                self.logger.info(
+                    f"[green]✓ 工具执行成功: {name}[/green] [轮次] {iteration + 1}/20 [结果] {result_summary}"
+                )
+            else:
+                error_msg = result.error.get("message", str(result.error)) if isinstance(result.error, dict) else str(result.error)
+                self.logger.error(
+                    f"[red]✗ 工具执行失败: {name}[/red] [轮次] {iteration + 1}/20 [错误] {error_msg} [结果] {result_summary}"
+                )
+            self.file_only_logger.info(
+                f"工具执行结果 [iteration={iteration + 1}] [tool={name}] [ok={result.ok}] "
+                f"[error={json.dumps(result.error, ensure_ascii=False) if result.error else None}] "
+                f"[payload_keys={list(result.payload.keys()) if result.payload else []}]"
+            )
             
             # --- Phase 2: Self-healing Loop (Verification) ---
             # If the tool modifies code, trigger automatic verification
             if result.ok and name in {"write_file", "apply_patch", "undo_patch", "run_cmd"}:
-                self.logger.info("[bold magenta]🔍 自动触发验证闭环...[/bold magenta]")
+                self.logger.info(
+                    "[bold magenta]🔍 自动触发验证闭环...[/bold magenta] "
+                    f"[工具] {name} [轮次] {iteration + 1}/20"
+                )
                 v_res = self.verifier.run_verify()
                 _ev("autofix_check", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
                 
-                if not v_res.ok:
-                    self.logger.warning(f"[yellow]⚠ 验证失败: {v_res.summary}[/yellow]")
+                # 详细日志：验证结果
+                if v_res.ok:
+                    self.logger.info(
+                        f"[green]✓ 验证通过[/green] [工具] {name} [类型] {v_res.type} [摘要] {v_res.summary}"
+                    )
+                else:
+                    error_details = "; ".join([f"{err.file}:{err.line} {err.message}" for err in (v_res.errors or [])[:3]])
+                    self.logger.warning(
+                        f"[yellow]⚠ 验证失败[/yellow] [工具] {name} [类型] {v_res.type} [摘要] {v_res.summary} "
+                        f"[错误] {error_details}"
+                    )
+                    self.file_only_logger.warning(
+                        f"验证失败详情 [tool={name}] [errors={json.dumps([{'file': err.file, 'line': err.line, 'message': err.message} for err in (v_res.errors or [])], ensure_ascii=False)}]"
+                    )
                     # Append verification error to tool result to force LLM to see it
                     v_msg = f"\n\n[验证失败 - 自动自检结果]\n状态: {v_res.summary}\n"
                     if v_res.errors:
@@ -920,17 +1087,18 @@ class AgentLoop:
                         result = ToolResult(ok=True, payload={"verification_error": v_msg})
                     else:
                         result.payload["verification_error"] = v_msg
-                else:
-                    self.logger.info(f"[green]✓ 验证通过: {v_res.summary}[/green]")
 
-            if result.ok:
-                self.logger.info(f"[green]✓ 工具执行成功: {name}[/green]")
-            else:
-                self.logger.error(f"[red]✗ 工具执行失败: {name} (错误: {result.error})[/red]")
             _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload})
             # feed tool result back to model as user message (works with most chat templates)
-            self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result, keywords=keywords)))
-            self.logger.debug(f"[dim]工具结果已回喂给 LLM[/dim]")
+            result_msg = _tool_result_to_message(name, result, keywords=keywords)
+            self.messages.append(ChatMessage(role="user", content=result_msg))
+            self.logger.debug(
+                f"[dim]工具结果已回喂给 LLM[/dim] [工具] {name} [轮次] {iteration + 1}/20 "
+                f"[结果长度] {len(result_msg)} 字符"
+            )
+            self.file_only_logger.debug(
+                f"工具结果回喂 [iteration={iteration + 1}] [tool={name}] [result_msg_length={len(result_msg)}]"
+            )
             _ev("tool_result_fed_back", {"tool": name})
             self._trim_history(max_messages=30)
             audit_data: dict[str, Any] = {"tool": name, "args": args, "ok": result.ok, "error": result.error}
@@ -979,6 +1147,105 @@ class AgentLoop:
         tail = self.messages[tail_start_idx:]
         self.messages = [system, *tail]
         self.logger.debug(f"[dim]历史裁剪: {old_len} → {len(self.messages)} 条消息[/dim]")
+
+    def _format_args_summary(self, tool_name: str, args: dict[str, Any]) -> str:
+        """
+        格式化工具参数摘要（用于日志输出）。
+        
+        根据工具类型提取关键参数，避免输出过长。
+        """
+        if tool_name == "read_file":
+            path = args.get("path", "")
+            offset = args.get("offset")
+            limit = args.get("limit")
+            parts = [f"path={path}"]
+            if offset is not None:
+                parts.append(f"offset={offset}")
+            if limit is not None:
+                parts.append(f"limit={limit}")
+            return " ".join(parts)
+        elif tool_name == "grep":
+            pattern = args.get("pattern", "")[:60]
+            path = args.get("path", ".")
+            return f"pattern={pattern!r} path={path}"
+        elif tool_name == "apply_patch":
+            path = args.get("path", "")
+            expected = args.get("expected_replacements", 1)
+            fuzzy = args.get("fuzzy", False)
+            return f"path={path} expected={expected} fuzzy={fuzzy}"
+        elif tool_name == "write_file":
+            path = args.get("path", "")
+            text_len = len(args.get("text", ""))
+            return f"path={path} text_len={text_len}"
+        elif tool_name == "run_cmd":
+            cmd = args.get("command", "")[:100]
+            cwd = args.get("cwd", ".")
+            return f"cmd={cmd!r} cwd={cwd}"
+        elif tool_name == "list_dir":
+            path = args.get("path", ".")
+            return f"path={path}"
+        elif tool_name == "glob_file_search":
+            pattern = args.get("glob_pattern", "")
+            target = args.get("target_directory", ".")
+            return f"pattern={pattern} target={target}"
+        else:
+            # 通用：只显示前 3 个参数，避免过长
+            items = list(args.items())[:3]
+            parts = [f"{k}={str(v)[:50]}" for k, v in items]
+            if len(args) > 3:
+                parts.append("...")
+            return " ".join(parts)
+
+    def _format_result_summary(self, tool_name: str, result: ToolResult) -> str:
+        """
+        格式化工具执行结果摘要（用于日志输出）。
+        
+        根据工具类型和结果提取关键信息，避免输出过长。
+        """
+        if not result.ok:
+            error_msg = result.error.get("message", str(result.error)) if isinstance(result.error, dict) else str(result.error)
+            return f"失败: {error_msg[:100]}"
+        
+        if not result.payload:
+            return "成功（无 payload）"
+        
+        payload = result.payload
+        
+        if tool_name == "read_file":
+            text_len = len(payload.get("text", ""))
+            return f"成功: 读取 {text_len} 字符"
+        elif tool_name == "grep":
+            hits = payload.get("hits", [])
+            count = len(hits)
+            truncated = payload.get("truncated", False)
+            return f"成功: 找到 {count} 个匹配{'（已截断）' if truncated else ''}"
+        elif tool_name == "apply_patch":
+            replacements = payload.get("replacements", 0)
+            undo_id = payload.get("undo_id", "")
+            return f"成功: {replacements} 处替换 undo_id={undo_id[:20]}"
+        elif tool_name == "write_file":
+            return "成功: 文件已写入"
+        elif tool_name == "run_cmd":
+            exit_code = payload.get("exit_code", -1)
+            stdout_len = len(payload.get("stdout", ""))
+            stderr_len = len(payload.get("stderr", ""))
+            return f"成功: exit_code={exit_code} stdout={stdout_len}字符 stderr={stderr_len}字符"
+        elif tool_name == "list_dir":
+            items = payload.get("items", [])
+            count = len(items)
+            return f"成功: {count} 项"
+        elif tool_name == "glob_file_search":
+            matches = payload.get("matches", [])
+            count = len(matches)
+            return f"成功: 找到 {count} 个文件"
+        elif tool_name == "search_semantic":
+            hits = payload.get("hits", [])
+            count = len(hits)
+            return f"成功: {count} 个语义匹配"
+        else:
+            # 通用：显示 payload 的键
+            keys = list(payload.keys())[:3]
+            return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         """
