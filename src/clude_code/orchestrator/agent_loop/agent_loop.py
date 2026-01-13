@@ -141,12 +141,12 @@ class AgentLoop:
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)
         
         # Knowledge / RAG systems
-        self.indexer = IndexerService(cfg.workspace_root)
+        self.indexer = IndexerService(cfg)
         self.indexer.start() # Start background indexing
         self.logger.info("[dim]启动后台索引服务（LanceDB RAG）[/dim]")
         self.embedder = CodeEmbedder()
-        self.vector_store = VectorStore(cfg.workspace_root)
-        self.verifier = Verifier(cfg.workspace_root)
+        self.vector_store = VectorStore(cfg)
+        self.verifier = Verifier(cfg)
         self.classifier = IntentClassifier(self.llm, file_only_logger=self.file_only_logger)
 
         # Initialize with Repo Map for better global context (Aider-style)

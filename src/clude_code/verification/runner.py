@@ -3,6 +3,7 @@ import re
 import os
 from pathlib import Path
 from typing import List, Dict
+from clude_code.config import CludeConfig
 from .models import VerificationResult, VerificationIssue
 from .detector import ProjectDetector
 from clude_code.observability.logger import get_logger
@@ -19,9 +20,10 @@ SENSITIVE_ENV_KEYS = frozenset([
 class Verifier:
     """执行验证并解析输出，同时确保原始输出的可追溯性。"""
     
-    def __init__(self, workspace_root: Path, timeout_s: int = 60):
-        self.workspace_root = workspace_root
-        self.timeout_s = timeout_s
+    def __init__(self, cfg: CludeConfig):
+        self.workspace_root = Path(cfg.workspace_root)
+        # 如果需要，这里可以从 cfg 中读取具体的验证超时时间
+        self.timeout_s = 60 
         self._file_only_logger = None
         
     @property

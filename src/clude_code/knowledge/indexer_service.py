@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+from clude_code.config import CludeConfig
 from clude_code.knowledge.vector_store import VectorStore
 from clude_code.knowledge.embedder import CodeEmbedder
 
@@ -13,9 +14,10 @@ class IndexerService:
     """
     Background service that scans the workspace and updates the vector index.
     """
-    def __init__(self, workspace_root: str):
-        self.workspace_root = Path(workspace_root)
-        self.store = VectorStore(workspace_root)
+    def __init__(self, cfg: CludeConfig):
+        self.cfg = cfg
+        self.workspace_root = Path(cfg.workspace_root)
+        self.store = VectorStore(cfg)
         self.embedder = CodeEmbedder()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None

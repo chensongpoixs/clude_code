@@ -44,6 +44,29 @@ class OrchestratorConfig(BaseModel):
     planning_retry: int = Field(default=1, ge=0, le=5, description="计划解析失败的重试次数。")
 
 
+class RAGConfig(BaseModel):
+    """RAG (Retrieval-Augmented Generation) 配置。"""
+    enabled: bool = Field(default=True, description="是否启用向量检索。")
+    device: str = Field(
+        default="cuda",
+        description="本地计算设备：'cpu', 'cuda' (Nvidia), 'mps' (Apple Silicon)。"
+    )
+    embedding_model: str = Field(
+        default="BAAI/bge-small-zh-v1.5",
+        description="本地 Embedding 模型名称（由 fastembed 加载）。"
+    )
+    model_cache_dir: str | None = Field(
+        default=None,
+        description="本地 Embedding 模型缓存/加载路径。如果为 None，则使用 fastembed 默认路径。"
+    )
+    db_path: str = Field(
+        default=".clude/vector_db",
+        description="向量数据库存储路径。"
+    )
+    chunk_size: int = Field(default=500, description="代码分块大小（字符数）。")
+    chunk_overlap: int = Field(default=50, description="分块重叠大小。")
+
+
 class CludeConfig(BaseSettings):
     """
     Config priority (high -> low):
@@ -60,5 +83,6 @@ class CludeConfig(BaseSettings):
     limits: LimitsConfig = LimitsConfig()
     logging: LoggingConfig = LoggingConfig()
     orchestrator: OrchestratorConfig = OrchestratorConfig()
+    rag: RAGConfig = RAGConfig()
 
 
