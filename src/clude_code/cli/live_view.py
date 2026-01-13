@@ -160,6 +160,45 @@ class LiveDisplay:
             self._push_thought_block("[llm] 输出异常：重复字符，已截断")
             self._push_fix("已自动截断复读输出：建议缩小任务/降低 max_tokens/提高结构化约束")
 
+        elif ev == "display":
+            # Agent 主动向用户输出的消息
+            content = str(data.get("content", ""))
+            level = str(data.get("level", "info"))
+            title = data.get("title")
+            
+            # 根据 level 选择颜色
+            level_colors = {
+                "info": "cyan",
+                "success": "green",
+                "warning": "yellow",
+                "error": "red",
+                "progress": "blue",
+            }
+            level_emoji = {
+                "info": "ℹ️",
+                "success": "✅",
+                "warning": "⚠️",
+                "error": "❌",
+                "progress": "🔄",
+            }
+            color = level_colors.get(level, "white")
+            emoji = level_emoji.get(level, "")
+            
+            # 格式化标题
+            title_prefix = f"[{title}] " if title else ""
+            
+            # 更新组件状态
+            self.active_component = "orchestrator"
+            display_summary = f"[Agent 输出] {emoji} {title_prefix}{self._clean_one_line(content, 100)}"
+            self._set_row("orchestrator", display_summary, style=color)
+            
+            # 推送到思考窗口（多行显示）
+            self._push_thought_block(f"[{color}]{emoji} {title_prefix}[/{color}]")
+            for line in content.splitlines()[:5]:  # 最多显示 5 行
+                self._push_thought_block(f"  {self._clean_one_line(line, 140)}")
+            if len(content.splitlines()) > 5:
+                self._push_thought_block("  ... (更多内容已省略)")
+
         elif ev == "final_text":
             self.active_state = "SUMMARIZING"
             self.active_component = "orchestrator"

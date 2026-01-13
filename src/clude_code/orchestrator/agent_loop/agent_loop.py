@@ -46,7 +46,14 @@ from .tool_dispatch import dispatch_tool as _dispatch_tool_fn
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
     """
     兼容层：旧函数名 `_try_parse_tool_call`。
-    新实现已迁移到 `agent_loop/parsing.py`，保留此入口避免大范围改动。
+    # 新实现已迁移到 `agent_loop/parsing.py`，保留此入口避免大范围改动。
+    #
+    # 使用示例：
+    # ```python
+    # text = "Call tool: read_file path=./file.txt"
+    # result = _try_parse_tool_call(text)
+    # print(result)
+    # ```
     """
     obj = try_parse_tool_call(text)
     if obj is None:
@@ -153,6 +160,10 @@ class AgentLoop:
         # 阶段 C: 追踪本轮修改过的文件路径，用于选择性测试
         self._turn_modified_paths: set[Path] = set()
 
+        # display 工具需要的运行时上下文（在 run_turn 中设置）
+        self._current_ev: Callable[[str, dict[str, Any]], None] | None = None
+        self._current_trace_id: str | None = None
+
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
         repo_map = self.tools.generate_repo_map()
@@ -223,6 +234,10 @@ class AgentLoop:
                     on_event(e)
                 except Exception as ex:
                     self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
+
+        # 设置运行时上下文，供 display 工具使用
+        self._current_ev = _ev
+        self._current_trace_id = trace_id
 
         current_state: AgentState = AgentState.INTAKE
 
@@ -355,7 +370,39 @@ class AgentLoop:
             "  ],\n"
             '  "verification_policy": "run_verify"\n'
             "}\n\n"
-            f"要求：steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。"
+            f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
+            "{\n"
+            "  \"id\": \"step_1\",\n"
+            "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py\",\n"
+            "  \"dependencies\": [],\n"
+            "  \"status\": \"pending\",\n"
+            "  \"tools_expected\": [\"read_file\"]\n"
+            "}\n"
+            "现在，请输出 JSON 对象。"
+            # "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
+            # "JSON 必须严格符合以下结构：\n"
+            # "{\n"
+            # "  \"title\": \"提取_try_parse_tool_call函数代码\",\n"
+            # "  \"steps\": [\n"
+            # "    {\n"
+            # "      \"id\": \"step_1\",\n"
+            # "      \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
+            # "      \"dependencies\": [],\n"
+            # "      \"status\": \"pending\",\n"
+            # "      \"tools_expected\": [\"read_file\"]\n"
+            # "    },\n"
+            # "    {\n"
+            # "      \"id\": \"step_2\",\n"
+            # "      \"description\": \"使用 grep 工具，从变量 'file_content' 中提取包含函数定义 '_try_parse_tool_call' 的代码块，并将提取的代码块存储在变量 'function_code' 中。\n",
+            # "      \"dependencies\": [\"step_1\"],\n"
+            # "      \"status\": \"pending\",\n"
+            # "      \"tools_expected\": [\"grep\"]\n"
+            # "    }\n"
+            # "  ],\n"
+            # "  \"verification_policy\": \"run_verify\"\n"
+            # "}\n\n"
+            # f"要求：请生成包含两个步骤的 JSON 对象。每个步骤必须明确指定要使用的工具和操作，并说明结果应该存储在哪个变量中。 steps 的数量不应超过 15 步。 确保生成的代码块是完整的函数定义，包括函数签名和函数体。"
+
         )
 
     def _log_llm_request_params_to_file(self) -> None:

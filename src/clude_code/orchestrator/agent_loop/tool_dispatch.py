@@ -97,12 +97,18 @@ class ToolSpec:
             if allow_null:
                 py_type = py_type | None
             
-            # 处理可选参数（如果没有在 required 中，则给予默认值 None）
+            # 处理默认值（业界做法：schema 的 default 应真正生效，避免 handler 里散落默认值逻辑）
+            default_val: Any = None
+            if isinstance(field_info, dict) and "default" in field_info:
+                default_val = field_info.get("default")
+
+            # 处理可选参数
             if field_name in required:
                 field_definitions[field_name] = (py_type, ...)
             else:
-                # 非 required 的字段默认 None
-                field_definitions[field_name] = ((py_type | None) if allow_null is False else py_type, None)
+                # 非 required：允许缺省；缺省时用 schema default（否则 None）
+                optional_type = (py_type | None) if allow_null is False else py_type
+                field_definitions[field_name] = (optional_type, default_val)
         
         try:
             # 3. 动态创建 Pydantic 模型
@@ -114,7 +120,22 @@ class ToolSpec:
             )
             # 4. 执行校验与转换
             validated = DynamicModel(**args)
-            return True, validated.model_dump(exclude_none=False)
+            out = validated.model_dump(exclude_none=False)
+
+            # 5. enum 约束（MVP 轻量实现）：如果 schema 声明了 enum，则严格检查
+            for field_name, field_info in props.items():
+                if not isinstance(field_info, dict):
+                    continue
+                enums = field_info.get("enum")
+                if not isinstance(enums, list) or not enums:
+                    continue
+                val = out.get(field_name)
+                if val is None:
+                    continue
+                if val not in enums:
+                    return False, f"参数 '{field_name}': 必须为 {enums} 之一"
+
+            return True, out
         except ValidationError as e:
             # 5. 格式化友好的错误回喂
             errors = []
@@ -180,6 +201,35 @@ def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 def _h_search_semantic(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
     # 语义检索属于 AgentLoop 的能力（依赖 embedder/vector_store），不直接放在 LocalTools
     return loop._semantic_search(query=args["query"])
+
+
+def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """
+    向用户输出信息（进度、分析结果、说明等）。
+    
+    实现原理：
+    1. 从 AgentLoop 获取当前的 _ev 回调和 trace_id
+    2. 调用 tooling/tools/display.py 中的 display 函数
+    3. 通过事件机制广播到 UI（--live 模式）
+    """
+    from clude_code.tooling.tools.display import display
+    
+    content = args.get("content", "")
+    level = args.get("level", "info")
+    title = args.get("title")
+    
+    # 从 AgentLoop 获取当前的事件回调和 trace_id
+    _ev = getattr(loop, "_current_ev", None)
+    trace_id = getattr(loop, "_current_trace_id", None)
+    
+    return display(
+        loop=loop,
+        content=content,
+        level=level,
+        title=title,
+        _ev=_ev,
+        trace_id=trace_id,
+    )
 
 
 def _obj_schema(*, properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -406,6 +456,35 @@ def _spec_search_semantic() -> ToolSpec:
     )
 
 
+def _spec_display() -> ToolSpec:
+    """ToolSpec：display（输出显示，无副作用）。"""
+    return ToolSpec(
+        name="display",
+        summary="向用户输出信息（进度、分析结果、说明等，支持 Markdown）。",
+        args_schema=_obj_schema(
+            properties={
+                "content": {"type": "string", "description": "要显示的内容（支持 Markdown）"},
+                "level": {
+                    "type": "string",
+                    "enum": ["info", "success", "warning", "error", "progress"],
+                    "default": "info",
+                    "description": "消息级别（影响显示样式）",
+                },
+                "title": {"type": "string", "description": "可选标题（用于分段显示）"},
+            },
+            required=["content"],
+        ),
+        example_args={"content": "正在分析文件...", "level": "progress"},
+        side_effects=set(),  # 无副作用（只是输出信息）
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_display,
+    )
+
+
 def _spec_internal_repo_map() -> ToolSpec:
     """内部规范项：Repo Map 运行时能力（不允许模型调用，仅用于 doctor/诊断）。"""
     return ToolSpec(
@@ -436,6 +515,7 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     yield _spec_write_file()
     yield _spec_run_cmd()
     yield _spec_search_semantic()
+    yield _spec_display()
     yield _spec_internal_repo_map()
 
 

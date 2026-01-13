@@ -106,6 +106,50 @@
 ### 6.3 执行类
 - `run_terminal_cmd(command, is_background)`（受策略保护）
 
+### 6.4 输出/交互类（MVP 推荐）
+
+#### 6.4.1 `display`（业界对标：Claude Code 的 `message_user`）
+
+用途：让 Agent 在执行长任务时**主动向用户输出进度/中间结论/说明**，而不是只能等到最终 `final_text` 才看到结果。
+
+- **安全性**：不读写文件、不执行命令，仅输出信息；因此在策略层通常不需要用户确认。
+- **工程价值**：显著降低“黑盒执行感”，提升可观测性与可控性（尤其在 `--live` 模式下）。
+
+**args_schema（JSON Schema）**：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "content": { "type": "string", "description": "要显示给用户的内容（支持 Markdown）" },
+    "level": {
+      "type": "string",
+      "enum": ["info", "success", "warning", "error", "progress"],
+      "default": "info",
+      "description": "消息级别（影响显示样式）"
+    },
+    "title": { "type": "string", "description": "可选标题（用于分段显示）" }
+  },
+  "required": ["content"],
+  "additionalProperties": false
+}
+```
+
+**示例**：
+
+```json
+{"tool":"display","args":{"content":"正在分析第 3/10 个文件…","level":"progress"}}
+```
+
+```json
+{"tool":"display","args":{"title":"代码审计","content":"发现 2 处高风险点，准备修复。","level":"warning"}}
+```
+
+**实现说明（本项目）**：
+- 分发：`src/clude_code/orchestrator/agent_loop/tool_dispatch.py`（ToolSpec 注册 + handler）
+- 执行：`src/clude_code/tooling/tools/display.py`（事件广播 + 控制台降级 + 审计）
+- UI：`src/clude_code/cli/live_view.py`（监听 `display` 事件并渲染到“思考滑动窗口”）
+
 ### 6.4 质量类
 - `read_lints(paths[])`（与 IDE/LSP 或内置 linter 对接）
 
