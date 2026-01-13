@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from typing import Any, Callable, TYPE_CHECKING
+
+from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
+from clude_code.orchestrator.state_m import AgentState
+
+if TYPE_CHECKING:
+    from .agent_loop import AgentLoop
+
+
+def execute_planning_phase(
+    loop: "AgentLoop",
+    user_text: str,
+    planning_prompt: str | None,
+    trace_id: str,
+    _ev: Callable[[str, dict[str, Any]], None],
+    _llm_chat: Callable[[str, str | None], str],
+) -> Plan | None:
+    """执行规划阶段：生成显式 Plan。"""
+    if not planning_prompt:
+        return None
+
+    _ev("state", {"state": AgentState.PLANNING.value, "reason": "enable_planning"})
+    loop.logger.info("[bold magenta]🧩 进入规划阶段：生成显式 Plan[/bold magenta]")
+
+    plan_attempts = 0
+    while plan_attempts <= loop.cfg.orchestrator.planning_retry:
+        plan_attempts += 1
+        _ev("planning_llm_request", {"attempt": plan_attempts})
+        assistant_plan = _llm_chat("planning", None)
+        _ev("planning_llm_response", {"text": assistant_plan[:4000], "truncated": len(assistant_plan) > 4000})
+
+        loop.messages.append(ChatMessage(role="assistant", content=assistant_plan))
+        loop._trim_history(max_messages=30)
+        try:
+            parsed = parse_plan_from_text(assistant_plan)
+            if len(parsed.steps) > loop.cfg.orchestrator.max_plan_steps:
+                parsed.steps = parsed.steps[: loop.cfg.orchestrator.max_plan_steps]
+            plan = parsed
+
+            # 强制校验步骤 ID 唯一性（parse_plan_from_text 已校验，这里做双保险）
+            plan.validate_unique_ids()
+
+            loop.audit.write(trace_id=trace_id, event="plan_generated", data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps]})
+            _ev("plan_generated", {"title": plan.title, "steps": len(plan.steps)})
+            loop.logger.info("[green]✓ 计划生成成功[/green]")
+            plan_summary = render_plan_markdown(plan)
+            loop.logger.info(f"[dim]计划摘要:\n{plan_summary}[/dim]")
+            loop.file_only_logger.info("生成计划:\n" + plan_summary)
+            return plan
+        except Exception as e:
+            loop.logger.warning(f"[yellow]⚠ 计划解析失败（attempt={plan_attempts}）: {e}[/yellow]")
+            loop.audit.write(trace_id=trace_id, event="plan_parse_failed", data={"attempt": plan_attempts, "error": str(e)})
+            _ev("plan_parse_failed", {"attempt": plan_attempts, "error": str(e)})
+            loop.messages.append(ChatMessage(role="user", content="上面的输出无法解析为 Plan JSON。请只输出一个严格 JSON 对象（不要解释，不要代码块）。"))
+            loop._trim_history(max_messages=30)
+
+    return None
+
+

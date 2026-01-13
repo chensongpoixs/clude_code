@@ -7,3 +7,8 @@
 /src/clude_code/policy/__pycache__
 /src/clude_code/tooling/__pycache__
 /src/clude_code/verification/__pycache__/*.pyc
+/src/clude_code/knowledge/__pycache__
+/src/clude_code/orchestrator/agent_loop/__pycache__
+/src/clude_code/tooling/tools/__pycache__
+/src/clude_code/knowledge/__pycache__/indexer_service.cpython-311.pyc
+/src/clude_code/knowledge/__pycache__/embedder.cpython-311.pyc

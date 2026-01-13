@@ -64,6 +64,50 @@ def version() -> None:
 
 
 @app.command()
+def tools(
+    schema: bool = typer.Option(False, "--schema", help="同时输出每个工具的 JSON Schema（更长，适合调试/文档）"),
+    as_json: bool = typer.Option(False, "--json", help="以 JSON 输出（便于脚本处理）"),
+) -> None:
+    """
+    输出可用工具清单（来自 ToolSpec 注册表，同源驱动 prompt/dispatch）。
+    """
+    from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
+
+    specs = list(iter_tool_specs())
+    if as_json:
+        payload = []
+        for s in specs:
+            obj = {
+                "name": s.name,
+                "summary": s.summary,
+                "side_effects": sorted(s.side_effects),
+                "example_args": s.example_args,
+            }
+            if schema:
+                obj["args_schema"] = s.args_schema
+            payload.append(obj)
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    table = Table(title="clude 可用工具（ToolSpec 注册表）", show_lines=False)
+    table.add_column("name", style="bold cyan", no_wrap=True)
+    table.add_column("side_effects", style="magenta", no_wrap=True)
+    table.add_column("summary", style="white")
+    table.add_column("example_args", style="dim")
+    if schema:
+        table.add_column("args_schema", style="dim")
+
+    for s in specs:
+        ex = json.dumps(s.example_args, ensure_ascii=False)
+        se = ",".join(sorted(s.side_effects)) if s.side_effects else "-"
+        row = [s.name, se, s.summary, ex]
+        if schema:
+            row.append(json.dumps(s.args_schema, ensure_ascii=False))
+        table.add_row(*row)
+    console.print(table)
+
+
+@app.command()
 def chat(
     model: str = typer.Option("", help="指定 llama.cpp 的 model id（openai_compat 常需要）"),
     select_model: bool = typer.Option(False, "--select-model", help="启动时从 /v1/models 交互选择 model（openai_compat）"),

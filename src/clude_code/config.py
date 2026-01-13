@@ -39,7 +39,7 @@ class OrchestratorConfig(BaseModel):
         description="是否启用显式规划（Plan -> Execute）。默认开启。",
     )
     max_plan_steps: int = Field(default=8, ge=1, le=30, description="单次计划最大步骤数（避免计划过长）。")
-    max_step_tool_calls: int = Field(default=12, ge=1, le=50, description="单个步骤内最大工具调用次数（防止死循环）。")
+    max_step_tool_calls: int = Field(default=50, ge=1, le=50, description="单个步骤内最大工具调用次数（防止死循环）。")
     max_replans: int = Field(default=2, ge=0, le=10, description="最大重规划次数（验证失败/卡住时）。")
     planning_retry: int = Field(default=1, ge=0, le=5, description="计划解析失败的重试次数。")
 
