@@ -11,12 +11,19 @@ from rich.prompt import Confirm
 from clude_code.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
+from clude_code.cli.utils import select_model_interactively
 
 console = Console()
 
-def run_doctor(fix: bool, logger: logging.Logger) -> None:
+def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger) -> None:
     """执行环境诊断。"""
     cfg = CludeConfig()
+    if model:
+        cfg.llm.model = model
+    
+    if select_model:
+        select_model_interactively(cfg, logger)
+
     logger.info("[bold]clude doctor[/bold]")
     
     missing_tools = []

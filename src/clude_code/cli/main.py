@@ -58,11 +58,13 @@ def models() -> None:
 
 @app.command()
 def doctor(
+    model: str = typer.Option("", help="指定模型 ID"),
+    select_model: bool = typer.Option(False, "--select-model", help="交互式选择模型进行连通性测试"),
     fix: bool = typer.Option(False, "--fix", help="尝试自动修复缺失依赖")
 ) -> None:
     """执行环境诊断与连通性检查。"""
     from clude_code.cli.doctor_cmd import run_doctor
-    run_doctor(fix, get_cli_logger())
+    run_doctor(fix, model, select_model, get_cli_logger())
 
 @app.command()
 def chat(

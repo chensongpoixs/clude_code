@@ -7,6 +7,7 @@ from rich.prompt import Confirm, Prompt
 from clude_code.config import CludeConfig
 from clude_code.orchestrator.agent_loop import AgentLoop
 from clude_code.cli.live_view import LiveDisplay
+from clude_code.cli.utils import select_model_interactively
 
 console = Console()
 
@@ -21,34 +22,8 @@ class ChatHandler:
         self.agent = AgentLoop(cfg)
 
     def select_model_interactively(self) -> None:
-        """交互式模型选择逻辑（openai_compat）。"""
-        if self.cfg.llm.api_mode != "openai_compat":
-            return
-
-        from clude_code.llm.llama_cpp_http import LlamaCppHttpClient
-        client = LlamaCppHttpClient(
-            base_url=self.cfg.llm.base_url,
-            api_mode="openai_compat",
-            model=self.cfg.llm.model,
-            temperature=0.0,
-            max_tokens=8,
-            timeout_s=self.cfg.llm.timeout_s,
-        )
-        ids = client.list_model_ids()
-        if not ids:
-            self.logger.warning("未能从 /v1/models 获取模型列表。")
-            return
-
-        self.logger.info("[bold]可用模型（/v1/models）[/bold]")
-        for i, mid in enumerate(ids, start=1):
-            self.logger.info(f"{i}. {mid}")
-        
-        sel = Prompt.ask("请选择模型序号", default="1")
-        try:
-            idx = int(sel)
-            self.cfg.llm.model = ids[idx - 1]
-        except Exception:
-            self.logger.warning("选择无效，继续使用默认模型。")
+        """调用公共工具进行交互式模型选择。"""
+        select_model_interactively(self.cfg, self.logger)
 
     def run_loop(self, debug: bool, live: bool) -> None:
         """主交互循环。"""
