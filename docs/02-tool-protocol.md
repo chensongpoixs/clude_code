@@ -150,6 +150,12 @@
 - 执行：`src/clude_code/tooling/tools/display.py`（事件广播 + 控制台降级 + 审计）
 - UI：`src/clude_code/cli/live_view.py`（监听 `display` 事件并渲染到“思考滑动窗口”）
 
+**为什么你可能“看不到 display 输出”？（常见误区）**：
+- `display` 是一个工具：只有模型**实际调用**它（或编排器主动触发）才会出现输出。
+- 本项目已在系统提示词与步骤提示中加入“过程可见性”约束（鼓励多步骤任务在步骤开始时先 `display` 一次）。
+- 若你使用 `--live`：`display` 会进入实时面板的“思考输出滑动窗口”。  
+  若不使用 `--live`：`display` 会降级为 `loop.logger.info(...)` 输出一条预览。
+
 ### 6.4 质量类
 - `read_lints(paths[])`（与 IDE/LSP 或内置 linter 对接）
 

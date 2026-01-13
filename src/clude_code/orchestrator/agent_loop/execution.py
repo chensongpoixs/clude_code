@@ -93,6 +93,7 @@ def execute_single_step_iteration(
         f"步骤描述：{step.description}\n"
         f"建议工具：{', '.join(step.tools_expected) if step.tools_expected else '（自行选择）'}\n\n"
         "规则：\n"
+        "0) 业界标准：步骤开始/关键进展时，优先调用 display 输出一条简短进度（level=progress/info）。\n"
         "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
         "2) 如果本步骤已完成且不需要工具：只输出字符串【STEP_DONE】。\n"
         "3) 如果本步骤失败且需要重规划：只输出字符串【REPLAN】。\n"
