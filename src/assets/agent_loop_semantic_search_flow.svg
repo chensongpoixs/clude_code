@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 500">
+  <style>
+    .box { fill: #e8f4f8; stroke: #2c5aa0; stroke-width: 2; }
+    .diamond { fill: #fff4e6; stroke: #d97706; stroke-width: 2; }
+    .start { fill: #d1fae5; stroke: #059669; stroke-width: 2; }
+    .end { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; }
+    .text { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 12px; }
+    .title { font-size: 16px; font-weight: bold; }
+    @keyframes flow {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: 20; }
+    }
+    .arrow { stroke: #1f2937; stroke-width: 2; fill: none; marker-end: url(#arrowhead); animation: flow 1s linear infinite; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#1f2937" />
+    </marker>
+  </defs>
+  
+  <text x="300" y="30" text-anchor="middle" class="text title">_semantic_search 语义搜索流程图</text>
+  
+  <rect x="200" y="60" width="200" height="40" rx="5" class="start"/>
+  <text x="300" y="85" text-anchor="middle" class="text">开始：接收 query</text>
+  
+  <rect x="200" y="120" width="200" height="40" rx="5" class="box"/>
+  <text x="300" y="145" text-anchor="middle" class="text">embedder.embed_query()</text>
+  
+  <rect x="200" y="180" width="200" height="40" rx="5" class="box"/>
+  <text x="300" y="205" text-anchor="middle" class="text">vector_store.search()</text>
+  
+  <rect x="200" y="240" width="200" height="40" rx="5" class="box"/>
+  <text x="300" y="265" text-anchor="middle" class="text">获取 top 5 结果</text>
+  
+  <rect x="200" y="300" width="200" height="40" rx="5" class="box"/>
+  <text x="300" y="325" text-anchor="middle" class="text">格式化 hits</text>
+  
+  <rect x="200" y="360" width="200" height="40" rx="5" class="end"/>
+  <text x="300" y="385" text-anchor="middle" class="text">返回 ToolResult</text>
+  
+  <!-- 异常分支 -->
+  <rect x="450" y="240" width="150" height="40" rx="5" class="box"/>
+  <text x="525" y="265" text-anchor="middle" class="text">捕获异常</text>
+  
+  <rect x="450" y="300" width="150" height="40" rx="5" class="end"/>
+  <text x="525" y="325" text-anchor="middle" class="text">返回 E_SEMANTIC_SEARCH</text>
+  
+  <path d="M 300,100 L 300,120" class="arrow"/>
+  <path d="M 300,160 L 300,180" class="arrow"/>
+  <path d="M 300,220 L 300,240" class="arrow"/>
+  <path d="M 300,280 L 300,300" class="arrow"/>
+  <path d="M 300,340 L 300,360" class="arrow"/>
+  <path d="M 400,260 L 450,260 L 450,240" class="arrow" stroke-dasharray="5,5"/>
+  <path d="M 525,280 L 525,300" class="arrow"/>
+</svg>
+

@@ -1,0 +1,209 @@
+"""
+统一日志系统模块。
+
+提供带文件名和行号的日志输出，格式：`[文件名:行号] 日志内容`
+支持 Rich markup（颜色、样式等）。
+"""
+import inspect
+import logging
+import sys
+from pathlib import Path
+from typing import Optional
+
+from rich.console import Console
+from rich.logging import RichHandler
+
+
+class FileLineRichHandler(RichHandler):
+    """
+    自定义 Rich 处理器，在日志开头添加文件名和行号。
+    
+    格式：级别     [文件名:行号] 级别 - 消息内容（支持 Rich markup）
+    """
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        # 获取调用日志的文件名和行号
+        # logging 的 findCaller 会自动跳过日志框架本身
+        try:
+            # 使用 logging 的内置机制查找调用者（跳过日志框架）
+            fn, lno, func, sinfo = self.findCaller(record, stack_info=False)
+            if fn:
+                record.filename = Path(fn).name
+                record.lineno_caller = lno
+            else:
+                # 如果找不到，使用 logging 记录的信息
+                record.filename = Path(record.pathname).name
+                record.lineno_caller = record.lineno
+        except Exception:
+            # 如果出错，使用默认值
+            record.filename = Path(record.pathname).name
+            record.lineno_caller = record.lineno
+        
+        # 调用父类方法
+        super().emit(record)
+    
+    def render(self, *, record: logging.LogRecord, traceback, message_renderable, **kwargs):
+        """
+        重写 render 方法，控制台输出只显示消息内容（不带前缀）。
+        文件输出会在 FileLineFileHandler 中添加完整格式。
+        """
+        # 控制台输出直接使用原始消息，不添加前缀
+        # 调用父类 render
+        return super().render(
+            record=record,
+            traceback=traceback,
+            message_renderable=message_renderable,
+            **kwargs
+        )
+
+
+class FileLineFileHandler(logging.FileHandler):
+    """
+    文件输出处理器，格式与控制台一致。
+    
+    格式：级别     [文件名:行号] 级别 - 消息内容
+    """
+    
+    def __init__(self, filename: str, mode: str = "a", encoding: str = "utf-8", delay: bool = False):
+        super().__init__(filename, mode, encoding, delay)
+        # 设置格式化器
+        formatter = logging.Formatter(
+            fmt="%(levelname)-8s [%(filename)s:%(lineno_caller)s] %(levelname)s - %(message)s",
+            datefmt="",
+        )
+        self.setFormatter(formatter)
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        # 获取调用日志的文件名和行号
+        try:
+            # 使用 logging 的内置机制查找调用者（跳过日志框架）
+            fn, lno, func, sinfo = self.findCaller(record, stack_info=False)
+            if fn:
+                record.filename = Path(fn).name
+                record.lineno_caller = lno
+            else:
+                # 如果找不到，使用 logging 记录的信息
+                record.filename = Path(record.pathname).name
+                record.lineno_caller = record.lineno
+        except Exception:
+            # 如果出错，使用默认值
+            record.filename = Path(record.pathname).name
+            record.lineno_caller = record.lineno
+        
+        # 调用父类方法
+        super().emit(record)
+
+
+def get_logger(
+    name: str,
+    level: int = logging.INFO,
+    log_file: Optional[str] = None,
+    workspace_root: Optional[str] = None,
+    log_to_console: bool = False,
+) -> logging.Logger:
+    """
+    获取配置好的日志记录器。
+    
+    参数:
+        name: 日志记录器名称（通常是模块名，如 __name__）
+        level: 日志级别（默认 INFO）
+        log_file: 可选的文件路径，如果提供则同时输出到文件
+        workspace_root: 工作区根目录，如果提供且 log_file 未指定，则自动创建 .clude/logs/app.log
+        log_to_console: 是否输出到控制台（默认 False，只写入文件）
+    
+    返回:
+        配置好的 Logger 实例
+    """
+    logger = logging.getLogger(name)
+    
+    logger.setLevel(level)
+    
+    # 检查是否已有控制台处理器
+    has_console_handler = any(
+        isinstance(h, FileLineRichHandler) for h in logger.handlers
+    )
+    
+    # 检查是否已有文件处理器
+    has_file_handler = any(
+        isinstance(h, FileLineFileHandler) for h in logger.handlers
+    )
+    
+    # 根据配置决定是否添加控制台处理器
+    if log_to_console and not has_console_handler:
+        # 创建 Rich 控制台处理器（支持颜色和格式化）
+        console = Console(stderr=True, force_terminal=True)  # force_terminal 确保颜色显示
+        console_handler = FileLineRichHandler(
+            console=console,
+            show_time=False,  # 不显示时间
+            show_path=False,  # 不显示路径
+            rich_tracebacks=True,
+            markup=True,  # 支持 Rich markup（颜色、样式）
+            show_level=False,  # 不显示级别，只显示消息内容
+        )
+        
+        # 设置格式化器（只格式化级别，消息由 Rich 处理）
+        formatter = logging.Formatter(
+            fmt="%(message)s",  # Rich 会处理格式和颜色，这里只传递消息
+            datefmt="",
+        )
+        console_handler.setFormatter(formatter)
+        
+        logger.addHandler(console_handler)
+    
+    # 确定日志文件路径
+    if not log_file and workspace_root:
+        # 自动创建日志文件路径
+        log_dir = Path(workspace_root) / ".clude" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = str(log_dir / "app.log")
+    
+    # 如果指定了日志文件，添加文件处理器（始终启用文件输出）
+    if log_file and not has_file_handler:
+        file_handler = FileLineFileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(level)
+        logger.addHandler(file_handler)
+    
+    return logger
+
+
+# 全局默认日志记录器（用于快速使用）
+_default_logger: Optional[logging.Logger] = None
+
+
+def get_default_logger() -> logging.Logger:
+    """
+    获取默认日志记录器（单例模式）。
+    
+    返回:
+        全局默认 Logger 实例
+    """
+    global _default_logger
+    if _default_logger is None:
+        _default_logger = get_logger("clude_code")
+    return _default_logger
+
+
+def debug(msg: str, *args, **kwargs) -> None:
+    """DEBUG 级别日志快捷函数。"""
+    get_default_logger().debug(msg, *args, **kwargs)
+
+
+def info(msg: str, *args, **kwargs) -> None:
+    """INFO 级别日志快捷函数。"""
+    get_default_logger().info(msg, *args, **kwargs)
+
+
+def warning(msg: str, *args, **kwargs) -> None:
+    """WARNING 级别日志快捷函数。"""
+    get_default_logger().warning(msg, *args, **kwargs)
+
+
+def error(msg: str, *args, **kwargs) -> None:
+    """ERROR 级别日志快捷函数。"""
+    get_default_logger().error(msg, *args, **kwargs)
+
+
+def exception(msg: str, *args, exc_info=True, **kwargs) -> None:
+    """ERROR 级别日志快捷函数（带异常信息）。"""
+    get_default_logger().error(msg, *args, exc_info=exc_info, **kwargs)
+

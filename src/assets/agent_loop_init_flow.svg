@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 700">
+  <style>
+    .box { fill: #e8f4f8; stroke: #2c5aa0; stroke-width: 2; }
+    .start { fill: #d1fae5; stroke: #059669; stroke-width: 2; }
+    .end { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; }
+    .text { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 12px; }
+    .title { font-size: 16px; font-weight: bold; }
+    @keyframes flow {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: 20; }
+    }
+    .arrow { stroke: #1f2937; stroke-width: 2; fill: none; marker-end: url(#arrowhead); animation: flow 1s linear infinite; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#1f2937" />
+    </marker>
+  </defs>
+  
+  <text x="350" y="30" text-anchor="middle" class="text title">AgentLoop.__init__ 初始化流程图</text>
+  
+  <rect x="250" y="60" width="200" height="40" rx="5" class="start"/>
+  <text x="350" y="85" text-anchor="middle" class="text">开始：接收 cfg</text>
+  
+  <rect x="250" y="120" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="145" text-anchor="middle" class="text">创建 session_id</text>
+  
+  <rect x="250" y="180" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="205" text-anchor="middle" class="text">初始化 LlamaCppHttpClient</text>
+  
+  <rect x="250" y="240" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="265" text-anchor="middle" class="text">初始化 LocalTools</text>
+  
+  <rect x="250" y="300" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="325" text-anchor="middle" class="text">初始化 AuditLogger</text>
+  
+  <rect x="250" y="360" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="385" text-anchor="middle" class="text">初始化 TraceLogger</text>
+  
+  <rect x="250" y="420" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="445" text-anchor="middle" class="text">启动 IndexerService</text>
+  
+  <rect x="250" y="480" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="505" text-anchor="middle" class="text">初始化 CodeEmbedder</text>
+  
+  <rect x="250" y="540" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="565" text-anchor="middle" class="text">初始化 VectorStore</text>
+  
+  <rect x="250" y="600" width="200" height="40" rx="5" class="box"/>
+  <text x="350" y="625" text-anchor="middle" class="text">生成 Repo Map (ctags)</text>
+  
+  <rect x="250" y="660" width="200" height="40" rx="5" class="end"/>
+  <text x="350" y="685" text-anchor="middle" class="text">构建初始 messages</text>
+  
+  <path d="M 350,100 L 350,120" class="arrow"/>
+  <path d="M 350,160 L 350,180" class="arrow"/>
+  <path d="M 350,220 L 350,240" class="arrow"/>
+  <path d="M 350,280 L 350,300" class="arrow"/>
+  <path d="M 350,340 L 350,360" class="arrow"/>
+  <path d="M 350,400 L 350,420" class="arrow"/>
+  <path d="M 350,460 L 350,480" class="arrow"/>
+  <path d="M 350,520 L 350,540" class="arrow"/>
+  <path d="M 350,580 L 350,600" class="arrow"/>
+  <path d="M 350,640 L 350,660" class="arrow"/>
+</svg>
+

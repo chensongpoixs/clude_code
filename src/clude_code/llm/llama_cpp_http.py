@@ -6,7 +6,8 @@ from typing import Any, Literal
 import httpx
 
 
-Role = Literal["system", "user", "assistant", "tool"]
+# 修复请求大模型多参数问题
+Role = Literal["system", "user"]; # "system", "user", "assistant", "tool"
 
 
 @dataclass(frozen=True)

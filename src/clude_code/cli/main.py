@@ -2,6 +2,7 @@ import shutil
 import sys
 import subprocess
 import time
+import logging
 from collections import deque
 from pathlib import Path
 import json
@@ -16,9 +17,42 @@ from rich.text import Text
 
 from clude_code.config import CludeConfig
 from clude_code.orchestrator.agent_loop import AgentLoop
+from clude_code.observability.logger import get_logger
 
 app = typer.Typer(help="clude: a Claude Code-like local code agent CLI (Python).")
 console = Console()
+
+# 初始化日志系统（延迟初始化，在需要时使用 workspace_root）
+_logger_instance = None
+
+def get_cli_logger() -> logging.Logger:
+    """获取 CLI 日志记录器，延迟初始化以获取 workspace_root。"""
+    global _logger_instance
+    if _logger_instance is None:
+        cfg = CludeConfig()
+        _logger_instance = get_logger(
+            __name__,
+            workspace_root=cfg.workspace_root,
+            log_to_console=cfg.logging.log_to_console,
+        )
+    return _logger_instance
+
+logger = get_cli_logger()
+
+# 初始化只写入文件的日志系统（延迟初始化，在需要时使用 workspace_root）
+_file_only_logger_instance = None
+
+def get_file_only_logger() -> logging.Logger:
+    """获取只写入文件的日志记录器（不输出到控制台）。"""
+    global _file_only_logger_instance
+    if _file_only_logger_instance is None:
+        cfg = CludeConfig()
+        _file_only_logger_instance = get_logger(
+            f"{__name__}.flow",
+            workspace_root=cfg.workspace_root,
+            log_to_console=False,  # 只写入文件，不输出到控制台
+        )
+    return _file_only_logger_instance
 
 
 @app.command()
@@ -45,9 +79,9 @@ def chat(
     - policy confirmations
     - audit logging
     """
-    console.print("[bold]进入 clude chat（llama.cpp HTTP）[/bold]")
-    console.print("- 输入 `exit` 退出")
-    console.print("- 工具写文件/执行命令默认需要确认")
+    logger.info("[bold]进入 clude chat（llama.cpp HTTP）[/bold]")
+    logger.info("- 输入 `exit` 退出")
+    logger.info("- 工具写文件/执行命令默认需要确认")
 
     cfg = CludeConfig()
     if model:
@@ -66,18 +100,28 @@ def chat(
         )
         ids = client.list_model_ids()
         if not ids:
-            console.print("[yellow]未能从 /v1/models 获取模型列表（可能不支持）。[/yellow]")
+            logger.warning("未能从 /v1/models 获取模型列表（可能不支持）。")
         else:
-            console.print("[bold]可用模型（/v1/models）[/bold]")
+            logger.info("[bold]可用模型（/v1/models）[/bold]")
             for i, mid in enumerate(ids, start=1):
-                console.print(f"{i}. {mid}")
+                logger.info(f"{i}. {mid}")
             sel = Prompt.ask("请选择模型序号", default="1")
             try:
                 idx = int(sel)
                 cfg.llm.model = ids[idx - 1]
             except Exception:
-                console.print("[yellow]选择无效，继续使用默认/自动 model。[/yellow]")
+                logger.warning("选择无效，继续使用默认/自动 model。")
+    
+    # 记录 AgentLoop 初始化流程（只写入文件）
+    file_only_logger = get_file_only_logger()
+    file_only_logger.info(f"初始化 AgentLoop 前 - 配置: model={cfg.llm.model}, api_mode={cfg.llm.api_mode}, base_url={cfg.llm.base_url}")
+    file_only_logger.info(f"初始化 AgentLoop 前 - 工作区: {cfg.workspace_root}")
+    file_only_logger.info(f"初始化 AgentLoop 前 - 策略: confirm_write={cfg.policy.confirm_write}, confirm_exec={cfg.policy.confirm_exec}")
+    
     agent = AgentLoop(cfg)
+    
+    # 记录 AgentLoop 初始化完成（只写入文件）
+    file_only_logger.info(f"初始化 AgentLoop 后 - session_id={agent.session_id}")
 
     def _confirm(msg: str) -> bool:
         return Confirm.ask(msg, default=False)
@@ -136,7 +180,7 @@ def chat(
     while True:
         user_text = typer.prompt("you")
         if user_text.strip().lower() in {"exit", "quit"}:
-            console.print("bye")
+            logger.info("bye")
             return
 
         if live:
@@ -597,7 +641,16 @@ def chat(
 
             # Keep final frame visible after the turn ends.
             with Live(_render_live(_panel_rows()), console=console, refresh_per_second=12, transient=False) as live_view:
+                # 记录调用流程日志（只写入文件）
+                file_only_logger.info(f"调用 run_turn 前 - 用户输入: {user_text[:200]}{'...' if len(user_text) > 200 else ''}")
+                file_only_logger.info(f"调用 run_turn 前 - 参数: debug={debug}, live={live}")
+                file_only_logger.info(f"调用 run_turn 前 - 配置: model={cfg.llm.model}, api_mode={cfg.llm.api_mode}, base_url={cfg.llm.base_url}")
+                file_only_logger.info(f"调用 run_turn 前 - 工作区: {cfg.workspace_root}")
+                
                 turn = agent.run_turn(user_text, confirm=_confirm, debug=debug, on_event=_on_event)
+                
+                # 记录调用流程日志（只写入文件）
+                file_only_logger.info(f"调用 run_turn 后 - trace_id={turn.trace_id}, tool_used={turn.tool_used}, events_count={len(turn.events)}")
                 active_state = "DONE"
                 active_component = "orchestrator"
                 last_event = "done"
@@ -607,14 +660,23 @@ def chat(
                 except Exception:
                     pass
         else:
+            # 记录调用流程日志（只写入文件）
+            file_only_logger.info(f"调用 run_turn 前 - 用户输入: {user_text[:200]}{'...' if len(user_text) > 200 else ''}")
+            file_only_logger.info(f"调用 run_turn 前 - 参数: debug={debug}")
+            file_only_logger.info(f"调用 run_turn 前 - 配置: model={cfg.llm.model}, api_mode={cfg.llm.api_mode}, base_url={cfg.llm.base_url}")
+            file_only_logger.info(f"调用 run_turn 前 - 工作区: {cfg.workspace_root}")
+            
             turn = agent.run_turn(user_text, confirm=_confirm, debug=debug)
+            
+            # 记录调用流程日志（只写入文件）
+            file_only_logger.info(f"调用 run_turn 后 - trace_id={turn.trace_id}, tool_used={turn.tool_used}, events_count={len(turn.events)}")
 
-        console.print("\n[bold]assistant[/bold]")
-        console.print(turn.assistant_text)
+        logger.info("\n[bold]assistant[/bold]")
+        logger.info(turn.assistant_text)
         if debug:
-            console.print(f"[dim]trace_id={turn.trace_id}（详见 .clude/logs/trace.jsonl）[/dim]")
+            logger.debug(f"trace_id={turn.trace_id}（详见 .clude/logs/trace.jsonl）")
             if not live:
-                console.print("[dim]--- agent 执行轨迹（可观测） ---[/dim]")
+                logger.debug("--- agent 执行轨迹（可观测） ---")
                 for e in turn.events:
                     step = e.get("step")
                     ev = e.get("event")
@@ -622,17 +684,17 @@ def chat(
                     # 控制台展示做摘要，避免刷屏
                     if ev in {"llm_response", "final_text"}:
                         text = str(data.get("text", ""))
-                        console.print(f"[dim]{step}. {ev}[/dim] {text[:240]}{'…' if len(text) > 240 else ''}")
+                        logger.debug(f"{step}. {ev} {text[:240]}{'…' if len(text) > 240 else ''}")
                     elif ev == "tool_call_parsed":
-                        console.print(f"[dim]{step}. tool[/dim] {data.get('tool')} args={data.get('args')}")
+                        logger.debug(f"{step}. tool {data.get('tool')} args={data.get('args')}")
                     elif ev == "tool_result":
-                        console.print(
-                            f"[dim]{step}. result[/dim] tool={data.get('tool')} ok={data.get('ok')} "
+                        logger.debug(
+                            f"{step}. result tool={data.get('tool')} ok={data.get('ok')} "
                             f"error={data.get('error')} payload_keys={list((data.get('payload') or {}).keys())}"
                         )
                     else:
-                        console.print(f"[dim]{step}. {ev}[/dim] {data}")
-        console.print("")
+                        logger.debug(f"{step}. {ev} {data}")
+        logger.info("")
 
 
 @app.command()
@@ -643,48 +705,48 @@ def doctor(
     from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 
     cfg = CludeConfig()
-    console.print("[bold]clude doctor[/bold]")
+    logger.info("[bold]clude doctor[/bold]")
     
     missing_tools = []
 
     # 1. 检查 rg
     rg = shutil.which("rg")
-    console.print(f"- ripgrep (rg): {rg or '[red]NOT FOUND[/red]'}")
+    logger.info(f"- ripgrep (rg): {rg or '[red]NOT FOUND[/red]'}")
     if not rg:
         missing_tools.append("ripgrep")
 
     # 2. 检查 ctags
     ctags = shutil.which("ctags")
-    console.print(f"- universal-ctags (ctags): {ctags or '[red]NOT FOUND[/red]'}")
+    logger.info(f"- universal-ctags (ctags): {ctags or '[red]NOT FOUND[/red]'}")
     if not ctags:
         missing_tools.append("universal-ctags")
 
     if missing_tools and fix:
-        console.print(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")
+        logger.warning(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")
         _try_fix_missing_tools(missing_tools)
         # 修复后重新检查
         return doctor(fix=False)
 
     if missing_tools and not fix:
-        console.print("\n[yellow]提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。[/yellow]")
+        logger.warning("\n提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。")
 
-    console.print(f"\n- workspace_root: {cfg.workspace_root}")
-    console.print(f"- llama base_url: {cfg.llm.base_url}")
-    console.print(f"- llama api_mode: {cfg.llm.api_mode}")
+    logger.info(f"\n- workspace_root: {cfg.workspace_root}")
+    logger.info(f"- llama base_url: {cfg.llm.base_url}")
+    logger.info(f"- llama api_mode: {cfg.llm.api_mode}")
 
     # workspace checks
     wr = Path(cfg.workspace_root)
     if not wr.exists():
-        console.print("[red]workspace_root 不存在[/red]")
+        logger.error("workspace_root 不存在")
         raise typer.Exit(code=2)
     try:
         p = wr / ".clude" / "doctor.tmp"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("ok", encoding="utf-8")
         p.unlink(missing_ok=True)
-        console.print("[green]workspace 可读写 OK[/green]")
+        logger.info("[green]workspace 可读写 OK[/green]")
     except Exception as e:
-        console.print(f"[red]workspace 写入失败：{e}[/red]")
+        logger.error(f"workspace 写入失败：{e}")
         raise typer.Exit(code=2)
 
     # llama connectivity
@@ -699,55 +761,16 @@ def doctor(
         )
         if cfg.llm.api_mode == "openai_compat":
             mid = client.try_get_first_model_id()
-            console.print(f"- openai_compat /v1/models first_id: {mid!r}")
+            logger.info(f"- openai_compat /v1/models first_id: {mid!r}")
         out = client.chat(
             [
                 ChatMessage(role="system", content="你是诊断助手，只输出 OK。"),
                 ChatMessage(role="user", content="ping"),
             ]
         ).strip()
-        console.print(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
+        logger.info(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
     except Exception as e:
-        console.print(f"[red]llama.cpp 连通失败：{e}[/red]")
-        raise typer.Exit(code=3)
-
-    # workspace checks
-    wr = Path(cfg.workspace_root)
-    if not wr.exists():
-        console.print("[red]workspace_root 不存在[/red]")
-        raise typer.Exit(code=2)
-    try:
-        p = wr / ".clude" / "doctor.tmp"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("ok", encoding="utf-8")
-        p.unlink(missing_ok=True)
-        console.print("[green]workspace 可读写 OK[/green]")
-    except Exception as e:
-        console.print(f"[red]workspace 写入失败：{e}[/red]")
-        raise typer.Exit(code=2)
-
-    # llama connectivity
-    try:
-        client = LlamaCppHttpClient(
-            base_url=cfg.llm.base_url,
-            api_mode=cfg.llm.api_mode,  # type: ignore[arg-type]
-            model=cfg.llm.model,
-            temperature=0.0,
-            max_tokens=32,
-            timeout_s=cfg.llm.timeout_s,
-        )
-        if cfg.llm.api_mode == "openai_compat":
-            mid = client.try_get_first_model_id()
-            console.print(f"- openai_compat /v1/models first_id: {mid!r}")
-        out = client.chat(
-            [
-                ChatMessage(role="system", content="你是诊断助手，只输出 OK。"),
-                ChatMessage(role="user", content="ping"),
-            ]
-        ).strip()
-        console.print(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
-    except Exception as e:
-        console.print(f"[red]llama.cpp 连通失败：{e}[/red]")
+        logger.error(f"llama.cpp 连通失败：{e}")
         raise typer.Exit(code=3)
 
 
@@ -780,16 +803,16 @@ def _try_fix_missing_tools(tools: list[str]) -> None:
             commands.append(f"sudo apt-get update && sudo apt-get install -y {pkg_list}")
 
     if not commands:
-        console.print("[red]未能自动匹配到适合您系统的包管理器。请参考文档手动安装。[/red]")
+        logger.error("未能自动匹配到适合您系统的包管理器。请参考文档手动安装。")
         return
 
     for cmd in commands:
         if Confirm.ask(f"是否执行安装命令: [bold cyan]{cmd}[/bold cyan]?", default=True):
             try:
                 subprocess.run(cmd, shell=True, check=True)
-                console.print("[green]安装指令已执行完成。[/green]")
+                logger.info("[green]安装指令已执行完成。[/green]")
             except Exception as e:
-                console.print(f"[red]执行失败: {e}[/red]")
+                logger.error(f"执行失败: {e}")
 
 @app.command()
 def models() -> None:
@@ -807,10 +830,10 @@ def models() -> None:
     )
     ids = client.list_model_ids()
     if not ids:
-        console.print("[red]未获取到模型列表。请确认 base_url 与 /v1/models 是否可用。[/red]")
+        logger.error("未获取到模型列表。请确认 base_url 与 /v1/models 是否可用。")
         raise typer.Exit(code=2)
-    console.print("[bold]models[/bold]")
+    logger.info("[bold]models[/bold]")
     for mid in ids:
-        console.print(f"- {mid}")
+        logger.info(f"- {mid}")
 
 

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <style>
+    .box { fill: #e8f4f8; stroke: #2c5aa0; stroke-width: 2; }
+    .diamond { fill: #fff4e6; stroke: #d97706; stroke-width: 2; }
+    .start { fill: #d1fae5; stroke: #059669; stroke-width: 2; }
+    .end { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; }
+    .text { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 14px; }
+    .title { font-size: 16px; font-weight: bold; }
+    @keyframes flow {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: 20; }
+    }
+    .arrow { stroke: #1f2937; stroke-width: 2; fill: none; marker-end: url(#arrowhead); animation: flow 1s linear infinite; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#1f2937" />
+    </marker>
+  </defs>
+  
+  <!-- 标题 -->
+  <text x="400" y="30" text-anchor="middle" class="text title">_try_parse_tool_call 函数流程图</text>
+  
+  <!-- 开始 -->
+  <rect x="300" y="60" width="200" height="40" rx="5" class="start"/>
+  <text x="400" y="85" text-anchor="middle" class="text">开始：接收 text</text>
+  
+  <!-- 步骤1：去除空白 -->
+  <rect x="300" y="130" width="200" height="40" rx="5" class="box"/>
+  <text x="400" y="155" text-anchor="middle" class="text">text.strip()</text>
+  
+  <!-- 步骤2：检查纯JSON -->
+  <rect x="300" y="200" width="200" height="40" rx="5" class="box"/>
+  <text x="400" y="225" text-anchor="middle" class="text">检查是否 {开头}结尾</text>
+  
+  <!-- 判断1 -->
+  <polygon points="400,260 450,280 400,300 350,280" class="diamond"/>
+  <text x="400" y="285" text-anchor="middle" class="text">是纯JSON?</text>
+  
+  <!-- 步骤3：提取代码块 -->
+  <rect x="100" y="330" width="200" height="40" rx="5" class="box"/>
+  <text x="200" y="355" text-anchor="middle" class="text">查找 ```json 或 ```</text>
+  
+  <!-- 步骤4：最佳努力提取 -->
+  <rect x="500" y="330" width="200" height="40" rx="5" class="box"/>
+  <text x="600" y="355" text-anchor="middle" class="text">提取第一个 {...}</text>
+  
+  <!-- 步骤5：尝试解析 -->
+  <rect x="300" y="400" width="200" height="40" rx="5" class="box"/>
+  <text x="400" y="425" text-anchor="middle" class="text">遍历候选，json.loads()</text>
+  
+  <!-- 判断2 -->
+  <polygon points="400,460 450,480 400,500 350,480" class="diamond"/>
+  <text x="400" y="485" text-anchor="middle" class="text">解析成功?</text>
+  
+  <!-- 验证 -->
+  <rect x="100" y="530" width="200" height="40" rx="5" class="box"/>
+  <text x="200" y="555" text-anchor="middle" class="text">验证 tool/args 字段</text>
+  
+  <!-- 返回成功 -->
+  <rect x="300" y="530" width="200" height="40" rx="5" class="end"/>
+  <text x="400" y="555" text-anchor="middle" class="text">返回 dict</text>
+  
+  <!-- 返回失败 -->
+  <rect x="500" y="530" width="200" height="40" rx="5" class="end"/>
+  <text x="600" y="555" text-anchor="middle" class="text">返回 None</text>
+  
+  <!-- 箭头 -->
+  <path d="M 400,100 L 400,130" class="arrow"/>
+  <path d="M 400,170 L 400,200" class="arrow"/>
+  <path d="M 400,240 L 400,260" class="arrow"/>
+  <path d="M 350,280 L 200,280 L 200,330" class="arrow"/>
+  <path d="M 450,280 L 600,280 L 600,330" class="arrow"/>
+  <path d="M 200,370 L 200,400 L 300,400" class="arrow"/>
+  <path d="M 600,370 L 600,400 L 500,400" class="arrow"/>
+  <path d="M 400,440 L 400,460" class="arrow"/>
+  <path d="M 350,480 L 200,480 L 200,530" class="arrow"/>
+  <path d="M 450,480 L 500,480 L 500,530" class="arrow"/>
+  <path d="M 300,480 L 400,480 L 400,530" class="arrow"/>
+</svg>
+

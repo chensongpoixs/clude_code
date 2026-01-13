@@ -25,6 +25,14 @@ class LimitsConfig(BaseModel):
     max_file_read_bytes: int = Field(default=1_000_000, ge=1024)
 
 
+class LoggingConfig(BaseModel):
+    """日志系统配置。"""
+    log_to_console: bool = Field(
+        default=True,
+        description="是否将日志输出到控制台（默认 True，同时输出到控制台和文件）"
+    )
+
+
 class CludeConfig(BaseSettings):
     """
     Config priority (high -> low):
@@ -39,5 +47,6 @@ class CludeConfig(BaseSettings):
     llm: LLMConfig = LLMConfig()
     policy: PolicyConfig = PolicyConfig()
     limits: LimitsConfig = LimitsConfig()
+    logging: LoggingConfig = LoggingConfig()
 
 

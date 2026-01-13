@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 500">
+  <style>
+    .box { fill: #e8f4f8; stroke: #2c5aa0; stroke-width: 2; }
+    .diamond { fill: #fff4e6; stroke: #d97706; stroke-width: 2; }
+    .start { fill: #d1fae5; stroke: #059669; stroke-width: 2; }
+    .end { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; }
+    .text { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 12px; }
+    .title { font-size: 16px; font-weight: bold; }
+    @keyframes flow {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: 20; }
+    }
+    .arrow { stroke: #1f2937; stroke-width: 2; fill: none; marker-end: url(#arrowhead); animation: flow 1s linear infinite; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#1f2937" />
+    </marker>
+  </defs>
+  
+  <text x="350" y="30" text-anchor="middle" class="text title">_trim_history 历史裁剪流程图</text>
+  
+  <rect x="250" y="60" width="200" height="40" rx="5" class="start"/>
+  <text x="350" y="85" text-anchor="middle" class="text">开始：接收 max_messages</text>
+  
+  <polygon points="350,120 400,140 350,160 300,140" class="diamond"/>
+  <text x="350" y="145" text-anchor="middle" class="text">len ≤ max?</text>
+  
+  <rect x="100" y="180" width="200" height="40" rx="5" class="end"/>
+  <text x="200" y="205" text-anchor="middle" class="text">直接返回（无需裁剪）</text>
+  
+  <rect x="400" y="180" width="200" height="40" rx="5" class="box"/>
+  <text x="500" y="205" text-anchor="middle" class="text">保存 system 消息</text>
+  
+  <rect x="400" y="240" width="200" height="40" rx="5" class="box"/>
+  <text x="500" y="265" text-anchor="middle" class="text">计算 tail_start_idx</text>
+  
+  <rect x="400" y="300" width="200" height="40" rx="5" class="box"/>
+  <text x="500" y="325" text-anchor="middle" class="text">向前查找 'user' 消息</text>
+  
+  <rect x="400" y="360" width="200" height="40" rx="5" class="box"/>
+  <text x="500" y="385" text-anchor="middle" class="text">提取 tail 部分</text>
+  
+  <rect x="400" y="420" width="200" height="40" rx="5" class="box"/>
+  <text x="500" y="445" text-anchor="middle" class="text">messages = [system, *tail]</text>
+  
+  <rect x="400" y="480" width="200" height="40" rx="5" class="end"/>
+  <text x="500" y="505" text-anchor="middle" class="text">完成裁剪</text>
+  
+  <path d="M 350,100 L 350,120" class="arrow"/>
+  <path d="M 300,140 L 200,140 L 200,180" class="arrow"/>
+  <path d="M 400,140 L 500,140 L 500,180" class="arrow"/>
+  <path d="M 500,220 L 500,240" class="arrow"/>
+  <path d="M 500,280 L 500,300" class="arrow"/>
+  <path d="M 500,340 L 500,360" class="arrow"/>
+  <path d="M 500,400 L 500,420" class="arrow"/>
+  <path d="M 500,460 L 500,480" class="arrow"/>
+</svg>
+
