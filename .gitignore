@@ -14,3 +14,5 @@
 /src/clude_code/knowledge/__pycache__/embedder.cpython-311.pyc
 /src/clude_code/lsp/__pycache__
 /src/clude_code/plugins/__pycache__
+/.pytest_cache
+/module_analysis.md
