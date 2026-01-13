@@ -16,6 +16,9 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
     - 将“向量检索/格式化结果”从编排主文件中拆出，便于独立演进与测试。
     """
     try:
+        if not getattr(loop.cfg, "rag", None) or not getattr(loop.cfg.rag, "enabled", True):
+            return ToolResult(False, error={"code": "E_RAG_DISABLED", "message": "RAG 已禁用（cfg.rag.enabled=false）"})
+
         loop.logger.debug(f"[dim]执行语义搜索: {query[:50]}...[/dim]")
         q_vector = loop.embedder.embed_query(query)
         hits = loop.vector_store.search(q_vector, limit=5)

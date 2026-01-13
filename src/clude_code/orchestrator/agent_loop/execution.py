@@ -217,8 +217,8 @@ def execute_final_verification(
         return None
 
     _set_state(AgentState.VERIFYING, {"reason": "did_modify_code"})
-    loop.logger.info("[bold magenta]🔍 最终验证阶段：运行自检[/bold magenta]")
-    v_res = loop.verifier.run_verify()
+    loop.logger.info("[bold magenta]🔍 最终验证阶段：运行自检 (选择性测试)[/bold magenta]")
+    v_res = loop.verifier.run_verify(modified_paths=list(loop._turn_modified_paths))
     _ev("final_verify", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
 
     if not v_res.ok:

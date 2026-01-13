@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
 from clude_code.config import CludeConfig
@@ -144,10 +145,13 @@ class AgentLoop:
         self.indexer = IndexerService(cfg)
         self.indexer.start() # Start background indexing
         self.logger.info("[dim]启动后台索引服务（LanceDB RAG）[/dim]")
-        self.embedder = CodeEmbedder()
+        self.embedder = CodeEmbedder(cfg)
         self.vector_store = VectorStore(cfg)
         self.verifier = Verifier(cfg)
         self.classifier = IntentClassifier(self.llm, file_only_logger=self.file_only_logger)
+
+        # 阶段 C: 追踪本轮修改过的文件路径，用于选择性测试
+        self._turn_modified_paths: set[Path] = set()
 
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
@@ -199,6 +203,9 @@ class AgentLoop:
         self.logger.info(f"[bold cyan]开始新的一轮对话[/bold cyan] trace_id={trace_id}")
         self.logger.info(f"[dim]用户输入: {user_text[:100]}{'...' if len(user_text) > 100 else ''}[/dim]")
 
+        # 阶段 C: 清空本轮修改追踪
+        self._turn_modified_paths.clear()
+
         keywords = self._extract_keywords(user_text)
 
         events: list[dict[str, Any]] = []
@@ -214,8 +221,8 @@ class AgentLoop:
             if on_event is not None:
                 try:
                     on_event(e)
-                except Exception:
-                    pass
+                except Exception as ex:
+                    self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
 
         current_state: AgentState = AgentState.INTAKE
 
@@ -236,6 +243,7 @@ class AgentLoop:
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
         user_content = user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
+        self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
         self.messages.append(ChatMessage(role="user", content=user_content))
         self._trim_history(max_messages=30)
         self.logger.debug(f"[dim]当前消息历史长度: {len(self.messages)}[/dim]")
@@ -377,6 +385,12 @@ class AgentLoop:
             if enable_planning:
                 self.logger.info("[dim]检测到能力询问或通用对话，跳过显式规划阶段。[/dim]")
                 enable_planning = False
+        # 业界兜底：短文本 + UNCERTAIN 往往是问候/寒暄/无任务输入，不应进入规划
+        # if classification.category == IntentCategory.UNCERTAIN:
+        #     txt = (user_text or "").strip()
+        #     if len(txt) <= 12 and any(k in txt for k in ("你好", "您好", "哈喽", "嗨", "hi", "hello", "在吗")):
+        #         self.logger.info("[dim]短文本疑似问候（UNCERTAIN 兜底），跳过显式规划阶段。[/dim]")
+        #         enable_planning = False
         return enable_planning
 
     def _execute_planning_phase(self, user_text: str, planning_prompt: str | None, trace_id: str, _ev: Callable[[str, dict[str, Any]], None], _llm_chat: Callable[[str, str | None], str]) -> Plan | None:

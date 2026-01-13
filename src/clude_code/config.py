@@ -8,7 +8,7 @@ class LLMConfig(BaseModel):
     provider: str = Field(default="llama_cpp_http")
     base_url: str = Field(default="http://127.0.0.1:8899")
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion |ggml-org/gemma-3-12b-it-GGUF
-    model: str = Field(default="")  # llama.cpp may ignore; keep for compatibility
+    model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
     timeout_s: int = Field(default=120, ge=1)
@@ -48,7 +48,7 @@ class RAGConfig(BaseModel):
     """RAG (Retrieval-Augmented Generation) 配置。"""
     enabled: bool = Field(default=True, description="是否启用向量检索。")
     device: str = Field(
-        default="cuda",
+        default="cpu",
         description="本地计算设备：'cpu', 'cuda' (Nvidia), 'mps' (Apple Silicon)。"
     )
     embedding_model: str = Field(
@@ -56,7 +56,7 @@ class RAGConfig(BaseModel):
         description="本地 Embedding 模型名称（由 fastembed 加载）。"
     )
     model_cache_dir: str | None = Field(
-        default=None,
+        default="D:/LLM/llm/Embedding/",  #默认目录 None值
         description="本地 Embedding 模型缓存/加载路径。如果为 None，则使用 fastembed 默认路径。"
     )
     db_path: str = Field(
@@ -65,6 +65,14 @@ class RAGConfig(BaseModel):
     )
     chunk_size: int = Field(default=500, description="代码分块大小（字符数）。")
     chunk_overlap: int = Field(default=50, description="分块重叠大小。")
+
+    # --- Phase D+: RAG 索引深度调优（业界标配项） ---
+    scan_interval_s: int = Field(default=30, ge=5, le=3600, description="后台索引扫描间隔（秒）。")
+    max_file_bytes: int = Field(default=2_000_000, ge=10_000, description="单文件最大索引大小（字节），超过则跳过。")
+    embed_batch_size: int = Field(default=64, ge=1, le=4096, description="Embedding 批处理大小（越大越快但更吃内存）。")
+    chunk_target_lines: int = Field(default=40, ge=5, le=500, description="启发式分块目标行数（优先在空行/定义边界切分）。")
+    chunk_max_lines: int = Field(default=60, ge=5, le=2000, description="启发式分块最大行数（硬上限）。")
+    chunk_overlap_lines: int = Field(default=5, ge=0, le=200, description="分块行重叠（提升跨块召回稳定性）。")
 
 
 class CludeConfig(BaseSettings):

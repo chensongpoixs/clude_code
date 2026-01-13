@@ -119,16 +119,28 @@ class LlamaCppHttpClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
-        with httpx.Client(timeout=self.timeout_s) as client:
-            r = client.post(url, json=payload)
-            if r.status_code >= 400:
-                # Surface response body — llama.cpp often explains which field is invalid.
-                body = r.text
-                raise RuntimeError(
-                    "llama.cpp OpenAI-compatible request failed: "
-                    f"status={r.status_code} url={url} body={body[:2000]}"
-                )
-            data = r.json()
+        try:
+            with httpx.Client(timeout=self.timeout_s) as client:
+                r = client.post(url, json=payload)
+                if r.status_code >= 400:
+                    # Surface response body — llama.cpp often explains which field is invalid.
+                    body = r.text
+                    raise RuntimeError(
+                        "llama.cpp OpenAI-compatible request failed: "
+                        f"status={r.status_code} url={url} body={body[:2000]}"
+                    )
+                data = r.json()
+        except httpx.TimeoutException as e:
+            raise RuntimeError(
+                "llama.cpp OpenAI-compatible request failed: "
+                f"timeout url={url} (timeout_s={self.timeout_s})"
+            ) from e
+        except httpx.RequestError as e:
+            # 业界常见：代理/证书/连接失败。这里把根因抛给上层用于友好提示。
+            raise RuntimeError(
+                "llama.cpp OpenAI-compatible request failed: "
+                f"request_error url={url} err={type(e).__name__}: {e}"
+            ) from e
 
         # OpenAI style
         try:

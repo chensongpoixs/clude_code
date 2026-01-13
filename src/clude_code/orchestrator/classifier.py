@@ -55,12 +55,25 @@ class IntentClassifier:
 
     def classify(self, user_text: str) -> ClassificationResult:
         """执行分类。"""
-        # # 针对极短文本的启发式快捷处理（节省 Token）
-        # text_strip = user_text.strip().lower()
-        # if text_strip in ("你好", "hi", "hello", "你是谁", "who are you"):
-        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: Simple greeting")
-        # if any(kw in text_strip for kw in ("你可以干嘛", "怎么用", "能力", "帮助", "help", "capability", "can you")):
-        #     return ClassificationResult(category=IntentCategory.CAPABILITY_QUERY, reason="Heuristic: Capability keyword")
+        # 1) 业界做法：对极短/高频“闲聊/能力询问”走启发式，避免不必要的大模型请求。
+        # 这样能显著提升健壮性：当本地 llama.cpp 不可用时，仍可正常回应问候/说明能力。
+        text_strip = (user_text or "").strip().lower()
+        # if not text_strip:
+        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: empty input", confidence=1.0)
+
+        # greetings = {
+        #     "你好", "你好啊", "您好", "哈喽", "嗨", "hi", "hello", "hey",
+        #     "在吗", "在不在", "晚安", "早上好", "下午好", "晚上好",
+        # }
+        # if text_strip in greetings:
+        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: greeting", confidence=1.0)
+
+        # # 一些常见“寒暄 + 标点”的变体（例如：你好啊～/你好啊!!）
+        # if len(text_strip) <= 8 and any(k in text_strip for k in ("你好", "哈喽", "嗨", "hi", "hello")):
+        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: greeting (variant)", confidence=0.95)
+
+        # if any(kw in text_strip for kw in ("你可以干嘛", "能干嘛", "怎么用", "帮助", "help", "capability", "can you")):
+        #     return ClassificationResult(category=IntentCategory.CAPABILITY_QUERY, reason="Heuristic: capability keyword", confidence=0.95)
 
         # 走 LLM 深度语义分类
         from clude_code.llm.llama_cpp_http import ChatMessage

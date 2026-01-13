@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import logging
 from typing import Any, Callable, Iterable, TYPE_CHECKING
+from dataclasses import dataclass
+
+from pydantic import TypeAdapter, ValidationError
 
 from clude_code.tooling.local_tools import ToolResult
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
+
+logger = logging.getLogger(__name__)
 
 
 ToolHandler = Callable[["AgentLoop", dict[str, Any]], ToolResult]
@@ -34,6 +39,92 @@ class ToolSpec:
     # exec 工具需要安全评估的命令参数键名（默认为 "command"）
     exec_command_key: str | None
     handler: ToolHandler
+
+    def validate_args(self, args: dict[str, Any]) -> tuple[bool, dict[str, Any] | str]:
+        """
+        使用 Pydantic 运行时强校验参数是否符合 args_schema。
+        返回: (是否通过, 转换后的参数或错误消息)
+        """
+        from pydantic import ConfigDict, create_model
+        
+        # 1. 解析 properties
+        props = self.args_schema.get("properties", {})
+        required = self.args_schema.get("required", [])
+        
+        # 2. 映射 JSON Schema 类型到 Python 类型（基础版）
+        type_mapping = {
+            "string": str,
+            "integer": int,
+            "boolean": bool,
+            "number": float,
+            "array": list,
+            "object": dict
+        }
+        
+        def _pick_type(fi: dict[str, Any]) -> tuple[str, bool]:
+            """
+            兼容 JSON Schema:
+            - type: "string"
+            - type: ["integer","null"]
+            - anyOf/oneOf: [{type: ...}, ...]（MVP 取第一个可识别 type）
+            返回: (基础类型名, 是否允许 null)
+            """
+            allow_null = False
+            t = fi.get("type")
+            if isinstance(t, list):
+                allow_null = "null" in t
+                non_null = [x for x in t if x != "null"]
+                if non_null and isinstance(non_null[0], str):
+                    return non_null[0], allow_null
+                return "string", allow_null
+            if isinstance(t, str):
+                return t, False
+
+            # Fallback: anyOf/oneOf
+            for k in ("anyOf", "oneOf"):
+                opts = fi.get(k)
+                if isinstance(opts, list):
+                    for opt in opts:
+                        if isinstance(opt, dict) and isinstance(opt.get("type"), (str, list)):
+                            return _pick_type(opt)
+            return "string", False
+
+        field_definitions: dict[str, Any] = {}
+        for field_name, field_info in props.items():
+            # 兼容 type 为 list 的情况（例如 ["integer","null"]）
+            js_type, allow_null = _pick_type(field_info if isinstance(field_info, dict) else {})
+            py_type: Any = type_mapping.get(js_type, Any)
+            if allow_null:
+                py_type = py_type | None
+            
+            # 处理可选参数（如果没有在 required 中，则给予默认值 None）
+            if field_name in required:
+                field_definitions[field_name] = (py_type, ...)
+            else:
+                # 非 required 的字段默认 None
+                field_definitions[field_name] = ((py_type | None) if allow_null is False else py_type, None)
+        
+        try:
+            # 3. 动态创建 Pydantic 模型
+            # 业界做法：禁止额外参数，避免模型乱传参被静默忽略
+            DynamicModel = create_model(
+                f"Args_{self.name}",
+                __config__=ConfigDict(extra="forbid"),
+                **field_definitions,
+            )
+            # 4. 执行校验与转换
+            validated = DynamicModel(**args)
+            return True, validated.model_dump(exclude_none=False)
+        except ValidationError as e:
+            # 5. 格式化友好的错误回喂
+            errors = []
+            for err in e.errors():
+                loc = ".".join(str(x) for x in err["loc"])
+                msg = err["msg"]
+                errors.append(f"参数 '{loc}': {msg}")
+            return False, "; ".join(errors)
+        except Exception as ex:
+            return False, f"校验逻辑异常: {ex}"
 
 
 def _h_list_dir(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -373,10 +464,10 @@ def render_tools_for_system_prompt(*, include_schema: bool = False) -> str:
 
 def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolResult:
     """
-    工具分发（注册表驱动）。
+    工具分发（注册表驱动 + Pydantic 运行时强校验）。
 
     大文件治理说明：
-    - Tooling 常随项目增长而膨胀，把分发逻辑拆出便于维护/测试。
+    - 实现了阶段 B 运行时契约加固：在执行 handler 前拦截非法参数。
     """
     try:
         spec = TOOL_REGISTRY.get(name)
@@ -384,7 +475,17 @@ def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolRes
             return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"unknown tool: {name}"})
         if not spec.callable_by_model:
             return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"tool not callable: {name}"})
-        return spec.handler(loop, args)
+
+        # --- 运行时强校验拦截 (Phase B) ---
+        # 真正分发前执行 Pydantic 强校验（包含自动转换）
+        ok, validated_or_msg = spec.validate_args(args)
+        if not ok:
+            logger.warning(f"[yellow]⚠ 工具 {name} 参数校验失败: {validated_or_msg}[/yellow]")
+            return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"参数校验失败: {validated_or_msg}"})
+        
+        # 校验通过，执行处理器（使用校验/转换后的参数，例如 "1" -> 1）
+        return spec.handler(loop, validated_or_msg)  # type: ignore
+
     except KeyError as e:
         logger.error(f"[red]✗ 参数缺失: {e}[/red]", exc_info=True)
         return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})

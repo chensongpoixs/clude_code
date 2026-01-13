@@ -34,6 +34,7 @@
 - **优势**: 彻底的 **本地隐私保护** (llama.cpp) 和 **严格协议约束** (JSON Schema)。
 - **劣势**: 相比 Aider/Claude Code，我们在 **长文件编辑精度** 和 **自动化验证自愈** 方面存在代差。
 - **技术突破点**: 应当利用 Pydantic 强校验来弥补本地小模型推理能力的不足。
+- **健壮性复盘**: 见 [`src/ROBUSTNESS_REVIEW_REPORT.md`](ROBUSTNESS_REVIEW_REPORT.md)（包含检查流程与关键修复点）。
 
 ---
 
@@ -50,7 +51,8 @@
 - **Verification**: ✅ 已落地（含命令白名单、环境隔离、多语言解析器）。详见 [`verification/ANALYSIS_REPORT.md`](./clude_code/verification/ANALYSIS_REPORT.md)。
 
 ### 第三阶段：上下文增强 (P2)
-- **Repo Indexing**: 实现基于 ctags 或简单文件摘要的仓库地图，提升召回质量。
+- **Repo Indexing**: ✅ 已落地增强版 Repo Map（目录树 + 关键符号 + 核心文件排序），见 `tooling/tools/repo_map.py`。
+- **RAG 索引深度调优**: 🛠 已进入深度调优阶段（增量可恢复索引、护栏、批量 embedding、启发式语义分块）。路线与结论见：[`src/RAG_INDEXING_DEEP_TUNING.md`](RAG_INDEXING_DEEP_TUNING.md)。
 
 ### 第四阶段：生态与扩展 (P3) ✅ 已完成
 - **LSP 集成**: ✅ 已落地（通用 LSP 客户端，支持多语言服务器）。详见 [`lsp/README.md`](./clude_code/lsp/README.md)。

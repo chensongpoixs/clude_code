@@ -47,9 +47,16 @@ class Verifier:
                 env.pop(key, None)
         return env
         
-    def run_verify(self) -> VerificationResult:
+    def run_verify(self, modified_paths: List[Path] | None = None) -> VerificationResult:
         lang, cmd = ProjectDetector.detect(self.workspace_root)
         
+        # 尝试精炼命令（选择性测试）
+        if modified_paths:
+            refined_cmd = ProjectDetector.refine_command(lang, cmd, modified_paths)
+            if refined_cmd != cmd:
+                self.file_only_logger.info(f"精炼验证范围: {cmd} -> {refined_cmd}")
+                cmd = refined_cmd
+
         if lang == "unknown" or not cmd:
             return VerificationResult(
                 ok=True, 

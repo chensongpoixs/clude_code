@@ -12,3 +12,5 @@
 /src/clude_code/tooling/tools/__pycache__
 /src/clude_code/knowledge/__pycache__/indexer_service.cpython-311.pyc
 /src/clude_code/knowledge/__pycache__/embedder.cpython-311.pyc
+/src/clude_code/lsp/__pycache__
+/src/clude_code/plugins/__pycache__

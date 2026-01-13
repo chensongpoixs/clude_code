@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import json
+from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 from clude_code.policy.command_policy import evaluate_command
@@ -64,6 +63,14 @@ def run_tool_lifecycle(
     loop.logger.info(f"[bold cyan]▶ 执行工具: {name}[/bold cyan]")
     result = loop._dispatch_tool(name, args)
 
+    # --- 阶段 C: 记录修改过的路径 ---
+    if result.ok and (name in {"write_file", "apply_patch", "undo_patch"}):
+        path_str = args.get("path")
+        if path_str:
+            from clude_code.tooling.workspace import resolve_in_workspace
+            abs_path = resolve_in_workspace(Path(loop.cfg.workspace_root), path_str)
+            loop._turn_modified_paths.add(abs_path)
+
     # 详细日志输出
     result_summary = loop._format_result_summary(name, result)
     if result.ok:
@@ -87,8 +94,9 @@ def run_tool_lifecycle(
 
     # 5. 自动化验证闭环 (自愈)
     if result.ok and (("write" in side_effects) or ("exec" in side_effects)):
-        loop.logger.info("[bold magenta]🔍 自动触发验证闭环...[/bold magenta]")
-        v_res = loop.verifier.run_verify()
+        loop.logger.info("[bold magenta]🔍 自动触发验证闭环 (选择性测试)...[/bold magenta]")
+        # 传递本轮已修改的文件列表
+        v_res = loop.verifier.run_verify(modified_paths=list(loop._turn_modified_paths))
         _ev("autofix_check", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
 
         if v_res.ok:
