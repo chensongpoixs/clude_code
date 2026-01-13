@@ -32,6 +32,10 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     payload = tr.payload or {}
     summary: dict[str, Any] = {"tool": tool, "ok": True}
     
+    # --- Phase 2: Add verification error if present ---
+    if "verification_error" in payload:
+        summary["verification_error"] = payload["verification_error"]
+
     # Pre-process keywords for search
     kw_list = [k.lower() for k in (keywords or []) if k]
 

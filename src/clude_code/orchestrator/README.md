@@ -37,6 +37,35 @@
 7. **`AgentLoop._semantic_search`** - 执行向量 RAG 语义搜索
    - 流程图: ![`agent_loop_semantic_search_flow.svg`](../../assets/agent_loop_semantic_search_flow.svg)
 
+## 核心规范与协议
+
+为了保证模块化开发的协作精度，我们定义了标准的数据契约：
+
+- **数据模型协议**: [`PROTOCOLS.md`](PROTOCOLS.md) - 包含 Plan、Step、VerificationResult 的 JSON Schema 及异常处理策略。
+
+## 完整执行流程
+
+详细的 Agent 执行流程说明和流程图：
+
+- **详细流程文档**: [`AGENT_FLOW_DETAILED.md`](AGENT_FLOW_DETAILED.md) - 包含完整的流程说明、设计决策和关键机制
+- **动画流程图**: ![Agent Complete Flow](../../assets/agent_complete_flow_animated.svg) - 可视化展示从初始化到返回结果的完整执行路径
+
+## 与业界标准对比分析
+
+详细的对比分析文档，识别当前实现与业界标准（Claude Code、Aider、Cursor）的差距：
+
+- **对比分析文档**: [`AGENT_VS_INDUSTRY_ANALYSIS.md`](AGENT_VS_INDUSTRY_ANALYSIS.md) - 基于 8 个维度的详细对比，包含问题分析、评分对比和改进建议
+
+### 流程概览
+
+1. **初始化阶段**: 创建 LLM 客户端、工具集、RAG 系统，构建系统提示词
+2. **用户输入处理**: 生成 trace_id，提取关键词，更新消息历史
+3. **ReAct 循环**（最多 20 次）:
+   - LLM 请求 → 响应解析 → 工具调用解析
+   - 策略检查（用户确认、命令黑名单）
+   - 工具执行 → 结果回喂 → 历史裁剪
+4. **返回结果**: AgentTurn（包含最终文本、工具使用标志、追踪ID、事件列表）
+
 ## 模块流程
 ![Orchestrator Flow](module_flow.svg)
 

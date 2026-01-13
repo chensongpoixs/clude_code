@@ -14,11 +14,12 @@ from clude_code.tooling.local_tools import LocalTools, ToolResult
 from clude_code.knowledge.indexer_service import IndexerService
 from clude_code.knowledge.embedder import CodeEmbedder
 from clude_code.knowledge.vector_store import VectorStore
+from clude_code.verification.runner import Verifier
 
 
 SYSTEM_PROMPT = """\
 # 核心元规则 (META-RULES) - 优先级最高
-1. **身份锚定**：你是一个名为 clude-code 的【开发架构师】。你不是对话助手，严禁表现得像个开发架构师。
+1. **身份锚定**：你是一个名为 clude-code 的【高级软件架构工程师】。你不是对话助手，严禁表现得像个高级软件架构工程师。
 2. **语言锁死**：必须 100% 使用【中文】与用户交流。严禁在【逻辑推演】和回复中使用英文单词（代码名、文件名除外）。
 3. **严禁推诿/反问**：你有权限读取文件、执行命令。绝对禁止说“我无法访问”、“我只是一个语言模型”、“请提供更多信息”。如果你不确定，请立即调用工具自行探测。
 4. **任务执行导向**：面对复杂指令（如分析、评分、重构），严禁在未获得充足数据前给出结论。第一步必须是调用探测工具（list_dir, read_file, glob_file_search 等）。
@@ -33,7 +34,7 @@ SYSTEM_PROMPT = """\
    {"tool":"<name>","args":{...}}
 
 # 评分与分析准则
-- 当涉及“评分”时，必须对比 `src/INDUSTRY_CODE_AGENT_TECH_WHITEPAPER.md` 中的业界标准（如 Aider, Cursor, Claude Code）。
+- 当涉及“评分”时，必须对比的业界标准。
 - 分析必须深入逻辑流、边界条件和跨文件依赖，严禁只列出函数名或文件名。
 
 # 可用工具清单
@@ -215,6 +216,7 @@ class AgentLoop:
         self.logger.info("[dim]启动后台索引服务（LanceDB RAG）[/dim]")
         self.embedder = CodeEmbedder()
         self.vector_store = VectorStore(cfg.workspace_root)
+        self.verifier = Verifier(cfg.workspace_root)
 
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
@@ -416,6 +418,31 @@ class AgentLoop:
             tool_used = True
             self.logger.info(f"[bold cyan]▶ 执行工具: {name}[/bold cyan]")
             result = self._dispatch_tool(name, args)
+            
+            # --- Phase 2: Self-healing Loop (Verification) ---
+            # If the tool modifies code, trigger automatic verification
+            if result.ok and name in {"write_file", "apply_patch", "undo_patch", "run_cmd"}:
+                self.logger.info("[bold magenta]🔍 自动触发验证闭环...[/bold magenta]")
+                v_res = self.verifier.run_verify()
+                _ev("autofix_check", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
+                
+                if not v_res.ok:
+                    self.logger.warning(f"[yellow]⚠ 验证失败: {v_res.summary}[/yellow]")
+                    # Append verification error to tool result to force LLM to see it
+                    v_msg = f"\n\n[验证失败 - 自动自检结果]\n状态: {v_res.summary}\n"
+                    if v_res.errors:
+                        v_msg += "具体错误:\n"
+                        for err in v_res.errors:
+                            v_msg += f"- {err.file}:{err.line} {err.message}\n"
+                    
+                    # Wrap the original payload if it exists
+                    if result.payload is None:
+                        result = ToolResult(ok=True, payload={"verification_error": v_msg})
+                    else:
+                        result.payload["verification_error"] = v_msg
+                else:
+                    self.logger.info(f"[green]✓ 验证通过: {v_res.summary}[/green]")
+
             if result.ok:
                 self.logger.info(f"[green]✓ 工具执行成功: {name}[/green]")
             else:
