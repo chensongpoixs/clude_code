@@ -67,13 +67,14 @@ def version() -> None:
 def tools(
     schema: bool = typer.Option(False, "--schema", help="同时输出每个工具的 JSON Schema（更长，适合调试/文档）"),
     as_json: bool = typer.Option(False, "--json", help="以 JSON 输出（便于脚本处理）"),
+    all_specs: bool = typer.Option(False, "--all", help="包含内部/不可调用的规范项（用于诊断）"),
 ) -> None:
     """
     输出可用工具清单（来自 ToolSpec 注册表，同源驱动 prompt/dispatch）。
     """
     from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
 
-    specs = list(iter_tool_specs())
+    specs = [s for s in iter_tool_specs() if (all_specs or s.callable_by_model)]
     if as_json:
         payload = []
         for s in specs:
@@ -755,23 +756,42 @@ def doctor(
 ) -> None:
     """Basic diagnostics: workspace + llama.cpp connectivity."""
     from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
+    from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
 
     cfg = CludeConfig()
     logger.info("[bold]clude doctor[/bold]")
     
     missing_tools = []
 
-    # 1. 检查 rg
-    rg = shutil.which("rg")
-    logger.info(f"- ripgrep (rg): {rg or '[red]NOT FOUND[/red]'}")
-    if not rg:
-        missing_tools.append("ripgrep")
+    # 1) 从 ToolSpec 推导外部依赖（必需/推荐），避免硬编码漂移
+    required_bins: dict[str, set[str]] = {}
+    optional_bins: dict[str, set[str]] = {}
+    for s in iter_tool_specs():
+        for b in s.external_bins_required:
+            required_bins.setdefault(b, set()).add(s.name)
+        for b in s.external_bins_optional:
+            optional_bins.setdefault(b, set()).add(s.name)
 
-    # 2. 检查 ctags
-    ctags = shutil.which("ctags")
-    logger.info(f"- universal-ctags (ctags): {ctags or '[red]NOT FOUND[/red]'}")
-    if not ctags:
-        missing_tools.append("universal-ctags")
+    def _bin_status(bin_name: str) -> str:
+        return shutil.which(bin_name) or "[red]NOT FOUND[/red]"
+
+    # 必需依赖：缺失会影响核心功能
+    if required_bins:
+        logger.info("\n[bold]外部依赖（必需）[/bold]")
+        for b, owners in sorted(required_bins.items(), key=lambda x: x[0]):
+            logger.info(f"- {b}: {_bin_status(b)}  影响: {', '.join(sorted(owners))}")
+            if not shutil.which(b):
+                # 映射到包名（用于 --fix）
+                missing_tools.append("ripgrep" if b == "rg" else ("universal-ctags" if b == "ctags" else b))
+
+    # 推荐依赖：缺失会降级（但仍可运行）
+    if optional_bins:
+        logger.info("\n[bold]外部依赖（推荐）[/bold]")
+        for b, owners in sorted(optional_bins.items(), key=lambda x: x[0]):
+            owners_disp = [o[1:] if o.startswith("_") else o for o in sorted(owners)]
+            logger.info(f"- {b}: {_bin_status(b)}  影响: {', '.join(owners_disp)}")
+            if not shutil.which(b):
+                missing_tools.append("ripgrep" if b == "rg" else ("universal-ctags" if b == "ctags" else b))
 
     if missing_tools and fix:
         logger.warning(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")

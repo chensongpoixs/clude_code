@@ -24,6 +24,15 @@ class ToolSpec:
     args_schema: dict[str, Any]
     example_args: dict[str, Any]
     side_effects: set[str]  # {"read","write","exec","search"}（可扩展）
+    # 外部依赖（doctor/部署检查用）
+    external_bins_required: set[str]
+    external_bins_optional: set[str]
+    # 可见性：是否在 SYSTEM_PROMPT 的“可用工具清单”中展示
+    visible_in_prompt: bool
+    # 是否允许被模型直接调用（业界做法：把“运行时能力/诊断项”与“可调用工具”隔离）
+    callable_by_model: bool
+    # exec 工具需要安全评估的命令参数键名（默认为 "command"）
+    exec_command_key: str | None
     handler: ToolHandler
 
 
@@ -91,11 +100,9 @@ def _obj_schema(*, properties: dict[str, Any], required: list[str] | None = None
     }
 
 
-def iter_tool_specs() -> Iterable[ToolSpec]:
-    """
-    返回所有工具规范（保持稳定顺序）。
-    """
-    yield ToolSpec(
+def _spec_list_dir() -> ToolSpec:
+    """ToolSpec：list_dir（只读）。"""
+    return ToolSpec(
         name="list_dir",
         summary="列出目录内容（只读）。",
         args_schema=_obj_schema(
@@ -104,9 +111,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"path": "."},
         side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_list_dir,
     )
-    yield ToolSpec(
+
+
+def _spec_read_file() -> ToolSpec:
+    """ToolSpec：read_file（只读）。"""
+    return ToolSpec(
         name="read_file",
         summary="读取文件内容（只读，支持 offset/limit 分段）。",
         args_schema=_obj_schema(
@@ -119,9 +135,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"path": "README.md", "offset": 1, "limit": 200},
         side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_read_file,
     )
-    yield ToolSpec(
+
+
+def _spec_glob_file_search() -> ToolSpec:
+    """ToolSpec：glob_file_search（只读）。"""
+    return ToolSpec(
         name="glob_file_search",
         summary="按文件名模式查找文件（只读，支持 ** 递归）。",
         args_schema=_obj_schema(
@@ -133,9 +158,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"glob_pattern": "**/*.py", "target_directory": "."},
         side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_glob_file_search,
     )
-    yield ToolSpec(
+
+
+def _spec_grep() -> ToolSpec:
+    """ToolSpec：grep（只读；优先 rg）。"""
+    return ToolSpec(
         name="grep",
         summary="代码搜索（优先 rg，fallback Python）。",
         args_schema=_obj_schema(
@@ -149,9 +183,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"pattern": "class\\s+AgentLoop", "path": "src", "ignore_case": False, "max_hits": 200},
         side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional={"rg"},
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_grep,
     )
-    yield ToolSpec(
+
+
+def _spec_apply_patch() -> ToolSpec:
+    """ToolSpec：apply_patch（写文件）。"""
+    return ToolSpec(
         name="apply_patch",
         summary="补丁式编辑（写文件，支持 fuzzy）。",
         args_schema=_obj_schema(
@@ -165,11 +208,27 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
             },
             required=["path", "old", "new"],
         ),
-        example_args={"path": "src/a.py", "old": "x = 1", "new": "x = 2", "expected_replacements": 1, "fuzzy": False, "min_similarity": 0.92},
+        example_args={
+            "path": "src/a.py",
+            "old": "x = 1",
+            "new": "x = 2",
+            "expected_replacements": 1,
+            "fuzzy": False,
+            "min_similarity": 0.92,
+        },
         side_effects={"write"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_apply_patch,
     )
-    yield ToolSpec(
+
+
+def _spec_undo_patch() -> ToolSpec:
+    """ToolSpec：undo_patch（写文件）。"""
+    return ToolSpec(
         name="undo_patch",
         summary="回滚补丁（写文件，基于 undo_id）。",
         args_schema=_obj_schema(
@@ -181,9 +240,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"undo_id": "undo_123", "force": False},
         side_effects={"write"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_undo_patch,
     )
-    yield ToolSpec(
+
+
+def _spec_write_file() -> ToolSpec:
+    """ToolSpec：write_file（写文件）。"""
+    return ToolSpec(
         name="write_file",
         summary="写入文件（写文件）。",
         args_schema=_obj_schema(
@@ -195,9 +263,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"path": "notes.txt", "text": "hello"},
         side_effects={"write"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_write_file,
     )
-    yield ToolSpec(
+
+
+def _spec_run_cmd() -> ToolSpec:
+    """ToolSpec：run_cmd（exec）。"""
+    return ToolSpec(
         name="run_cmd",
         summary="执行命令（可能有副作用，受策略约束）。",
         args_schema=_obj_schema(
@@ -209,9 +286,18 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"command": "python -m pytest -q", "cwd": "."},
         side_effects={"exec"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key="command",
         handler=_h_run_cmd,
     )
-    yield ToolSpec(
+
+
+def _spec_search_semantic() -> ToolSpec:
+    """ToolSpec：search_semantic（只读 + search）。"""
+    return ToolSpec(
         name="search_semantic",
         summary="语义检索（向量 RAG，只读）。",
         args_schema=_obj_schema(
@@ -220,8 +306,46 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
         ),
         example_args={"query": "向量索引在哪里实现？"},
         side_effects={"search", "read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
         handler=_h_search_semantic,
     )
+
+
+def _spec_internal_repo_map() -> ToolSpec:
+    """内部规范项：Repo Map 运行时能力（不允许模型调用，仅用于 doctor/诊断）。"""
+    return ToolSpec(
+        name="_repo_map",
+        summary="运行时能力：生成 Repo Map（依赖 ctags，可选）。",
+        args_schema=_obj_schema(properties={}, required=[]),
+        example_args={},
+        side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional={"ctags"},
+        visible_in_prompt=False,
+        callable_by_model=False,
+        exec_command_key=None,
+        handler=_h_list_dir,  # 占位：不会被 dispatch 调用（callable_by_model=False）
+    )
+
+
+def iter_tool_specs() -> Iterable[ToolSpec]:
+    """
+    返回所有工具规范（保持稳定顺序）。
+    """
+    yield _spec_list_dir()
+    yield _spec_read_file()
+    yield _spec_glob_file_search()
+    yield _spec_grep()
+    yield _spec_apply_patch()
+    yield _spec_undo_patch()
+    yield _spec_write_file()
+    yield _spec_run_cmd()
+    yield _spec_search_semantic()
+    yield _spec_internal_repo_map()
 
 
 # 注册表驱动（业界版）：同一份注册表 = tool dispatch + tool prompt/help 的来源
@@ -236,6 +360,8 @@ def render_tools_for_system_prompt(*, include_schema: bool = False) -> str:
     """
     lines: list[str] = []
     for spec in iter_tool_specs():
+        if not spec.visible_in_prompt:
+            continue
         ex = json.dumps(spec.example_args, ensure_ascii=False)
         lines.append(f"  - {spec.name}: {ex}")
         if include_schema:
@@ -256,6 +382,8 @@ def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolRes
         spec = TOOL_REGISTRY.get(name)
         if spec is None:
             return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"unknown tool: {name}"})
+        if not spec.callable_by_model:
+            return ToolResult(False, error={"code": "E_NO_TOOL", "message": f"tool not callable: {name}"})
         return spec.handler(loop, args)
     except KeyError as e:
         return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})

@@ -82,3 +82,36 @@
 ![Core Implementation Flow](assets/core_implementation_flow.svg)
 
 *(注：动画展示了从 CLI 输入到 Agent 编排再到 LLM 反馈的完整闭环，SVG 源码位于 `src/assets/core_implementation_flow.svg`)*
+
+---
+
+## 6. 命令行参数使用说明（排障/复盘必看）
+
+> 该章节用于研发/排障：明确“哪些参数会影响日志落盘、Live UI、模型选择与诊断行为”。
+
+### 6.1 `clude chat`
+- **`--debug`**：
+  - 控制台输出：展示摘要化事件轨迹（避免刷屏）
+  - 文件落盘：写入 `.clude/logs/trace.jsonl`（建议排障优先看这个）
+- **`--live`**：
+  - 50 行固定面板实时刷新（上半：系统架构/状态机/操作信息；下半：思考滚动窗口）
+  - 结束后保持最终状态显示（便于截图与复盘）
+  - 会自动启用 `--debug`
+- **`--model` / `--select-model`**：
+  - `--model`：显式指定 model id
+  - `--select-model`：从 `/v1/models` 列表交互选择（openai_compat）
+
+### 6.2 `clude tools`
+- **用途**：输出 ToolSpec 工具注册表（同源驱动：dispatch/prompt/doctor）。
+- **`--json --schema`**：建议用于把“工具契约（JSON Schema）”复制到需求/评审/文档中。
+- **`--all`**：包含内部/不可调用规范项（例如 `_repo_map`），用于诊断能力是否启用。
+
+### 6.3 `clude doctor`
+- **依赖检查**：从 ToolSpec 自动推导必需/推荐外部依赖（如 `rg`/`ctags`），不再硬编码。
+- **连通性检查**：会做一次最小 LLM 请求；如果失败，请优先检查：
+  - `CLUDE_LLM__BASE_URL` 是否正确
+  - llama.cpp 服务端是否正在运行、端口是否可访问
+  - `api_mode=openai_compat` 时服务端是否支持 `/v1/chat/completions`
+
+### 6.4 `clude models`
+- **用途**：`openai_compat` 模式下列出 `/v1/models` 返回的模型 id（用于 `--model` 或 `--select-model`）。

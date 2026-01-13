@@ -38,8 +38,11 @@ def run_tool_lifecycle(
             return ToolResult(ok=False, error={"code": "E_DENIED", "message": "User denied write access"})
         loop.logger.info(f"[green]✓ 用户确认写文件操作: {name}[/green]")
 
-    if name == "run_cmd":
-        cmd = str(args.get("command", ""))
+    if "exec" in side_effects:
+        cmd_key = (spec.exec_command_key if spec is not None else None) or "command"
+        cmd = str(args.get(cmd_key, ""))
+        if not cmd.strip():
+            return ToolResult(ok=False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {cmd_key}"})
         # 内部安全评估（黑名单）
         decision = evaluate_command(cmd, allow_network=loop.cfg.policy.allow_network)
         if not decision.ok:

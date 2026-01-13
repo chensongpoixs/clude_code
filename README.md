@@ -54,6 +54,63 @@ clude chat --debug
 
 ---
 
+## 3. CLI 命令参考（参数说明）
+
+> 参数以 `src/clude_code/cli/main.py` 为准；工具清单以 `ToolSpec` 注册表为准（`clude tools` 可直接打印）。
+
+### 3.1 `clude chat`
+- **用途**：进入交互式 Agent 会话（读/搜/改/跑命令/验证闭环）。
+- **常用参数**
+  - **`--model TEXT`**：指定 llama.cpp 的 model id
+  - **`--select-model`**：从 `/v1/models` 交互选择模型（openai_compat）
+  - **`--debug`**：输出可观测轨迹，并写入 `.clude/logs/trace.jsonl`
+  - **`--live`**：固定 50 行实时刷新 UI（开启后自动启用 `--debug`，结束后保持最终状态）
+
+```bash
+clude chat
+clude chat --debug
+clude chat --live
+clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
+```
+
+### 3.2 `clude tools`
+- **用途**：输出可用工具清单（同源 ToolSpec），用于排障/文档/脚本。
+- **参数**
+  - **`--schema`**：附带 JSON Schema
+  - **`--json`**：JSON 输出
+  - **`--all`**：包含内部/不可调用项（诊断用）
+
+```bash
+clude tools
+clude tools --json
+clude tools --json --schema
+```
+
+### 3.3 `clude doctor`
+- **用途**：诊断外部依赖（rg/ctags 等）、工作区读写、llama.cpp 连通性。
+- **参数**
+  - **`--fix`**：尝试自动安装/修复缺失依赖（会交互确认）
+
+```bash
+clude doctor
+clude doctor --fix
+```
+
+### 3.4 `clude models`
+- **用途**：列出 `/v1/models`（openai_compat）返回的模型 id。
+
+```bash
+clude models
+```
+
+### 3.5 `clude version`
+
+```bash
+clude version
+```
+
+---
+
 ## 3. 实现流程图 (Implementation Architecture)
 
 ![Core Implementation Flow](src/assets/core_implementation_flow.svg)
