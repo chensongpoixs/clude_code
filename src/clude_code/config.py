@@ -10,7 +10,7 @@ class LLMConfig(BaseModel):
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion |ggml-org/gemma-3-12b-it-GGUF
     model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=1024, ge=1)
+    max_tokens: int = Field(default=409600, ge=1)  # 配置LLM返回数据最大长度  你的预期文本长度是多少？ 
     timeout_s: int = Field(default=120, ge=1)
 
 
@@ -38,8 +38,8 @@ class OrchestratorConfig(BaseModel):
         default=True,
         description="是否启用显式规划（Plan -> Execute）。默认开启。",
     )
-    max_plan_steps: int = Field(default=8, ge=1, le=30, description="单次计划最大步骤数（避免计划过长）。")
-    max_step_tool_calls: int = Field(default=50, ge=1, le=50, description="单个步骤内最大工具调用次数（防止死循环）。")
+    max_plan_steps: int = Field(default=15, ge=1, le=30, description="单次计划最大步骤数（避免计划过长）。")
+    max_step_tool_calls: int = Field(default=500, ge=1, le=50, description="单个步骤内最大工具调用次数（防止死循环）。")
     max_replans: int = Field(default=2, ge=0, le=10, description="最大重规划次数（验证失败/卡住时）。")
     planning_retry: int = Field(default=1, ge=0, le=5, description="计划解析失败的重试次数。")
 
