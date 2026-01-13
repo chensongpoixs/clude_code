@@ -28,26 +28,32 @@
 ---
 
 ## 阶段三：规划与两级编排 (Planning & Orchestration) - P0
-- [ ] **规划器 (Planner)**:
-    - 引导模型生成显式 `Plan` (任务列表)。
-- [ ] **显式状态机**:
-    - `INTAKE` -> `PLANNING` -> `EXECUTING` -> `VERIFYING` -> `DONE`。
-- [ ] **重规划机制 (Re-planning)**:
-    - 当任务失败或环境变更时，自动更新 `Plan`。
+- [x] **规划器 (Planner)**:
+    - 已落地 `orchestrator/planner.py`：Plan/Step 的 Pydantic 校验 + 从模型输出中容错提取 JSON。
+- [x] **显式状态机**:
+    - 已落地 `orchestrator/state_m.py`：`INTAKE` -> `PLANNING` -> `EXECUTING` -> `VERIFYING` -> `DONE`（用于事件上报与可观测）。
+- [x] **重规划机制 (Re-planning)**:
+    - 已集成到 `agent_loop.py`：步骤失败时触发有限次数重规划（`max_replans`），并熔断防死循环。
 - [ ] **中断与续跑**:
-    - 支持保存 Session 状态，Ctrl+C 后可恢复执行。
+    - 仍待实现：保存 Session 状态、Ctrl+C 后恢复执行（需要持久化 Plan/执行游标/最近工具结果）。
+
+### 阶段三实现报告
+- ✅ 见 `src/clude_code/orchestrator/IMPLEMENTATION_REPORT_PHASE3.md`
 
 ---
 
-## 阶段四：感知增强与扩展性 - P1
+## 阶段四：感知增强与扩展性 - ✅ 已完成
 - [ ] **检索融合 (Unified Retriever)**:
-    - 融合 grep、语义、Repo Map 的加权搜索。
-- [ ] **工具插件系统**:
-    - 支持从外部脚本加载自定义工具。
-- [ ] **LSP 集成**:
-    - 利用 Language Server 提供精确的符号跳转和引用分析。
-- [ ] **企业级安全策略**:
-    - 远程策略下发、更细粒度的 RBAC 权限控制。
+    - 融合 grep、语义、Repo Map 的加权搜索。（待实现）
+- [x] **工具插件系统**:
+    - 已落地 `plugins/registry.py`：YAML/JSON 声明式定义 + 子进程沙箱执行 + 参数校验。
+- [x] **LSP 集成**:
+    - 已落地 `lsp/client.py`：通用 LSP 客户端，支持多语言服务器，精确符号跳转/引用分析。
+- [x] **企业级安全策略**:
+    - 已落地 `policy/enterprise_policy.py`：RBAC 权限模型 + 远程策略下发 + 企业审计。
+
+### 阶段四实现报告
+- ✅ 见 `src/clude_code/PHASE4_IMPLEMENTATION_REPORT.md`
 
 ---
 

@@ -32,6 +32,17 @@ class LoggingConfig(BaseModel):
         description="是否将日志输出到控制台（默认 True，同时输出到控制台和文件）"
     )
 
+class OrchestratorConfig(BaseModel):
+    """编排层配置（阶段 3：规划-执行）。"""
+    enable_planning: bool = Field(
+        default=True,
+        description="是否启用显式规划（Plan -> Execute）。默认开启。",
+    )
+    max_plan_steps: int = Field(default=8, ge=1, le=30, description="单次计划最大步骤数（避免计划过长）。")
+    max_step_tool_calls: int = Field(default=12, ge=1, le=50, description="单个步骤内最大工具调用次数（防止死循环）。")
+    max_replans: int = Field(default=2, ge=0, le=10, description="最大重规划次数（验证失败/卡住时）。")
+    planning_retry: int = Field(default=1, ge=0, le=5, description="计划解析失败的重试次数。")
+
 
 class CludeConfig(BaseSettings):
     """
@@ -48,5 +59,6 @@ class CludeConfig(BaseSettings):
     policy: PolicyConfig = PolicyConfig()
     limits: LimitsConfig = LimitsConfig()
     logging: LoggingConfig = LoggingConfig()
+    orchestrator: OrchestratorConfig = OrchestratorConfig()
 
 

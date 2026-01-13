@@ -15,6 +15,8 @@ from clude_code.knowledge.indexer_service import IndexerService
 from clude_code.knowledge.embedder import CodeEmbedder
 from clude_code.knowledge.vector_store import VectorStore
 from clude_code.verification.runner import Verifier
+from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
+from clude_code.orchestrator.state_m import AgentState
 
 
 SYSTEM_PROMPT = """\
@@ -293,14 +295,476 @@ class AgentLoop:
                     # Never allow UI callbacks to break the agent loop.
                     pass
 
+        def _normalize_messages_for_llama(stage: str, *, step_id: str | None = None) -> None:
+            """
+            发送给 llama.cpp 前的“统一出口”规范化：
+            - 合并连续的 user/user 或 assistant/assistant（避免 chat template 报 500）
+            - 合并多条 system 到第一条 system（避免 system/system 或 system 插入导致不交替）
+            - 如果 system 后意外出现 assistant，则并入 system（保持严格 alternation）
+            备注：这不是“改逻辑”，只是“保证输入契约满足后端模板约束”。
+            """
+            if not self.messages:
+                return
+
+            original_len = len(self.messages)
+            merged_pairs = 0
+            merged_system = 0
+            merged_into_system_from_assistant = 0
+
+            # 1) 保留/合并 system
+            system_msg: ChatMessage | None = None
+            idx = 0
+            if self.messages[0].role == "system":
+                system_msg = self.messages[0]
+                idx = 1
+
+            out: list[ChatMessage] = []
+            if system_msg is not None:
+                out.append(system_msg)
+
+            expected = "user"  # system 后必须从 user 开始
+
+            # 2) 逐条规范化
+            for m in self.messages[idx:]:
+                role = m.role
+                content = m.content
+
+                # 多 system：并入第一条 system
+                if role == "system":
+                    if out and out[0].role == "system":
+                        merged_system += 1
+                        out[0] = ChatMessage(
+                            role="system",
+                            content=out[0].content + "\n\n" + content,
+                        )
+                        continue
+                    # 没有 system 则作为 system 起始
+                    out.insert(0, m)
+                    continue
+
+                # system 后出现 assistant（不符合严格模板）：并入 system
+                if expected == "user" and (not out or out[-1].role == "system") and role == "assistant":
+                    if out and out[0].role == "system":
+                        merged_into_system_from_assistant += 1
+                        out[0] = ChatMessage(
+                            role="system",
+                            content=out[0].content + "\n\n" + "[历史 assistant 前置信息]\n" + content,
+                        )
+                        continue
+                    # 没有 system 时，直接丢弃这条 assistant（极少见）
+                    merged_pairs += 1
+                    continue
+
+                # 正常交替：按 expected 接入
+                if role == expected:
+                    out.append(m)
+                    expected = "assistant" if expected == "user" else "user"
+                    continue
+
+                # 非预期角色：只可能是连续 user/user 或 assistant/assistant
+                if out and out[-1].role == role:
+                    merged_pairs += 1
+                    out[-1] = ChatMessage(role=role, content=out[-1].content + "\n\n" + content)
+                    continue
+
+                # 兜底：无法解释的顺序，尽量并入上一条（避免新增破坏交替）
+                if out:
+                    merged_pairs += 1
+                    out[-1] = ChatMessage(role=out[-1].role, content=out[-1].content + "\n\n" + content)
+                    continue
+
+            # 3) 若发生变化，回写 self.messages，并上报事件用于 UI/调试
+            if len(out) != original_len or merged_pairs or merged_system or merged_into_system_from_assistant:
+                self.messages = out
+                self._trim_history(max_messages=30)
+                _ev(
+                    "messages_normalized",
+                    {
+                        "stage": stage,
+                        "step_id": step_id,
+                        "before": original_len,
+                        "after": len(self.messages),
+                        "merged_pairs": merged_pairs,
+                        "merged_system": merged_system,
+                        "merged_assistant_into_system": merged_into_system_from_assistant,
+                    },
+                )
+
+        def _llm_chat(stage: str, *, step_id: str | None = None) -> str:
+            """
+            llama.cpp 调用统一出口：
+            - 先做 messages 规范化（保证 role 交替）
+            - 再发起 HTTP 请求
+            """
+            _normalize_messages_for_llama(stage, step_id=step_id)
+            return self.llm.chat(self.messages)
+
+        # ---- Phase 3: Explicit Planning & Two-level Orchestration ----
+        current_state: AgentState = AgentState.INTAKE
+
+        def _set_state(state: AgentState, info: dict[str, Any] | None = None) -> None:
+            nonlocal current_state
+            current_state = state
+            payload = {"state": state.value}
+            if info:
+                payload.update(info)
+            _ev("state", payload)
+
+        # 注意：llama.cpp 的 chat template 可能要求严格 user/assistant 交替。
+        # 因此在“规划阶段”我们不能再额外插入一个连续的 user 消息。
+        # 做法：把“进入规划”的提示并入同一条 user 消息内容中（仍保留原始 user_text 的审计记录）。
+        planning_prompt = None
+        if self.cfg.orchestrator.enable_planning:
+            planning_prompt = (
+                "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
+                "JSON 必须符合以下结构：\n"
+                "{\n"
+                '  \"title\": \"任务全局目标\",\n'
+                '  \"steps\": [\n'
+                "    {\n"
+                '      \"id\": \"step_1\",\n'
+                '      \"description\": \"可执行且可验证的动作（可跨文件）\",\n'
+                '      \"dependencies\": [],\n'
+                '      \"status\": \"pending\",\n'
+                '      \"tools_expected\": [\"read_file\",\"grep\",\"apply_patch\"]\n'
+                "    }\n"
+                "  ],\n"
+                '  \"verification_policy\": \"run_verify\" \n'
+                "}\n\n"
+                f"要求：steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。"
+            )
+
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
-        self.messages.append(ChatMessage(role="user", content=user_text))
+        user_content = user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
+        self.messages.append(ChatMessage(role="user", content=user_content))
         # Keep history bounded to reduce context size
         self._trim_history(max_messages=30)
         self.logger.debug(f"[dim]当前消息历史长度: {len(self.messages)}[/dim]")
 
         tool_used = False
+        did_modify_code = False
+
+        # 1) 规划阶段：尝试生成显式 Plan（跨文件任务更稳健）
+        plan: Plan | None = None
+        if self.cfg.orchestrator.enable_planning:
+            _set_state(AgentState.PLANNING, {"reason": "enable_planning"})
+            self.logger.info("[bold magenta]🧩 进入规划阶段：生成显式 Plan[/bold magenta]")
+
+            plan_attempts = 0
+            while plan_attempts <= self.cfg.orchestrator.planning_retry:
+                plan_attempts += 1
+                _ev("planning_llm_request", {"attempt": plan_attempts})
+                assistant_plan = _llm_chat("planning", step_id=None)
+                _ev("planning_llm_response", {"text": assistant_plan[:4000], "truncated": len(assistant_plan) > 4000})
+
+                # 保存 assistant 输出，保持对话完整可回放
+                self.messages.append(ChatMessage(role="assistant", content=assistant_plan))
+                self._trim_history(max_messages=30)
+                try:
+                    parsed = parse_plan_from_text(assistant_plan)
+                    # 软限制：截断过长计划
+                    if len(parsed.steps) > self.cfg.orchestrator.max_plan_steps:
+                        parsed.steps = parsed.steps[: self.cfg.orchestrator.max_plan_steps]
+                    plan = parsed
+                    self.audit.write(
+                        trace_id=trace_id,
+                        event="plan_generated",
+                        data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps]},
+                    )
+                    _ev("plan_generated", {"title": plan.title, "steps": len(plan.steps)})
+                    self.logger.info("[green]✓ 计划生成成功[/green]")
+                    # 展示计划摘要（便于用户 review 和调试）
+                    plan_summary = render_plan_markdown(plan)
+                    self.logger.info(f"[dim]计划摘要:\n{plan_summary}[/dim]")
+                    self.file_only_logger.info("生成计划:\n" + plan_summary)
+                    break
+                except Exception as e:
+                    self.logger.warning(f"[yellow]⚠ 计划解析失败（attempt={plan_attempts}）: {e}[/yellow]")
+                    self.audit.write(trace_id=trace_id, event="plan_parse_failed", data={"attempt": plan_attempts, "error": str(e)})
+                    _ev("plan_parse_failed", {"attempt": plan_attempts, "error": str(e)})
+                    # 给模型一次自纠机会
+                    self.messages.append(
+                        ChatMessage(
+                            role="user",
+                            content="上面的输出无法解析为 Plan JSON。请只输出一个严格 JSON 对象（不要解释，不要代码块）。",
+                        )
+                    )
+                    self._trim_history(max_messages=30)
+
+        # 2) 执行阶段：有 Plan 就按步执行；否则降级为旧的 ReAct 循环
+        if plan is not None:
+            _set_state(AgentState.EXECUTING, {"steps": len(plan.steps)})
+            self.logger.info("[bold magenta]▶ 进入执行阶段：按 Plan 步骤编排[/bold magenta]")
+
+            replans_used = 0
+            step_cursor = 0
+            while True:
+                if plan is None:
+                    break
+                if step_cursor >= len(plan.steps):
+                    break
+
+                step = plan.steps[step_cursor]
+
+                # 依赖检查：确保所有依赖步骤已完成
+                completed_ids = {s.id for s in plan.steps if s.status == "done"}
+                unmet_deps = [dep for dep in step.dependencies if dep not in completed_ids]
+                if unmet_deps:
+                    self.logger.warning(f"[yellow]⚠ 步骤 {step.id} 有未满足的依赖: {unmet_deps}，跳过并标记为 blocked[/yellow]")
+                    step.status = "blocked"
+                    self.audit.write(trace_id=trace_id, event="plan_step_blocked", data={"step_id": step.id, "unmet_deps": unmet_deps})
+                    _ev("plan_step_blocked", {"step_id": step.id, "unmet_deps": unmet_deps})
+                    step_cursor += 1
+                    continue
+
+                step.status = "in_progress"
+                self.audit.write(trace_id=trace_id, event="plan_step_start", data={"step_id": step.id, "description": step.description})
+                _ev("plan_step_start", {"step_id": step.id, "idx": step_cursor + 1, "total": len(plan.steps)})
+
+                # 每个步骤内部，允许若干次工具调用（防止死循环）
+                for iteration in range(self.cfg.orchestrator.max_step_tool_calls):
+                    self.logger.info(
+                        f"[bold yellow]→ 执行步骤 {step_cursor + 1}/{len(plan.steps)}: {step.id}（轮次 {iteration + 1}/{self.cfg.orchestrator.max_step_tool_calls}）[/bold yellow]"
+                    )
+                    _ev("llm_request", {"messages": len(self.messages), "step_id": step.id, "iteration": iteration + 1})
+
+                    step_prompt = (
+                        f"现在执行计划步骤：{step.id}\n"
+                        f"步骤描述：{step.description}\n"
+                        f"建议工具：{', '.join(step.tools_expected) if step.tools_expected else '（自行选择）'}\n\n"
+                        "规则：\n"
+                        "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
+                        "2) 如果本步骤已完成且不需要工具：只输出字符串【STEP_DONE】。\n"
+                        "3) 如果本步骤失败且需要重规划：只输出字符串【REPLAN】。\n"
+                    )
+                    self.messages.append(ChatMessage(role="user", content=step_prompt))
+                    self._trim_history(max_messages=30)
+
+                    assistant = _llm_chat("execute_step", step_id=step.id)
+                    _ev("llm_response", {"text": assistant[:4000], "truncated": len(assistant) > 4000, "step_id": step.id})
+
+                    # stuttering 防护沿用
+                    if assistant.count("[") > 50 or assistant.count("{") > 50:
+                        self.logger.warning("[red]检测到模型输出异常（复读字符），已强制截断[/red]")
+                        assistant = "模型输出异常：检测到过多的重复字符，已强制截断。"
+                        _ev("stuttering_detected", {"length": len(assistant), "step_id": step.id})
+
+                    # 先检查控制标记（容错：允许模型输出额外空格、换行或带中文标点）
+                    a_strip = assistant.strip()
+                    # 容错匹配 STEP_DONE
+                    if "STEP_DONE" in a_strip or "【STEP_DONE】" in a_strip or a_strip.upper().startswith("STEP_DONE"):
+                        self.messages.append(ChatMessage(role="assistant", content=assistant))
+                        self._trim_history(max_messages=30)
+                        step.status = "done"
+                        self.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
+                        _ev("plan_step_done", {"step_id": step.id})
+                        break
+                    # 容错匹配 REPLAN
+                    if "REPLAN" in a_strip or "【REPLAN】" in a_strip or a_strip.upper().startswith("REPLAN"):
+                        self.messages.append(ChatMessage(role="assistant", content=assistant))
+                        self._trim_history(max_messages=30)
+                        step.status = "failed"
+                        self.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
+                        _ev("plan_step_replan_requested", {"step_id": step.id})
+                        break
+
+                    # 尝试解析工具调用
+                    tool_call = _try_parse_tool_call(assistant)
+                    if tool_call is None:
+                        # 未给出工具，也没给出 DONE/REPLAN：提示模型纠正，继续本步骤
+                        self.messages.append(ChatMessage(role="assistant", content=assistant))
+                        self._trim_history(max_messages=30)
+                        self.messages.append(
+                            ChatMessage(
+                                role="user",
+                                content="你的输出既不是工具调用 JSON，也不是【STEP_DONE】/【REPLAN】。请严格按规则输出。",
+                            )
+                        )
+                        self._trim_history(max_messages=30)
+                        continue
+
+                    name = tool_call["tool"]
+                    args = tool_call["args"]
+                    _ev("tool_call_parsed", {"tool": name, "args": args, "step_id": step.id})
+
+                    # 记录 assistant 的工具调用 JSON（保持 llama.cpp role 交替）
+                    clean_assistant = json.dumps(tool_call, ensure_ascii=False)
+                    self.messages.append(ChatMessage(role="assistant", content=clean_assistant))
+                    self._trim_history(max_messages=30)
+
+                    # confirmations + policy（复用现有逻辑）
+                    if name in {"write_file", "apply_patch", "undo_patch"} and self.cfg.policy.confirm_write:
+                        decision = confirm(f"确认写文件？tool={name} args={args}")
+                        self.audit.write(trace_id=trace_id, event="confirm_write", data={"tool": name, "args": args, "allow": decision})
+                        _ev("confirm_write", {"tool": name, "allow": decision, "step_id": step.id})
+                        if not decision:
+                            msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}), keywords=keywords)
+                            self.messages.append(ChatMessage(role="user", content=msg))
+                            self._trim_history(max_messages=30)
+                            continue
+
+                    if name == "run_cmd" and self.cfg.policy.confirm_exec:
+                        decision = confirm(f"确认执行命令？tool={name} args={args}")
+                        self.audit.write(trace_id=trace_id, event="confirm_exec", data={"tool": name, "args": args, "allow": decision})
+                        _ev("confirm_exec", {"tool": name, "allow": decision, "step_id": step.id})
+                        if not decision:
+                            msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_DENIED", "message": "user denied"}), keywords=keywords)
+                            self.messages.append(ChatMessage(role="user", content=msg))
+                            self._trim_history(max_messages=30)
+                            continue
+
+                    if name == "run_cmd":
+                        cmd_str = str(args.get("command", ""))
+                        dec = evaluate_command(cmd_str, allow_network=self.cfg.policy.allow_network)
+                        if not dec.ok:
+                            self.audit.write(trace_id=trace_id, event="policy_deny_cmd", data={"command": cmd_str, "reason": dec.reason})
+                            _ev("policy_deny_cmd", {"command": cmd_str, "reason": dec.reason, "step_id": step.id})
+                            msg = _tool_result_to_message(name, ToolResult(False, error={"code": "E_POLICY_DENIED", "message": dec.reason}), keywords=keywords)
+                            self.messages.append(ChatMessage(role="user", content=msg))
+                            self._trim_history(max_messages=30)
+                            continue
+
+                    tool_used = True
+                    result = self._dispatch_tool(name, args)
+
+                    if name in {"write_file", "apply_patch", "undo_patch"} and result.ok:
+                        did_modify_code = True
+
+                    # Phase2 验证闭环：保持现有行为（工具后触发）
+                    if result.ok and name in {"write_file", "apply_patch", "undo_patch", "run_cmd"}:
+                        v_res = self.verifier.run_verify()
+                        _ev("autofix_check", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary, "step_id": step.id})
+                        if not v_res.ok:
+                            v_msg = f"\n\n[验证失败 - 自动自检结果]\n状态: {v_res.summary}\n"
+                            if v_res.errors:
+                                v_msg += "具体错误:\n"
+                                for err in v_res.errors:
+                                    v_msg += f"- {err.file}:{err.line} {err.message}\n"
+                            if result.payload is None:
+                                result = ToolResult(ok=True, payload={"verification_error": v_msg})
+                            else:
+                                result.payload["verification_error"] = v_msg
+
+                    _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "step_id": step.id})
+                    self.messages.append(ChatMessage(role="user", content=_tool_result_to_message(name, result, keywords=keywords)))
+                    self._trim_history(max_messages=30)
+                    self.audit.write(trace_id=trace_id, event="tool_call", data={"tool": name, "args": args, "ok": result.ok, "error": result.error})
+
+                # 步骤迭代循环结束后强制熔断：如果状态仍是 in_progress，标记为 failed（防止无限循环）
+                if step.status == "in_progress":
+                    self.logger.warning(f"[yellow]⚠ 步骤 {step.id} 达到最大迭代次数但未完成，强制标记为 failed[/yellow]")
+                    step.status = "failed"
+                    self.audit.write(trace_id=trace_id, event="plan_step_max_iter", data={"step_id": step.id, "max_iter": self.cfg.orchestrator.max_step_tool_calls})
+                    _ev("plan_step_max_iter", {"step_id": step.id, "max_iter": self.cfg.orchestrator.max_step_tool_calls})
+
+                # 步骤结束后，根据状态推进
+                if step.status == "done":
+                    step_cursor += 1
+                    continue
+
+                # 如果步骤要求重规划：限制次数，避免无限循环
+                if step.status == "failed":
+                    if replans_used >= self.cfg.orchestrator.max_replans:
+                        self.logger.warning("[red]⚠ 达到最大重规划次数，停止[/red]")
+                        _ev("stop_reason", {"reason": "max_replans_reached", "limit": self.cfg.orchestrator.max_replans})
+                        return AgentTurn(
+                            assistant_text="达到最大重规划次数，已停止。请缩小任务或提供更明确的入口文件/目标。",
+                            tool_used=tool_used,
+                            trace_id=trace_id,
+                            events=events,
+                        )
+
+                    replans_used += 1
+                    # 先进入 RECOVERING 状态（用于 UI 展示和审计）
+                    _set_state(AgentState.RECOVERING, {"reason": "step_failed", "step_id": step.id, "replans_used": replans_used})
+                    _set_state(AgentState.PLANNING, {"reason": "replan", "replans_used": replans_used})
+                    self.logger.info(f"[bold magenta]🔁 触发重规划（第 {replans_used} 次）[/bold magenta]")
+
+                    replan_prompt = (
+                        "出现阻塞/失败，需要重规划。请输出新的 Plan JSON（严格 JSON，不要解释，不要调用工具）。\n"
+                        f"限制：steps 不超过 {self.cfg.orchestrator.max_plan_steps}。\n"
+                        "请结合当前对话中的错误与工具反馈，生成更可执行的步骤。"
+                    )
+                    self.messages.append(ChatMessage(role="user", content=replan_prompt))
+                    self._trim_history(max_messages=30)
+                    assistant_plan = _llm_chat("replan", step_id=step.id)
+                    self.messages.append(ChatMessage(role="assistant", content=assistant_plan))
+                    self._trim_history(max_messages=30)
+                    try:
+                        plan = parse_plan_from_text(assistant_plan)
+                        if len(plan.steps) > self.cfg.orchestrator.max_plan_steps:
+                            plan.steps = plan.steps[: self.cfg.orchestrator.max_plan_steps]
+                        self.audit.write(
+                            trace_id=trace_id,
+                            event="plan_replanned",
+                            data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps], "replans_used": replans_used},
+                        )
+                        _ev("plan_replanned", {"title": plan.title, "steps": len(plan.steps), "replans_used": replans_used})
+                        _set_state(AgentState.EXECUTING, {"steps": len(plan.steps)})
+                        step_cursor = 0
+                        continue
+                    except Exception as e:
+                        self.logger.warning(f"[yellow]⚠ 重规划解析失败: {e}[/yellow]")
+                        self.audit.write(trace_id=trace_id, event="plan_replan_parse_failed", data={"error": str(e)})
+                        _ev("plan_replan_parse_failed", {"error": str(e)})
+                        # 失败则降级退出
+                        return AgentTurn(
+                            assistant_text="重规划失败（无法解析 Plan JSON）。请手动提供更明确的拆分步骤或入口文件。",
+                            tool_used=tool_used,
+                            trace_id=trace_id,
+                            events=events,
+                        )
+
+                # 处理 blocked 步骤：检查是否所有步骤都被 blocked（死锁检测）
+                if step.status == "blocked":
+                    all_blocked_or_done = all(s.status in ("blocked", "done") for s in plan.steps)
+                    if all_blocked_or_done and any(s.status == "blocked" for s in plan.steps):
+                        self.logger.error("[red]✗ 检测到依赖死锁：所有未完成步骤都处于 blocked 状态[/red]")
+                        _ev("stop_reason", {"reason": "dependency_deadlock"})
+                        return AgentTurn(
+                            assistant_text="检测到依赖死锁：所有未完成步骤都处于 blocked 状态。请检查计划中的依赖关系。",
+                            tool_used=tool_used,
+                            trace_id=trace_id,
+                            events=events,
+                        )
+                    step_cursor += 1
+                    continue
+
+                # 其他状态（卡住/未完成）：熔断
+                _ev("stop_reason", {"reason": "step_not_completed", "step_id": step.id})
+                return AgentTurn(
+                    assistant_text=f"步骤未能完成且未触发重规划：{step.id}。请缩小该步骤或提供更多约束。",
+                    tool_used=tool_used,
+                    trace_id=trace_id,
+                    events=events,
+                )
+
+            # 3) 最终验证阶段（如果本轮有修改代码）
+            _set_state(AgentState.VERIFYING, {"did_modify_code": did_modify_code})
+            if did_modify_code:
+                self.logger.info("[bold magenta]🔍 进入最终验证阶段[/bold magenta]")
+                v_res = self.verifier.run_verify()
+                _ev("final_verify", {"ok": v_res.ok, "type": v_res.type, "summary": v_res.summary})
+                if not v_res.ok:
+                    # 最终验证失败：作为最终输出返回（也可在未来引入自动修复回合）
+                    text = f"最终验证失败：{v_res.summary}\n"
+                    if v_res.errors:
+                        for err in v_res.errors[:10]:
+                            text += f"- {err.file}:{err.line} {err.message}\n"
+                    _set_state(AgentState.DONE, {"ok": False})
+                    return AgentTurn(assistant_text=text, tool_used=tool_used, trace_id=trace_id, events=events)
+
+            _set_state(AgentState.DONE, {"ok": True})
+            return AgentTurn(
+                assistant_text=f"计划执行完成：{plan.title}\n（已按步骤执行并完成自检）",
+                tool_used=tool_used,
+                trace_id=trace_id,
+                events=events,
+            )
+
+        # ---- Fallback: original single-level ReAct loop ----
+        _set_state(AgentState.EXECUTING, {"mode": "react_fallback"})
         for iteration in range(20):  # hard stop to avoid infinite loops
             self.logger.info(f"[bold yellow]→ 第 {iteration + 1} 轮：请求 LLM（消息数={len(self.messages)}）[/bold yellow]")
             _ev("llm_request", {"messages": len(self.messages)})
@@ -324,7 +788,7 @@ class AgentLoop:
             }
             self.file_only_logger.info(f"请求大模型参数: {json.dumps(request_params, ensure_ascii=False, indent=2)}")
             
-            assistant = self.llm.chat(self.messages)
+            assistant = _llm_chat("react_fallback", step_id=None)
             
             # Robustness: Detect repetitive/broken outputs (stuttering)
             if assistant.count("[") > 50 or assistant.count("{") > 50:

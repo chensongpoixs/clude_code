@@ -11,14 +11,16 @@
 ### 1.1 落地完成度 (Scorecard)
 | 维度 | 实现模块 | 落地程度 | 业界对比水平 |
 | :--- | :--- | :--- | :--- |
- | **验证闭环** | `verification/` | 100% | **高**: 实现了零配置探测、自动化测试运行及错误结构化回馈自愈。 |
+ | **验证闭环** | `verification/` | 100% | **高**: 零配置探测 + 命令白名单 + 环境隔离 + 多语言解析器（Python/Node.js/Go/Rust）。 |
 | **基础交互** | `cli/main.py` | 85% | **高**: 交互流畅，支持交互式自动修复 (--fix)。 |
- | **核心编排** | `orchestrator/agent_loop.py` | 85% | **高**: 已具备人格硬化、吐字防抖、CoT 自动剥离及历史压缩。 |
+| **核心编排** | `orchestrator/agent_loop.py` + `orchestrator/planner.py` | 95% | **高**: 显式 Plan→依赖调度→按步执行→失败重规划→最终验证的两级编排；支持死锁检测、步骤 ID 校验、信号容错。 |
  | **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
  | **工具箱** | `tooling/local_tools.py` | 88% | **高**: 增强了 apply_patch 的多点模糊匹配与 undo_patch 的哈希追踪。 |
  | **知识/RAG** | `knowledge/` | 70% | **中**: 落地 LanceDB 异步索引，支持语义召回。 |
  | **语义增强** | `tooling/feedback.py` | 85% | **中**: 实现了语义逻辑锚点（if/for/return）及动态 20 行采样窗口。 |
- | **安全策略** | `policy/command_policy.py` | 65% | **中**: Denylist 完备，缺动态权限流。 |
+ | **安全策略** | `policy/command_policy.py` + `enterprise_policy.py` | 90% | **高**: Denylist + RBAC 权限模型 + 远程策略下发 + 企业级审计。 |
+| **LSP 集成** | `lsp/client.py` | 85% | **高**: 通用 LSP 客户端，支持多语言服务器，精确符号跳转/引用分析。 |
+| **插件系统** | `plugins/registry.py` | 88% | **高**: YAML/JSON 声明式定义 + 子进程沙箱执行 + 参数校验。 |
 | **审计追溯** | `observability/audit.py` + `observability/trace.py` | 72% | **中**: JSONL 全记录；patch/undo 含 hash 证据链；debug 轨迹可落盘；缺回放/可视化。 |
 
 ---
@@ -44,11 +46,17 @@
  - **结构化回喂 + rg**: ✅ 已落地（`tooling/feedback.py` + grep 优先 `rg --json` + doctor 检测 rg）。分析见 `src/IMPLEMENTATION_ANALYSIS_FEEDBACK_RIPGREP.md`。
 
 ### 第二阶段：任务编排 (P1)
-- **Planning**: 让模型执行前先输出 `Plan`。
-- **Verification**: 引入自动化 `doctor` 和 `test` 运行反馈。
+- **Planning**: ✅ 已落地（Plan JSON 生成与校验、按步执行、失败重规划、状态机事件上报）。详见 `src/clude_code/orchestrator/IMPLEMENTATION_REPORT_PHASE3.md`。
+- **Verification**: ✅ 已落地（含命令白名单、环境隔离、多语言解析器）。详见 [`verification/ANALYSIS_REPORT.md`](./clude_code/verification/ANALYSIS_REPORT.md)。
 
 ### 第三阶段：上下文增强 (P2)
 - **Repo Indexing**: 实现基于 ctags 或简单文件摘要的仓库地图，提升召回质量。
+
+### 第四阶段：生态与扩展 (P3) ✅ 已完成
+- **LSP 集成**: ✅ 已落地（通用 LSP 客户端，支持多语言服务器）。详见 [`lsp/README.md`](./clude_code/lsp/README.md)。
+- **插件系统**: ✅ 已落地（YAML/JSON 声明式定义 + 子进程沙箱）。详见 [`plugins/README.md`](./clude_code/plugins/README.md)。
+- **企业策略**: ✅ 已落地（RBAC 权限模型 + 远程策略下发）。详见 [`policy/README_ENTERPRISE.md`](./clude_code/policy/README_ENTERPRISE.md)。
+- **实现报告**: [`PHASE4_IMPLEMENTATION_REPORT.md`](./clude_code/PHASE4_IMPLEMENTATION_REPORT.md)
 
 ---
 
@@ -60,9 +68,12 @@
 - [🧠 知识/RAG](./clude_code/knowledge/README.md)
 - [📡 LLM 适配](./clude_code/llm/README.md)
 - [👁️ 可观测性](./clude_code/observability/README.md)
-- [⚙️ 核心编排](./clude_code/orchestrator/README.md)
-- [🛡️ 安全策略](./clude_code/policy/README.md)
+- [⚙️ 核心编排](./clude_code/orchestrator/README.md) | [健壮性分析](./clude_code/orchestrator/PHASE3_ROBUSTNESS_ANALYSIS.md)
+- [🛡️ 安全策略](./clude_code/policy/README.md) | [企业策略](./clude_code/policy/README_ENTERPRISE.md)
 - [🛠️ 工具箱与回馈](./clude_code/tooling/README.md)
+- [✅ 验证闭环](./clude_code/verification/ANALYSIS_REPORT.md)
+- [🔌 LSP 集成](./clude_code/lsp/README.md) (Phase 4)
+- [🧩 插件系统](./clude_code/plugins/README.md) (Phase 4)
 
 ---
 

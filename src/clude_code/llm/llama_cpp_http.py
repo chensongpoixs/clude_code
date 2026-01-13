@@ -6,8 +6,11 @@ from typing import Any, Literal
 import httpx
 
 
-# 修复请求大模型多参数问题
-Role = Literal["system", "user"]; # "system", "user", "assistant", "tool"
+# Role 说明：
+# - llama.cpp 的 OpenAI-compatible 接口本身支持 system/user/assistant（部分模板还会支持 tool）
+# - 本项目当前会在消息历史中写入 assistant（例如工具调用 JSON、规划输出）
+# - 因此这里必须包含 assistant，否则类型标注会误导后续维护/静态检查
+Role = Literal["system", "user", "assistant"]  # 未来可扩展 "tool"
 
 
 @dataclass(frozen=True)
