@@ -370,7 +370,7 @@ class AgentLoop:
             "  ],\n"
             '  "verification_policy": "run_verify"\n'
             "}\n\n"
-            f"要求：steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。"
+            f"要求：1. steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。2. 最后一步要输出给生成详细思考流程，总结信息"
             # f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
             # "{\n"
             # "  \"id\": \"step_1\",\n"

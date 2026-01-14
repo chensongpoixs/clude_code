@@ -58,6 +58,6 @@ def read_file(
         res_payload["limit"] = limit
         return ToolResult(True, payload=res_payload)
     except Exception as e:
-        return ToolResult(False, error={"code": "E_READ", "message": str(e)})
+        return ToolResult(False, error={"code": "E_READ", "message": "[workspace_root:" + str(workspace_root) +"][max_file_read_bytes:"+str(max_file_read_bytes)+"][path:"+path+"][offset:"+str(offset)+"][limit:"+str(limit)+"][ e: "+str(e)+"]"})
 
 

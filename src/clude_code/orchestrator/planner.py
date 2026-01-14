@@ -92,7 +92,7 @@ def parse_plan_from_text(text: str) -> Plan:
             plan.validate_unique_ids()
             return plan
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
-            last_err = str(e)
+            last_err = str(e) + "[ candidates: " + candidates + "][ current: " + c + "]";
             continue
     raise ValueError(f"无法从模型输出中解析 Plan JSON。{('最后错误: ' + last_err) if last_err else ''}")
 

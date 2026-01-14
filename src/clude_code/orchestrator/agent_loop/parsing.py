@@ -36,7 +36,7 @@ def try_parse_tool_call(text: str) -> dict[str, Any] | None:
                     if body.startswith("{") and body.endswith("}"):
                         candidates.append(body)
 
-    if "{" in text and "}" in text:
+    if "{" in text and "}" in text and text.strip() != "{}":
         start = text.find("{")
         end = text.rfind("}")
         if 0 <= start < end:
