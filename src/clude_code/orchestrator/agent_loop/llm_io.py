@@ -144,7 +144,7 @@ def llm_chat(
             "stage": stage,
             "step_id": step_id,
             "text_length": len(assistant_text),
-            "text_preview": assistant_text[:500] + ("…" if len(assistant_text) > 500 else ""),
+            "text_preview": assistant_text,
         }
         log_llm_response_data_to_file(loop, assistant_text, tool_call=None)
         if _ev:
@@ -168,7 +168,7 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
         "messages": [
             {
                 "role": msg.role,
-                "content_preview": msg.content[:200] + "..." if len(msg.content) > 200 else msg.content,
+                "content_preview": msg.content,
                 "content_length": len(msg.content),
             }
             for msg in loop.messages
@@ -181,7 +181,7 @@ def log_llm_response_data_to_file(loop: "AgentLoop", assistant_text: str, tool_c
     """把本次 LLM 返回数据摘要写入 file_only_logger。"""
     response_data = {
         "text_length": len(assistant_text),
-        "text_preview": assistant_text[:500] + "..." if len(assistant_text) > 500 else assistant_text,
+        "text_preview":   assistant_text,
         "truncated": len(assistant_text) > 500,
         "has_tool_call": tool_call is not None,
         "tool_call": tool_call if tool_call else None,

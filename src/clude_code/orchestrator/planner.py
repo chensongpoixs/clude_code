@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, List, Optional
-
+from typing import Optional, List, Union;
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -42,12 +42,21 @@ class Plan(BaseModel):
             raise ValueError(f"步骤 ID 重复: {set(dups)}")
 
 
-def _extract_json_candidates(text: str) -> List[str]:
+#def _extract_json_candidates(text: str) -> List[str]:
+def _extract_json_candidates(text: Optional[Union[str, bytes]]) -> List[str]:
     """
     从 LLM 输出中提取可能的 JSON 对象字符串候选。
     - 允许夹杂解释文本
     - 允许 fenced code block
     """
+
+    if isinstance(text, bytes):
+        text = text.decode('utf-8')
+    elif text is None:
+        text = ""
+    elif not isinstance(text, str):
+        raise TypeError(f"_extract_json_candidates Expected str, got {type(text).__name__}")
+    # 后续代码...
     t = (text or "").strip()
     cands: List[str] = []
     if t.startswith("{") and t.endswith("}"):
