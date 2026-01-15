@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clude-code"
 version = "0.1.0"
-description = "A Claude Code-like local code agent CLI (Python) - docs & protocol first."
+description = "A Claude Code-like local code agent CLI (Python) - docs & protocol first.
+Provides full observability including metrics, tracing, and profiling capabilities."
 requires-python = ">=3.11"
 dependencies = [
   "typer>=0.12.0",
@@ -13,6 +14,7 @@ dependencies = [
   "pydantic-settings>=2.2.0",
   "rich>=13.7.0",
   "httpx>=0.27.0",
+  "psutil>=5.9.0",  # System metrics collection and performance analysis
 ]
 
 [project.optional-dependencies]
@@ -20,6 +22,8 @@ dev = [
   "ruff>=0.7.0",
   "mypy>=1.11.0",
   "pytest>=8.0.0",
+  "py-spy>=0.3.14",  # CPU profiling (optional, requires system-specific installation)
+  "memory-profiler>=0.61.0",  # Memory profiling (optional)
 ]
 
 [project.scripts]
@@ -70,4 +74,3 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-
