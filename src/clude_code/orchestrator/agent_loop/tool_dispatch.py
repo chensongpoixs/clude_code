@@ -292,12 +292,12 @@ def _spec_glob_file_search() -> ToolSpec:
         summary="按文件名模式查找文件（只读，支持 ** 递归）。",
         args_schema=_obj_schema(
             properties={
-                "glob_pattern": {"type": "string", "description": "glob 模式，例如 **/*.py"},
+                "glob_pattern": {"type": "string", "description": "glob 模式，例如 **/*.md, **/*.py, **/*.cpp, **/*.c, **/*.h, **/*.cc, **/*.java, **/*.js, **/*.ts, **/*.html, **/*.css, **/*.json, **/*.xml"},
                 "target_directory": {"type": "string", "default": ".", "description": "搜索根目录（相对工作区）"},
             },
             required=["glob_pattern"],
         ),
-        example_args={"glob_pattern": "**/*.py", "target_directory": "."},
+        example_args={"glob_pattern": "**/*.*", "target_directory": "."},
         side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -315,14 +315,14 @@ def _spec_grep() -> ToolSpec:
         summary="代码搜索（优先 rg，fallback Python）。",
         args_schema=_obj_schema(
             properties={
-                "pattern": {"type": "string", "description": "正则表达式"},
+                "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
                 "path": {"type": "string", "default": ".", "description": "搜索路径（相对工作区）"},
                 "ignore_case": {"type": "boolean", "default": False, "description": "是否忽略大小写"},
                 "max_hits": {"type": "integer", "default": 200, "minimum": 1, "description": "最多返回条数"},
             },
             required=["pattern"],
         ),
-        example_args={"pattern": "class\\s+AgentLoop", "path": "src", "ignore_case": False, "max_hits": 200},
+        example_args={"pattern": "class\\s+(?i)", "path": "src", "ignore_case": False, "max_hits": 200},
         side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional={"rg"},
@@ -350,7 +350,7 @@ def _spec_apply_patch() -> ToolSpec:
             required=["path", "old", "new"],
         ),
         example_args={
-            "path": "src/a.py",
+            "path": "src/*.*",
             "old": "x = 1",
             "new": "x = 2",
             "expected_replacements": 1,
