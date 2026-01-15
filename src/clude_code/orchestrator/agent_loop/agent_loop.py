@@ -561,35 +561,81 @@ class AgentLoop:
 
     def _trim_history(self, *, max_messages: int) -> None:
         """
-        裁剪对话历史，保持上下文窗口在合理范围内。
-        
+        高级对话历史裁剪，使用智能上下文管理和token预算。
+
         裁剪策略：
-        1. 始终保留第一条 system 消息（包含核心指令和 Repo Map）
-        2. 从尾部向前裁剪，但确保裁剪后的第一条消息是 'user' 角色
-           （满足 llama.cpp 等严格 chat template 的 user/assistant 交替要求）
-        3. 如果当前消息数 <= max_messages，则不进行裁剪
-        
+        1. 使用高级上下文管理器进行token-aware裁剪
+        2. 优先保留高优先级内容（系统消息、当前任务相关）
+        3. 智能压缩长内容以适应token预算
+        4. 保持对话的连贯性和角色交替
+
         参数:
-            max_messages: 最大保留消息数（包括 system 消息）
-        
+            max_messages: 最大保留消息数（兼容性参数，现主要使用token预算）
+
         流程图: 见 `agent_loop_trim_history_flow.svg`
         """
+        from clude_code.orchestrator.advanced_context import get_advanced_context_manager, ContextPriority
+
         old_len = len(self.messages)
-        if old_len <= max_messages:
+        if old_len <= 1:  # 至少保留system消息
             return
-        
-        system = self.messages[0]
-        # We need an odd number of messages in the tail if the last one is 'user'
-        # or just ensure the first message of the tail is 'user'.
-        tail_start_idx = len(self.messages) - (max_messages - 1)
-        
-        # Move forward until we find a 'user' message to keep parity
-        while tail_start_idx < len(self.messages) and self.messages[tail_start_idx].role != "user":
-            tail_start_idx += 1
-            
-        tail = self.messages[tail_start_idx:]
-        self.messages = [system, *tail]
-        self.logger.debug(f"[dim]历史裁剪: {old_len} → {len(self.messages)} 条消息[/dim]")
+
+        # 初始化上下文管理器
+        context_manager = get_advanced_context_manager(max_tokens=self.llm.max_tokens)
+
+        # 清空旧上下文
+        context_manager.clear_context(keep_system=True)
+
+        # 添加system消息（最高优先级）
+        if self.messages and self.messages[0].role == "system":
+            system_content = self.messages[0].content or ""
+            context_manager.add_system_context(system_content, ContextPriority.CRITICAL)
+
+        # 添加对话历史（按优先级分类）
+        for i, message in enumerate(self.messages[1:], 1):  # 跳过system消息
+            # 根据位置和内容确定优先级
+            if i >= len(self.messages) - 5:  # 最近5条消息
+                priority = ContextPriority.HIGH
+            elif i >= len(self.messages) - 15:  # 最近15条消息
+                priority = ContextPriority.MEDIUM
+            else:
+                priority = ContextPriority.LOW
+
+            context_manager.add_message(message, priority)
+
+        # 获取优化后的上下文
+        optimized_items = context_manager.optimize_context()
+
+        # 重建消息列表
+        new_messages = []
+
+        # 添加system消息
+        if self.messages and self.messages[0].role == "system":
+            new_messages.append(self.messages[0])
+
+        # 从优化后的上下文项重建消息
+        for item in optimized_items:
+            if item.category == "system":
+                continue  # system消息已添加
+
+            # 从metadata恢复原始消息
+            original_role = item.metadata.get("original_role", item.category)
+            message = ChatMessage(role=original_role, content=item.content)
+            new_messages.append(message)
+
+        # 如果优化后消息太少，至少保留最近的几条
+        if len(new_messages) < 3 and len(self.messages) > 3:
+            # 保留system + 最后两条对话
+            new_messages = [self.messages[0]] + self.messages[-4:] if len(self.messages) > 4 else self.messages
+
+        self.messages = new_messages
+
+        # 记录裁剪统计
+        stats = context_manager.get_context_stats()
+        self.logger.debug(
+            f"[dim]智能上下文裁剪: {old_len} → {len(self.messages)} 条消息, "
+            f"{stats.get('total_tokens', 0)} tokens ({stats.get('utilization_rate', 0):.1%})[/dim]"
+        )
 
     def _format_args_summary(self, tool_name: str, args: dict[str, Any]) -> str:
         """

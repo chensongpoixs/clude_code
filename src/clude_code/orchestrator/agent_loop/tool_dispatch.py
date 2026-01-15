@@ -15,30 +15,46 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _obj_schema(*, properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required or [],
+        "additionalProperties": False,
+    }
+
+
 ToolHandler = Callable[["AgentLoop", dict[str, Any]], ToolResult]
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     """
-    工具规范（业界做法：同一份“工具事实”驱动 dispatch、prompt、help、policy/doctor）。
+    工具规范（参考Claude Code：同一份"工具事实"驱动所有相关功能）。
     """
 
+    # 核心必需字段
     name: str
     summary: str
     args_schema: dict[str, Any]
     example_args: dict[str, Any]
-    side_effects: set[str]  # {"read","write","exec","search"}（可扩展）
-    # 外部依赖（doctor/部署检查用）
+    side_effects: set[str]
     external_bins_required: set[str]
     external_bins_optional: set[str]
-    # 可见性：是否在 SYSTEM_PROMPT 的“可用工具清单”中展示
     visible_in_prompt: bool
-    # 是否允许被模型直接调用（业界做法：把“运行时能力/诊断项”与“可调用工具”隔离）
     callable_by_model: bool
-    # exec 工具需要安全评估的命令参数键名（默认为 "command"）
     exec_command_key: str | None
     handler: ToolHandler
+
+    # 扩展可选字段
+    description: str = ""
+    category: str = "general"
+    priority: int = 0
+    cacheable: bool = False
+    timeout_seconds: int = 30
+    requires_confirmation: bool = False
+    version: str = "1.0.0"
+    deprecated: bool = False
 
     def validate_args(self, args: dict[str, Any]) -> tuple[bool, dict[str, Any] | str]:
         """
@@ -206,39 +222,34 @@ def _h_search_semantic(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
     """
     向用户输出信息（进度、分析结果、说明等）。
-    
+
     实现原理：
     1. 从 AgentLoop 获取当前的 _ev 回调和 trace_id
-    2. 调用 tooling/tools/display.py 中的 display 函数
-    3. 通过事件机制广播到 UI（--live 模式）
+    2. 通过 _ev("display", {...}) 触发界面更新
+    3. 返回 ToolResult 给模型（payload 包含显示内容）
     """
-    from clude_code.tooling.tools.display import display
-    
     content = args.get("content", "")
     level = args.get("level", "info")
     title = args.get("title")
-    
-    # 从 AgentLoop 获取当前的事件回调和 trace_id
-    _ev = getattr(loop, "_current_ev", None)
-    trace_id = getattr(loop, "_current_trace_id", None)
-    
-    return display(
-        loop=loop,
-        content=content,
-        level=level,
-        title=title,
-        _ev=_ev,
-        trace_id=trace_id,
-    )
+
+    # 触发界面显示事件
+    loop._ev("display", {
+        "content": content,
+        "level": level,
+        "title": title,
+        "timestamp": time.time(),
+    })
+
+    return ToolResult(True, payload={"displayed": True, "content": content})
 
 
-def _obj_schema(*, properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required or [],
-        "additionalProperties": False,
-    }
+def _h_internal_repo_map(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    return loop.tools.internal_repo_map()
+
+
+def _run_local_tool(name: str, args: dict[str, Any]) -> ToolResult:
+    """Legacy helper - should not be used in new code."""
+    raise NotImplementedError(f"_run_local_tool is deprecated. Use proper tool handlers instead.")
 
 
 def _spec_list_dir() -> ToolSpec:
@@ -442,11 +453,14 @@ def _spec_search_semantic() -> ToolSpec:
         name="search_semantic",
         summary="语义检索（向量 RAG，只读）。",
         args_schema=_obj_schema(
-            properties={"query": {"type": "string", "description": "查询文本"}},
+            properties={
+                "query": {"type": "string", "description": "自然语言查询"},
+                "max_results": {"type": "integer", "default": 10, "minimum": 1, "description": "最多返回条数"},
+            },
             required=["query"],
         ),
-        example_args={"query": "向量索引在哪里实现？"},
-        side_effects={"search", "read"},
+        example_args={"query": "用户认证逻辑", "max_results": 10},
+        side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -457,25 +471,18 @@ def _spec_search_semantic() -> ToolSpec:
 
 
 def _spec_display() -> ToolSpec:
-    """ToolSpec：display（输出显示，无副作用）。"""
+    """ToolSpec：display（只读）。"""
     return ToolSpec(
         name="display",
-        summary="向用户输出信息（进度、分析结果、说明等，支持 Markdown）。",
+        summary="显示消息给用户（只读）。",
         args_schema=_obj_schema(
             properties={
-                "content": {"type": "string", "description": "要显示的内容（支持 Markdown）"},
-                "level": {
-                    "type": "string",
-                    "enum": ["info", "success", "warning", "error", "progress"],
-                    "default": "info",
-                    "description": "消息级别（影响显示样式）",
-                },
-                "title": {"type": "string", "description": "可选标题（用于分段显示）"},
+                "message": {"type": "string", "description": "要显示的消息"},
             },
-            required=["content"],
+            required=["message"],
         ),
-        example_args={"content": "正在分析文件...", "level": "progress"},
-        side_effects=set(),  # 无副作用（只是输出信息）
+        example_args={"message": "操作已完成"},
+        side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -486,20 +493,112 @@ def _spec_display() -> ToolSpec:
 
 
 def _spec_internal_repo_map() -> ToolSpec:
-    """内部规范项：Repo Map 运行时能力（不允许模型调用，仅用于 doctor/诊断）。"""
+    """ToolSpec：internal_repo_map（只读）。"""
     return ToolSpec(
-        name="_repo_map",
-        summary="运行时能力：生成 Repo Map（依赖 ctags，可选）。",
+        name="internal_repo_map",
+        summary="生成代码仓库结构图（只读）。",
         args_schema=_obj_schema(properties={}, required=[]),
         example_args={},
         side_effects={"read"},
-        external_bins_required=set(),
-        external_bins_optional={"ctags"},
+        external_bins_required={"ctags"},
+        external_bins_optional=set(),
         visible_in_prompt=False,
         callable_by_model=False,
         exec_command_key=None,
-        handler=_h_list_dir,  # 占位：不会被 dispatch 调用（callable_by_model=False）
+        handler=_h_internal_repo_map,
     )
+
+
+def _spec_preview_multi_edit() -> ToolSpec:
+    return ToolSpec(
+        name="preview_multi_edit",
+        summary="预览多文件批量编辑的影响和风险",
+        description="在应用多文件编辑前预览所有变化，分析潜在风险和依赖关系。帮助用户做出明智的编辑决策。",
+        args_schema={
+            "type": "object",
+            "properties": {
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "文件路径"},
+                            "old_string": {"type": "string", "description": "要替换的旧内容"},
+                            "new_string": {"type": "string", "description": "替换成的新内容"}
+                        },
+                        "required": ["path", "old_string", "new_string"]
+                    },
+                    "description": "编辑任务列表"
+                }
+            },
+            "required": ["edits"]
+        },
+        example_args={
+            "edits": [
+                {
+                    "path": "src/main.py",
+                    "old_string": "def old_func():",
+                    "new_string": "def new_func():"
+                }
+            ]
+        },
+        side_effects={"read"},  # 只读操作，分析影响
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        category="file",
+        priority=2,
+        cacheable=False,  # 预览不缓存
+        timeout_seconds=30,
+        exec_command_key=None,
+        requires_confirmation=False,  # 预览不需要确认
+        version="1.0.0",
+        handler=_h_preview_multi_edit,
+    )
+
+
+def _h_preview_multi_edit(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理多文件编辑预览"""
+    try:
+        import asyncio
+        from clude_code.tooling.advanced_editing import get_advanced_code_editor
+
+        edits = args.get("edits", [])
+        if not edits:
+            return ToolResult(False, error={"code": "E_NO_EDITS", "message": "没有提供编辑任务"})
+
+        # 获取编辑器
+        editor = get_advanced_code_editor(loop.workspace_root)
+
+        # 运行预览（同步方式调用异步函数）
+        async def run_preview():
+            return await editor.preview_multi_file_edit(edits)
+
+        previews = asyncio.run(run_preview())
+
+        # 生成摘要
+        summary = editor.generate_edit_summary(previews)
+
+        return ToolResult(
+            True,
+            payload={
+                "preview_count": len(previews),
+                "summary": summary,
+                "previews": [
+                    {
+                        "file": str(p.file_path),
+                        "confidence": p.confidence,
+                        "impact_level": p.impact_level,
+                        "changes": len(p.line_changes)
+                    }
+                    for p in previews
+                ]
+            }
+        )
+
+    except Exception as e:
+        return ToolResult(False, error={"code": "E_PREVIEW_FAILED", "message": f"预览失败: {e}"})
 
 
 def iter_tool_specs() -> Iterable[ToolSpec]:
@@ -516,11 +615,25 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     yield _spec_run_cmd()
     yield _spec_search_semantic()
     yield _spec_display()
+    yield _spec_preview_multi_edit()
     yield _spec_internal_repo_map()
 
 
 # 注册表驱动（业界版）：同一份注册表 = tool dispatch + tool prompt/help 的来源
 TOOL_REGISTRY: dict[str, ToolSpec] = {s.name: s for s in iter_tool_specs()}
+
+# 新增：集成工具注册表管理器
+def get_tool_registry():
+    """获取工具注册表管理器"""
+    from clude_code.tooling.tool_registry import get_tool_registry as _get_registry
+    registry = _get_registry()
+
+    # 确保所有工具都已注册
+    for tool_spec in iter_tool_specs():
+        if not registry.get_tool(tool_spec.name):
+            registry.register_tool(tool_spec)
+
+    return registry
 
 
 def render_tools_for_system_prompt(*, include_schema: bool = False) -> str:

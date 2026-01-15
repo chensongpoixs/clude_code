@@ -12,15 +12,27 @@ console = Console()
 
 def run_tools_list(schema: bool, as_json: bool, all_specs: bool) -> None:
     """列出可用工具清单。"""
-    specs = [s for s in iter_tool_specs() if (all_specs or s.callable_by_model)]
+    # 使用新的工具注册表
+    from clude_code.orchestrator.agent_loop.tool_dispatch import get_tool_registry
+    registry = get_tool_registry()
+
+    specs = registry.list_tools(callable_only=not all_specs, include_deprecated=False)
+
     if as_json:
         payload = []
         for s in specs:
             obj = {
                 "name": s.name,
                 "summary": s.summary,
+                "description": s.description,
+                "category": s.category,
+                "priority": s.priority,
                 "side_effects": sorted(s.side_effects),
                 "example_args": s.example_args,
+                "cacheable": s.cacheable,
+                "timeout_seconds": s.timeout_seconds,
+                "requires_confirmation": s.requires_confirmation,
+                "version": s.version,
             }
             if schema:
                 obj["args_schema"] = s.args_schema
@@ -28,20 +40,42 @@ def run_tools_list(schema: bool, as_json: bool, all_specs: bool) -> None:
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
-    table = Table(title="clude 可用工具（ToolSpec 注册表）")
-    table.add_column("name", style="bold cyan")
-    table.add_column("side_effects", style="magenta")
-    table.add_column("summary", style="white")
-    if schema:
-        table.add_column("args_schema", style="dim")
+    # 按分类分组显示
+    categories = registry.get_categories()
 
-    for s in specs:
-        se = ",".join(sorted(s.side_effects)) if s.side_effects else "-"
-        row = [s.name, se, s.summary]
+    for category, count in categories.items():
+        console.print(f"\n[bold blue]{category.upper()}[/bold blue] 工具 ({count}个)")
+
+        category_tools = registry.list_tools(category=category, callable_only=not all_specs)
+        if not category_tools:
+            continue
+
+        table = Table(show_header=True, box=None)
+        table.add_column("工具名", style="bold cyan", width=15)
+        table.add_column("优先级", style="yellow", width=6, justify="center")
+        table.add_column("副作用", style="magenta", width=12)
+        table.add_column("描述", style="white")
         if schema:
-            row.append(json.dumps(s.args_schema, ensure_ascii=False))
-        table.add_row(*row)
-    console.print(table)
+            table.add_column("参数模式", style="dim", width=20)
+
+        for s in category_tools:
+            priority_icon = "⭐" * min(s.priority + 1, 3) if s.priority > 0 else "○"
+            se = ",".join(sorted(s.side_effects)) if s.side_effects else "-"
+            desc = s.description or s.summary
+
+            row = [s.name, priority_icon, se, desc[:50] + "..." if len(desc) > 50 else desc]
+            if schema:
+                schema_preview = str(s.args_schema.get('type', 'object')) + \
+                               f" ({len(s.args_schema.get('properties', {}))}参数)"
+                row.append(schema_preview)
+
+            table.add_row(*row)
+
+        console.print(table)
+
+    # 显示统计信息
+    total_tools = len(specs)
+    console.print(f"\n[dim]共 {total_tools} 个工具 | 按优先级和分类组织[/dim]")
 
 def run_models_list(logger: logging.Logger) -> None:
     """列出 llama.cpp 的模型列表。"""

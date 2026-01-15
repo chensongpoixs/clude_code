@@ -25,7 +25,8 @@ def apply_patch(
     min_similarity: float = 0.92,
 ) -> ToolResult:
     """
-    Patch-first editing（支持 fuzzy 单点替换）。
+    增强的Patch-first editing（参考Claude Code的最佳实践）。
+    支持精确匹配、模糊匹配、上下文感知和编辑影响分析。
     返回 payload 包含 before/after hash 与 undo_id。
     """
     p = resolve_in_workspace(workspace_root, path)
@@ -35,10 +36,20 @@ def apply_patch(
     before_text = p.read_text(encoding="utf-8", errors="replace")
     before_hash = _sha256_text(before_text)
 
-    replacements = 0
-    updated_text = before_text
+    # 增强的patch验证
+    from clude_code.tooling.enhanced_patching import get_enhanced_patch_engine
+    patch_engine = get_enhanced_patch_engine()
+
+    # 验证patch合理性
+    is_valid, validation_msg = patch_engine.validate_patch(before_text, old, new)
+    if not is_valid:
+        return ToolResult(False, error={"code": "E_VALIDATION_FAILED", "message": validation_msg})
+
+    # 首先尝试精确匹配
     mode = "exact"
     matched_similarity: float | None = None
+    replacements = 0
+    updated_text = before_text
 
     if old in before_text:
         count = before_text.count(old)
@@ -54,65 +65,52 @@ def apply_patch(
             replacements = expected_replacements
             updated_text = before_text.replace(old, new, expected_replacements)
     else:
+        # 精确匹配失败，尝试增强的上下文感知匹配
         if not fuzzy:
             return ToolResult(False, error={"code": "E_NOT_FOUND", "message": "old block not found in file"})
+
         if expected_replacements != 1:
             return ToolResult(False, error={"code": "E_UNSUPPORTED", "message": "fuzzy matching only supports expected_replacements=1"})
 
-        old_lines = old.splitlines()
-        file_lines = before_text.splitlines()
-        n = max(len(old_lines), 1)
+        # 使用增强patch引擎进行上下文匹配
+        success, error_msg, details = patch_engine.apply_patch_with_context(p, old, new)
 
-        anchor = ""
-        for ln in sorted((l.strip() for l in old_lines), key=len, reverse=True):
-            if ln:
-                anchor = ln[:120]
-                break
+        if not success:
+            return ToolResult(False, error={"code": "E_FUZZY_FAILED", "message": error_msg})
 
-        candidate_starts: list[int] = []
-        if anchor:
-            for i, ln in enumerate(file_lines):
-                if anchor in ln:
-                    candidate_starts.append(max(i - n // 2, 0))
-        else:
-            candidate_starts = list(range(0, max(len(file_lines) - n + 1, 1)))
-
-        best = None
-        best_ratio = 0.0
-        candidate_starts = candidate_starts[:200]
-        for start in candidate_starts:
-            for span in (n, max(n - 1, 1), n + 1):
-                if start + span > len(file_lines):
-                    continue
-                cand = "\n".join(file_lines[start : start + span])
-                r = SequenceMatcher(None, old, cand).ratio()
-                if r > best_ratio:
-                    best_ratio = r
-                    best = cand
-
-        if best is None or best_ratio < float(min_similarity):
-            return ToolResult(
-                False,
-                error={
-                    "code": "E_FUZZY_NO_MATCH",
-                    "message": f"no fuzzy match above min_similarity={min_similarity}, best={best_ratio:.3f}",
-                },
-            )
-
-        mode = "fuzzy"
-        matched_similarity = best_ratio
-        updated_text = before_text.replace(best, new, 1)
+        mode = "enhanced_fuzzy"
+        matched_similarity = details.get('similarity', 0.0)
         replacements = 1
 
+        # 重新读取更新后的内容
+        updated_text = p.read_text(encoding="utf-8", errors="replace")
+
     after_hash = _sha256_text(updated_text)
+
+    # 分析编辑影响
+    impact_analysis = patch_engine.analyze_edit_impact(before_text, updated_text)
+
+    # 创建增强的备份
+    metadata = {
+        "mode": mode,
+        "replacements": replacements,
+        "matched_similarity": matched_similarity,
+        "impact_analysis": impact_analysis,
+        "old_content_length": len(before_text),
+        "new_content_length": len(updated_text),
+        "diff": patch_engine.generate_diff(before_text, updated_text)
+    }
 
     undo_dir = workspace_root / ".clude" / "undo"
     undo_dir.mkdir(parents=True, exist_ok=True)
     undo_id = f"undo_{time.time_ns()}"
-    bak_path = undo_dir / f"{undo_id}.bak"
-    meta_path = undo_dir / f"{undo_id}.json"
 
-    bak_path.write_text(before_text, encoding="utf-8")
+    # 使用增强的备份创建
+    backup_file = patch_engine.create_backup_with_metadata(p, "apply_patch", metadata)
+    bak_path = Path(backup_file)
+
+    # 创建元数据文件
+    meta_path = undo_dir / f"{undo_id}.json"
     meta_path.write_text(
         json.dumps(
             {
@@ -122,15 +120,16 @@ def apply_patch(
                 "before_hash": before_hash,
                 "after_hash": after_hash,
                 "backup_file": str(bak_path),
-                "mode": mode,
-                "replacements": replacements,
+                "metadata": metadata,
             },
             ensure_ascii=False,
         ),
         encoding="utf-8",
     )
 
+    # 写入更新后的内容
     p.write_text(updated_text, encoding="utf-8")
+
     return ToolResult(
         True,
         payload={
@@ -144,6 +143,7 @@ def apply_patch(
             "before_hash": before_hash,
             "after_hash": after_hash,
             "undo_id": undo_id,
+            "impact_analysis": impact_analysis,
         },
     )
 

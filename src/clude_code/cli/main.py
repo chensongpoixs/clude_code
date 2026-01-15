@@ -4,33 +4,11 @@ import typer
 from clude_code.config import CludeConfig
 from clude_code.observability.logger import get_logger
 
-app = typer.Typer(help="clude: a Claude Code-like local code agent CLI (Python).")
+app = typer.Typer(help="clude: a Clude Code-like local code agent CLI (Python).")
 
 # --- 日志初始化助手 ---
-
-_logger_instance = None
-def get_cli_logger() -> logging.Logger:
-    global _logger_instance
-    if _logger_instance is None:
-        cfg = CludeConfig()
-        _logger_instance = get_logger(
-            __name__,
-            workspace_root=cfg.workspace_root,
-            log_to_console=cfg.logging.log_to_console,
-        )
-    return _logger_instance
-
-_file_only_logger_instance = None
-def get_file_only_logger() -> logging.Logger:
-    global _file_only_logger_instance
-    if _file_only_logger_instance is None:
-        cfg = CludeConfig()
-        _file_only_logger_instance = get_logger(
-            f"{__name__}.flow",
-            workspace_root=cfg.workspace_root,
-            log_to_console=False,
-        )
-    return _file_only_logger_instance
+# 使用统一的 CLI 日志系统
+from clude_code.cli.logging import get_cli_logger, get_file_logger
 
 # --- 命令路由 ---
 
@@ -54,7 +32,7 @@ def tools(
 def models() -> None:
     """列出可用模型列表。"""
     from clude_code.cli.info_cmds import run_models_list
-    run_models_list(get_cli_logger())
+    run_models_list(get_cli_logger().console)
 
 @app.command()
 def doctor(
@@ -64,7 +42,7 @@ def doctor(
 ) -> None:
     """执行环境诊断与连通性检查。"""
     from clude_code.cli.doctor_cmd import run_doctor
-    run_doctor(fix, model, select_model, get_cli_logger())
+    run_doctor(fix, model, select_model, get_cli_logger().console)
 
 @app.command()
 def chat(
@@ -80,7 +58,7 @@ def chat(
     if model:
         cfg.llm.model = model
     
-    handler = ChatHandler(cfg, get_cli_logger(), get_file_only_logger())
+    handler = ChatHandler(cfg)
     
     if select_model:
         handler.select_model_interactively()
