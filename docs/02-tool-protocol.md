@@ -145,6 +145,19 @@
 {"tool":"display","args":{"title":"代码审计","content":"发现 2 处高风险点，准备修复。","level":"warning"}}
 ```
 
+```json
+{
+  "tool": "display",
+  "args": {
+    "title": "执行思路",
+    "level": "info",
+    "content": "准备收敛入口：先统一事件协议，再迁移 UI 到 plugins。",
+    "thought": "原因：目前存在多入口导致行为分裂；先把链路收口才能保证 UI/工具/审计一致。",
+    "evidence": ["入口: cli/chat_handler.py", "UI: plugins/ui/opencode_tui.py", "协议: docs/02-tool-protocol.md"]
+  }
+}
+```
+
 **实现说明（本项目）**：
 - 分发：`src/clude_code/orchestrator/agent_loop/tool_dispatch.py`（ToolSpec 注册 + handler）
 - 执行：`src/clude_code/tooling/tools/display.py`（事件广播 + 控制台降级 + 审计）

@@ -50,7 +50,25 @@ def execute_planning_phase(
             loop._trim_history(max_messages=30)
 
             loop.audit.write(trace_id=trace_id, event="plan_generated", data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps]})
-            _ev("plan_generated", {"title": plan.title, "steps": len(plan.steps)})
+            # 为 live UI / TUI 提供可读的计划预览（避免只给一个 steps 数字）
+            steps_preview: list[str] = []
+            for s in plan.steps[: min(8, len(plan.steps))]:
+                sid = str(getattr(s, "id", "") or "").strip()
+                desc = str(getattr(s, "description", "") or "").strip()
+                line = f"{sid}: {desc}" if sid else desc
+                if len(line) > 140:
+                    line = line[:139] + "…"
+                if line:
+                    steps_preview.append(line)
+            _ev(
+                "plan_generated",
+                {
+                    "title": plan.title,
+                    "steps": len(plan.steps),
+                    "steps_preview": steps_preview,
+                    "steps_preview_truncated": len(plan.steps) > len(steps_preview),
+                },
+            )
             loop.logger.info("[green]✓ 计划生成成功[/green]")
             plan_summary = render_plan_markdown(plan)
             loop.logger.info(f"[dim]计划摘要:\n{plan_summary}[/dim]")

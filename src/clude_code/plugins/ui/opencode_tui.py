@@ -14,6 +14,7 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Callable
 import json
+import time
 from rich.text import Text
 from rich.table import Table
 from rich.syntax import Syntax
@@ -103,6 +104,131 @@ def run_opencode_tui(
             self._llm_prompt = 0
             self._llm_completion = 0
             self._tps = 0.0
+            self._verbosity: str = "compact"  # compact|verbose|debug（仅影响“对话/输出”的块内容）
+
+        def _now_hhmmss(self) -> str:
+            try:
+                return time.strftime("%H:%M:%S", time.localtime())
+            except Exception:
+                return ""
+
+        def _short_trace(self, trace_id: str | None) -> str:
+            t = (trace_id or "").strip()
+            return t[:8] if t else "-"
+
+        def _level_style(self, level: str) -> str:
+            lv = (level or "").strip().lower()
+            return {
+                "info": "cyan",
+                "progress": "blue",
+                "warning": "yellow",
+                "warn": "yellow",
+                "error": "red",
+                "success": "green",
+            }.get(lv, "cyan")
+
+        def _push_structured_block(
+            self,
+            *,
+            title: str,
+            level: str = "info",
+            step: int | str | None = None,
+            ev: str | None = None,
+            trace_id: str | None = None,
+            summary: str | None = None,
+            decision: str | None = None,
+            evidence: list[str] | None = None,
+            hint: str | None = None,
+            force_show_decision: bool = False,
+        ) -> None:
+            """
+            在“对话/输出”窗格输出结构化块：
+            - 头部：time/LEVEL/step/ev/trace
+            - 正文：Summary / Why / Evidence（摘要优先）
+            """
+            conversation = self.query_one("#conversation", _Log)
+            ttl = (title or "").strip()
+            if not ttl:
+                return
+            lv = (level or "info").strip().upper()
+            t = self._now_hhmmss()
+            st = "-" if step is None else str(step)
+            et = (ev or "").strip() or "-"
+            tr = self._short_trace(trace_id)
+            head = f"[{t}] [{lv}] step={st} ev={et} trace={tr}  {ttl}".strip()
+
+            color = self._level_style(level)
+            conversation.write(Text(f"┌─ {head}", style=color))
+
+            def _w(prefix: str, txt: str | None) -> None:
+                s = (txt or "").strip()
+                if not s:
+                    return
+                # 防止爆屏：对话区每行尽量短一些
+                if len(s) > 500 and self._verbosity != "debug":
+                    s = s[:499] + "…"
+                conversation.write(Text(f"│ {prefix}{s}", style=color))
+
+            _w("Summary: ", summary)
+            if force_show_decision or self._verbosity in {"verbose", "debug"}:
+                _w("Why: ", decision)
+            if evidence:
+                if self._verbosity == "compact":
+                    ev_lines = evidence[:6]
+                else:
+                    ev_lines = evidence[:12]
+                for ln in ev_lines:
+                    ln = (ln or "").strip()
+                    if not ln:
+                        continue
+                    if len(ln) > 520 and self._verbosity != "debug":
+                        ln = ln[:519] + "…"
+                    conversation.write(Text(f"│ Evidence: {ln}", style=color))
+                if len(evidence) > len(ev_lines):
+                    conversation.write(Text("│ Evidence: …(更多证据见“事件/操作面板”)", style=color))
+            if hint:
+                _w("Hint: ", hint)
+            conversation.write(Text("└─", style=color))
+            if self._follow:
+                try:
+                    conversation.scroll_end(animate=False)
+                except Exception:
+                    pass
+
+        def _summarize_tool_args(self, tool: str, args: dict[str, Any]) -> list[str]:
+            """从 args 中提炼“对话区可读证据”，避免 dump 全量 JSON。"""
+            tool = (tool or "").strip()
+            args = args or {}
+            evs: list[str] = []
+            if tool == "read_file":
+                evs.append(f"path={args.get('target_file')}")
+                if args.get("offset") is not None:
+                    evs.append(f"offset={args.get('offset')}")
+                if args.get("limit") is not None:
+                    evs.append(f"limit={args.get('limit')}")
+            elif tool == "grep":
+                evs.append(f"pattern={args.get('pattern')}")
+                if args.get("path"):
+                    evs.append(f"path={args.get('path')}")
+                if args.get("glob"):
+                    evs.append(f"glob={args.get('glob')}")
+            elif tool == "apply_patch":
+                # patch 内容可能很长：只提示“已提交 patch”，详情看事件窗格
+                evs.append("patch=*** Begin Patch …")
+            elif tool in {"run_terminal_cmd", "run_cmd"}:
+                cmd = args.get("command") or args.get("cmd")
+                evs.append(f"command={cmd}")
+                if args.get("is_background") is not None:
+                    evs.append(f"is_background={args.get('is_background')}")
+            elif tool in {"web_search", "webfetch"}:
+                q = args.get("search_term") or args.get("url")
+                evs.append(f"q={q}")
+            else:
+                # 默认提炼少量关键字段
+                for k in ("target_file", "target_directory", "glob_pattern", "query", "explanation", "name"):
+                    if k in args and args.get(k) is not None:
+                        evs.append(f"{k}={args.get(k)}")
+            return [str(x) for x in evs if x not in ("None", "")]
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=True)
@@ -337,6 +463,7 @@ def run_opencode_tui(
             if "step" in ev and ev.get("step") is not None:
                 self._last_step = ev.get("step")  # type: ignore[assignment]
             self._last_event = et or self._last_event
+            trace_id = ev.get("trace_id")
 
             conversation = self.query_one("#conversation", _Log)
             status = self.query_one("#status", _Log)
@@ -368,6 +495,16 @@ def run_opencode_tui(
                 self._active_tasks = 1 if self._busy else 0
                 self._refresh_header_panel()
                 self._refresh_status()
+                # 对话区：给一条“过程解释”块（更像 Claude Code 的可读叙事）
+                self._push_structured_block(
+                    title="状态切换",
+                    level="progress" if self._state in {"PLANNING", "EXECUTING"} else "info",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"state={self._state}",
+                    decision=str(data.get("reason") or data.get("step") or data.get("mode") or ""),
+                )
                 return
 
             # 开场：项目记忆加载状态（对齐 enhanced 的“项目记忆已加载（CLUDE.md）”块）
@@ -410,8 +547,16 @@ def run_opencode_tui(
                 self._active_tasks = 1 if self._busy else 0
                 self._refresh_header_panel()
                 self._refresh_status()
-                # 对话区也给一个“阶段块”，更像 enhanced，便于人读
-                _push_block("执行步骤开始", [f"{idx}/{total}  step_id={step_id}"], color="yellow")
+                self._push_structured_block(
+                    title="执行步骤开始",
+                    level="progress",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"{idx}/{total}  step_id={step_id}",
+                    decision="开始执行本步骤；后续将根据模型输出调用工具并回喂结果。",
+                    evidence=[f"step_id={step_id}"],
+                )
                 return
 
             if et == "user_message":
@@ -423,6 +568,71 @@ def run_opencode_tui(
                     conversation.write(t)
                     if self._follow:
                         conversation.scroll_end(animate=False)
+                return
+
+            if et in {"intent_classified"}:
+                cat = data.get("category")
+                conf = data.get("confidence")
+                self._push_structured_block(
+                    title="意图识别",
+                    level="info",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"category={cat} confidence={conf}",
+                    decision="用于决定是否进入 planning 阶段，以及工具/验证策略的优先级。",
+                )
+                return
+
+            if et in {"planning_llm_request"}:
+                self._state = "PLANNING"
+                self._operation = "规划：LLM 请求"
+                self._active_tasks = 1
+                self._refresh_header_panel()
+                self._refresh_status()
+                self._push_structured_block(
+                    title="进入规划阶段（生成 Plan）",
+                    level="progress",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"attempt={data.get('attempt')}",
+                    decision="将任务拆成可执行步骤，降低一次性长上下文失败概率，并提高可追溯性。",
+                )
+                return
+
+            if et in {"plan_generated"}:
+                title = str(data.get("title") or "").strip()
+                steps = data.get("steps")
+                preview = data.get("steps_preview") or []
+                evs: list[str] = []
+                if isinstance(preview, list):
+                    for p in preview[:8]:
+                        evs.append(str(p))
+                self._push_structured_block(
+                    title="计划已生成（Plan）",
+                    level="success",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"title={title} steps={steps}",
+                    decision="接下来会按步骤执行：每步会触发 LLM→工具→回喂→（可选）验证的闭环。",
+                    evidence=evs,
+                    hint="更多结构化细节见“事件”窗格（plan_generated JSON）。",
+                )
+                return
+
+            if et in {"plan_parse_failed"}:
+                self._push_structured_block(
+                    title="计划解析失败",
+                    level="error",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"attempt={data.get('attempt')} error={data.get('error')}",
+                    decision="将要求模型仅输出严格 JSON，触发重试（或降级到 ReAct）。",
+                    hint="建议缩小任务、提高结构化约束，或指定入口文件。",
+                )
                 return
 
             if et in {"assistant_text", "assistant"}:
@@ -445,13 +655,28 @@ def run_opencode_tui(
 
             if et == "display":
                 content = str(data.get("content", "")).strip()
+                level = str(data.get("level") or "info")
+                title = str(data.get("title") or "Agent 输出").strip()
+                thought = str(data.get("thought") or "").strip()
+                explanation = str(data.get("explanation") or "").strip()
+                ev_lines = data.get("evidence")
+                evidence: list[str] | None = None
+                if isinstance(ev_lines, list):
+                    evidence = [str(x) for x in ev_lines if str(x).strip()]
                 if content:
-                    t = Text()
-                    t.append("agent: ", style="cyan")
-                    t.append(content)
-                    conversation.write(t)
-                    if self._follow:
-                        conversation.scroll_end(animate=False)
+                    self._push_structured_block(
+                        title=title,
+                        level=level,
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=content,
+                        decision=(thought or explanation),
+                        evidence=evidence,
+                        hint="（display 工具输出）",
+                        # display 的核心价值就是“过程可见”，因此强制显示 Why（思考过程）
+                        force_show_decision=True,
+                    )
                 return
 
             if et == "llm_request":
@@ -482,6 +707,20 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 self._refresh_status()
                 self._refresh_ops()
+                self._push_structured_block(
+                    title="LLM 请求参数",
+                    level="info",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"model={data.get('model')} api={data.get('api_mode')} base_url={data.get('base_url')}",
+                    decision=f"temperature={data.get('temperature')} max_tokens={data.get('max_tokens')}",
+                    evidence=[
+                        f"prompt_tokens_est={data.get('prompt_tokens_est')}",
+                        f"messages_count={data.get('messages_count')}",
+                    ],
+                    hint="完整参数见“事件”窗格（llm_request_params JSON）。",
+                )
                 return
 
             if et == "llm_usage":
@@ -515,19 +754,25 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 self._refresh_status()
                 self._refresh_ops()
-                # 对话区：显示一行可读摘要
-                t = Text()
-                t.append("tool: ", style="bold yellow")
-                t.append(f"{tool} {args_str}")
-                conversation.write(t)
-                if self._follow:
-                    conversation.scroll_end(animate=False)
+                args = data.get("args", {}) or {}
+                evs = self._summarize_tool_args(tool, args if isinstance(args, dict) else {})
+                self._push_structured_block(
+                    title=f"工具调用: {tool}",
+                    level="progress",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary="模型已解析出工具调用，将进行策略校验并执行工具。",
+                    decision="对话区仅展示关键参数摘要；详情见“事件/操作面板”。",
+                    evidence=evs or [f"args={args_str}"],
+                )
                 return
 
             if et == "tool_result":
                 tool = str(data.get("tool", ""))
                 ok = bool(data.get("ok"))
-                err = str(data.get("error") or "")
+                err_obj = data.get("error")
+                err = str(err_obj or "")
                 if len(err) > 160:
                     err = err[:159] + "…"
                 icon = "✓ " if ok else "✗ "
@@ -546,6 +791,33 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 self._refresh_status()
                 self._refresh_ops()
+                level = "success" if ok else "error"
+                code = ""
+                if isinstance(err_obj, dict):
+                    code = str(err_obj.get("code") or "")
+                self._push_structured_block(
+                    title=f"工具结果: {tool}",
+                    level=level,
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=f"ok={ok}" + (f" code={code}" if code else "") + (f" err={err}" if err and not ok else ""),
+                    decision="工具结果已回喂给模型（作为后续推理依据）。",
+                    hint="更完整的 payload/原始错误见“事件/操作面板”。",
+                )
+                return
+
+            if et in {"policy_deny_tool", "policy_deny_cmd", "denied_by_user"}:
+                self._push_structured_block(
+                    title="策略/确认拦截",
+                    level="error",
+                    step=ev.get("step"),
+                    ev=et,
+                    trace_id=trace_id,
+                    summary=str(data),
+                    decision="为避免危险操作，本次调用被策略或用户确认拒绝。",
+                    hint="如需继续：调整 allowed_tools/disallowed_tools 或关闭 confirm_write/confirm_exec（不推荐在不可信项目中关闭）。",
+                )
                 return
 
         def _drain_events(self) -> None:

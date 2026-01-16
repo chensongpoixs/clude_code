@@ -247,7 +247,8 @@ class AgentLoop:
                 self.trace.write(trace_id=trace_id, step=step_idx, event=event, data=data)
             if on_event is not None:
                 try:
-                    on_event(e)
+                    # 透传 trace_id：live UI / TUI / bug report 需要对齐同一轮 turn 的可追溯标识
+                    on_event({**e, "trace_id": trace_id})
                 except Exception as ex:
                     self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
 

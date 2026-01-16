@@ -244,6 +244,10 @@ def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
         content = args.get("message", "")
     level = args.get("level", "info")
     title = args.get("title")
+    # 思考/解释（可选）：用于把“为什么/怎么想的”展示给用户（对标 Claude Code 的 message_user）
+    thought = args.get("thought")
+    explanation = args.get("explanation")
+    evidence = args.get("evidence")
 
     _ev = getattr(loop, "_current_ev", None)
     trace_id = getattr(loop, "_current_trace_id", None)
@@ -253,6 +257,9 @@ def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
         content=str(content),
         level=str(level) if isinstance(level, str) else "info",
         title=str(title) if isinstance(title, str) else None,
+        thought=str(thought) if isinstance(thought, str) else None,
+        explanation=str(explanation) if isinstance(explanation, str) else None,
+        evidence=evidence if isinstance(evidence, list) else None,
         _ev=_ev,
         trace_id=trace_id,
     )
@@ -503,6 +510,13 @@ def _spec_display() -> ToolSpec:
                     "description": "消息级别",
                 },
                 "title": {"type": ["string", "null"], "description": "可选标题"},
+                "thought": {"type": ["string", "null"], "description": "可选：思考过程（对齐 UI 的 Why/Decision 区域）"},
+                "explanation": {"type": ["string", "null"], "description": "可选：解释/理由（与 thought 语义接近，兼容不同 prompt 习惯）"},
+                "evidence": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                    "description": "可选：证据/要点列表（用于 UI Evidence 区域）",
+                },
 
                 # 兼容字段：历史上曾使用 message（保留以避免旧 prompt/脚本失效）
                 "message": {"type": ["string", "null"], "description": "兼容字段：等价于 content（后续将废弃）"},

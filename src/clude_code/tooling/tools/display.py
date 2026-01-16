@@ -46,6 +46,9 @@ def display(
     content: str,
     level: str = "info",
     title: str | None = None,
+    thought: str | None = None,
+    explanation: str | None = None,
+    evidence: list[str] | None = None,
     *,
     _ev: Callable[[str, dict[str, Any]], None] | None = None,
     trace_id: str | None = None,
@@ -90,10 +93,16 @@ def display(
         truncated = True
     
     # 4. 构造显示数据
+    # 说明：
+    # - thought/explanation 用于把“为什么/怎么想的”展示到 live UI 的 Why 区域（可选）
+    # - evidence 用于展示要点列表（可选）
     display_data = {
         "content": content,
         "level": level,
         "title": title,
+        "thought": thought,
+        "explanation": explanation,
+        "evidence": evidence,
         "truncated": truncated,
     }
     
