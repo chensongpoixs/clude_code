@@ -29,11 +29,13 @@ def execute_planning_phase(
     while plan_attempts <= loop.cfg.orchestrator.planning_retry:
         plan_attempts += 1
         _ev("planning_llm_request", {"attempt": plan_attempts})
+
+        # 记录调用_llm_chat之前的消息长度，用于后续清理
+        messages_before_llm = len(loop.messages)
+
         assistant_plan = _llm_chat("planning", None)
         _ev("planning_llm_response", {"text": assistant_plan[:4000], "truncated": len(assistant_plan) > 4000})
 
-        loop.messages.append(ChatMessage(role="assistant", content=assistant_plan))
-        loop._trim_history(max_messages=30)
         try:
             parsed = parse_plan_from_text(assistant_plan)
             if len(parsed.steps) > loop.cfg.orchestrator.max_plan_steps:
@@ -43,12 +45,15 @@ def execute_planning_phase(
             # 强制校验步骤 ID 唯一性（parse_plan_from_text 已校验，这里做双保险）
             plan.validate_unique_ids()
 
+            # 只有在成功时才添加assistant消息到历史
+            loop.messages.append(ChatMessage(role="assistant", content=assistant_plan))
+            loop._trim_history(max_messages=30)
+
             loop.audit.write(trace_id=trace_id, event="plan_generated", data={"title": plan.title, "steps": [s.model_dump() for s in plan.steps]})
             _ev("plan_generated", {"title": plan.title, "steps": len(plan.steps)})
             loop.logger.info("[green]✓ 计划生成成功[/green]")
             plan_summary = render_plan_markdown(plan)
             loop.logger.info(f"[dim]计划摘要:\n{plan_summary}[/dim]")
-            loop.file_only_logger.info("生成计划:\n" + plan_summary)
             return plan
         except Exception as e:
             loop.logger.error(f"[red]✗ 计划解析失败 (尝试 {plan_attempts}/{loop.cfg.orchestrator.planning_retry + 1}): {e}[/red]", exc_info=True)

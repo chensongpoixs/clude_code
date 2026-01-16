@@ -107,7 +107,7 @@ def llm_chat(
             "max_tokens": loop.llm.max_tokens,
             "messages_count": len(loop.messages),
             "last_role": loop.messages[-1].role if loop.messages else None,
-            "last_content_preview": (loop.messages[-1].content[:200] + "…") if (loop.messages and len(loop.messages[-1].content) > 200) else (loop.messages[-1].content if loop.messages else None),
+            "last_content_preview": (loop.messages[-1].content) if (loop.messages and len(loop.messages[-1].content) > 200) else (loop.messages[-1].content if loop.messages else None),
         }
         # 写入文件（详细）
         log_llm_request_params_to_file(loop)
