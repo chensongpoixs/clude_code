@@ -48,6 +48,8 @@
  - **增强 UI 迁移到 plugins（P0-2）**: ✅ 增强 Live UI/实验 chat 实现已迁移至 `src/clude_code/plugins/ui/`，`cli/enhanced_*` 保留为兼容层（re-export）。
  - **Claude Code 对标能力 (P0)**: ✅ Slash Commands (`/help /clear /config /permissions` 等) + 工具权限 allow/deny 拦截机制。
  - **Claude Code 界面打磨 (P0)**: ✅ `enhanced` UI 升级为 Claude Code 风格（左侧输出/右侧面板/阶段块）。
+- **Claude Code 运行模式对标 (P1)**: ✅ `clude chat -p/--print` 非交互一次性执行；✅ `clude chat -c/-r` 会话持久化与恢复（`.clude/sessions/`）。
+- **Claude Code 自定义命令对标 (P1)**: ✅ 从 `.clude/commands/*.md` 加载自定义命令，支持参数校验（`args/required/usage`）与命令级权限声明（`allowed_tools/disallowed_tools/allow_network`）。
  - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。
  - **结构化回喂 + rg**: ✅ 已落地（`tooling/feedback.py` + grep 优先 `rg --json` + doctor 检测 rg）。分析见 `src/IMPLEMENTATION_ANALYSIS_FEEDBACK_RIPGREP.md`。
 

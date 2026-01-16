@@ -1,5 +1,6 @@
 from typing import Any
 import json
+from pathlib import Path
 import typer
 from rich.console import Console
 from rich.live import Live
@@ -16,6 +17,7 @@ from clude_code.cli.config_manager import get_config_manager
 from clude_code.cli.cli_logging import get_cli_logger
 from clude_code.cli.slash_commands import SlashContext, handle_slash_command
 from clude_code.cli.session_store import save_session
+from clude_code.cli.custom_commands import load_custom_commands, expand_custom_command
 
 # 使用主题化的控制台
 console = Console(theme=CLAUDE_THEME)
@@ -29,7 +31,7 @@ class ChatHandler:
         self.cfg = cfg
         self.agent = AgentLoop(cfg, session_id=session_id)
         if history:
-            # 只追加 user/assistant 历史，system 由本轮最新 repo map/CLAUDE.md 生成
+            # 只追加 user/assistant 历史，system 由本轮最新 repo map/CLUDE.md 生成
             self.agent.messages.extend(history)  # type: ignore[arg-type]
 
         # 初始化统一的日志系统
@@ -45,6 +47,9 @@ class ChatHandler:
         self.debug_mode = False
         self._last_trace_id: str | None = None
         self._last_user_text: str | None = None
+
+        # 自定义命令（.clude/commands/*.md）
+        self._custom_commands = load_custom_commands(self.cfg.workspace_root)
 
     def select_model_interactively(self) -> None:
         """调用公共工具进行交互式模型选择。"""
@@ -87,6 +92,9 @@ class ChatHandler:
 
         while True:
             try:
+                # 每轮都做一次轻量刷新（支持用户新增/修改 .clude/commands/*.md 后生效）
+                self._custom_commands = load_custom_commands(self.cfg.workspace_root)
+
                 # 使用增强的提示输入（支持快捷键）
                 result = self.shortcut_handler.prompt_with_shortcuts("you")
 
@@ -111,6 +119,18 @@ class ChatHandler:
 
                 user_text = result.text.strip()
                 self._last_user_text = user_text
+
+                # 先尝试自定义命令展开（对标 Claude Code 的自定义 commands）
+                expanded = expand_custom_command(commands=self._custom_commands, user_text=user_text)
+                policy_overrides: dict[str, Any] = {}
+                if expanded is not None:
+                    if expanded.errors:
+                        for err in expanded.errors:
+                            console.print(f"[red]{err}[/red]")
+                        continue
+                    console.print(f"[dim]执行自定义命令: /{expanded.command.name} ({Path(expanded.command.path).name})[/dim]")
+                    policy_overrides = expanded.policy_overrides or {}
+                    user_text = expanded.prompt
 
                 # Claude Code 风格：Slash Commands（本地命令层，不走 LLM）
                 if user_text.startswith("/"):
@@ -138,10 +158,24 @@ class ChatHandler:
                     continue
 
                 # 执行用户查询
-                if live:
-                    self._run_with_live(user_text, debug=self.debug_mode, live_ui=live_ui)
-                else:
-                    self._run_simple(user_text, debug=self.debug_mode)
+                old_policy: dict[str, Any] = {}
+                try:
+                    if policy_overrides:
+                        # 命令级权限声明：仅对本次执行生效（执行后恢复）
+                        p = self.cfg.policy
+                        for k, v in policy_overrides.items():
+                            old_policy[k] = getattr(p, k, None)
+                            setattr(p, k, v)
+
+                    if live:
+                        self._run_with_live(user_text, debug=self.debug_mode, live_ui=live_ui)
+                    else:
+                        self._run_simple(user_text, debug=self.debug_mode)
+                finally:
+                    if old_policy:
+                        p = self.cfg.policy
+                        for k, v in old_policy.items():
+                            setattr(p, k, v)
 
             except KeyboardInterrupt:
                 console.print("\n[bold yellow]再见！[/bold yellow]")

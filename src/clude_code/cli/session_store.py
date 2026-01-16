@@ -31,7 +31,7 @@ def save_session(
     保存会话（只保存 history，不保存 system）。
 
     说明：
-    - system prompt 会动态包含 repo map / CLAUDE.md，恢复时应以“当前仓库最新状态”为准；
+    - system prompt 会动态包含 repo map / CLUDE.md，恢复时应以“当前仓库最新状态”为准；
       因此只保存非 system 的历史对话，恢复时追加到新 system 之后。
     """
     d = _sessions_dir(workspace_root)

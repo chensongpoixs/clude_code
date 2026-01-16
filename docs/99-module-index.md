@@ -8,6 +8,9 @@
 - `docs/13-ui-cli-ux.md`
 - **依赖**：Orchestrator、Tool Registry、Audit Log
 - **产物**：命令行会话、确认交互、流式输出渲染
+- **补充能力（已落地）**：
+  - `-p/-c/-r`：非交互执行与会话恢复（`.clude/sessions/`）
+  - `.clude/commands/*.md`：项目级自定义命令（参数校验 + 命令级权限声明）
 
 ### 1.2 代理编排层（Orchestrator）
 - `docs/01-e2e-flow-and-state-machine.md`

@@ -85,8 +85,8 @@
 | **UI/UX** | `/slash` 命令系统 | ✅ 已完成 | P0 | REPL 内 `/help`, `/config`, `/permissions` 等 |
 | | 增强版 Claude Code UI | ✅ 已完成 | P0 | 左侧滚动 + 右侧面板 + 阶段块布局 |
 | **Policy** | `allowedTools` / `disallowedTools` | ✅ 已完成 | P0 | 策略引擎强制拦截 |
-| | `CLAUDE.md` (项目记忆) | ✅ 已完成 | P1 | 自动搜索并注入 System Prompt |
-| **Plugins** | 自定义命令扩展 | ⏳ 待开发 | P2 | 支持从 `.clude/commands/` 加载自定义 MD 命令 |
+| | `CLUDE.md` (项目记忆) | ✅ 已完成 | P1 | 自动搜索并注入 System Prompt |
+| **Plugins** | 自定义命令扩展 | ✅ 已完成 | P1 | 支持从 `.clude/commands/*.md` 加载自定义命令；支持参数校验（`args/required/usage`）与命令级权限声明（`allowed_tools/disallowed_tools/allow_network`） |
 
 ### 4.1 P0 迭代（稳定性优先，先保证“能用且一致”）
 

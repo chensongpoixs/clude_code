@@ -66,14 +66,26 @@ clude chat --debug
   - **`--debug`**：输出可观测轨迹，并写入 `.clude/logs/trace.jsonl`
   - **`--live`**：固定 50 行实时刷新 UI（开启后自动启用 `--debug`，结束后保持最终状态）
   - **`--live-ui`**：Live UI 风格（`classic|enhanced`，仅 `--live` 生效）
+  - **`-p/--print`**：非交互一次性执行并退出（支持 `--output-format text|json`）
+  - **`-c/--continue`**：继续最近会话（从 `.clude/sessions/latest.json` 加载）
+  - **`-r/--resume <session_id>`**：恢复指定会话
 
 ```bash
 clude chat
 clude chat --debug
 clude chat --live
 clude chat --live --live-ui enhanced
+clude chat -p "总结这个项目的架构并指出三个风险点"
+clude chat -c
+clude chat -r sess_123456
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 ```
+
+#### 3.1.1 自定义命令（.clude/commands/*.md）
+
+- **目录**：`.clude/commands/*.md`
+- **调用**：在会话内输入 `/<name> ...`（支持 `args/required/usage` 参数校验与命令级权限声明）
+- **查看**：`/commands`
 
 ### 3.2 `clude tools`
 - **用途**：输出可用工具清单（同源 ToolSpec），用于排障/文档/脚本。

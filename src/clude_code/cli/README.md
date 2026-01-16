@@ -62,6 +62,33 @@ clude chat -c
 clude chat -r sess_123456
 ```
 
+- **自定义命令（对标 Claude Code `.claude/commands`）**
+  - 目录：`.clude/commands/*.md`
+  - 调用：在会话里输入 `/<name> ...`，系统会把该命令的模板展开成 prompt 并交给 AgentLoop 执行。
+  - 内置查看：`/commands`
+
+**文件格式（支持可选 frontmatter）**：
+
+```markdown
+---
+name: review
+description: 审查指定文件并给出改进建议
+args: path
+required: path
+usage: <path> [extra...]
+allowed_tools: read_file, grep
+disallowed_tools: run_cmd
+allow_network: false
+---
+请审查文件 {{arg1}}，并给出：问题清单（P0/P1/P2）+ 修改建议 + 验收标准。
+```
+
+**使用示例**：
+
+```bash
+/review src/clude_code/cli/main.py
+```
+
 - **Slash Commands（对标 Claude Code）**
   - 在交互模式中输入 `/命令` 可直接执行本地命令（不走 LLM），用于管理会话/配置/权限等：
     - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug`
@@ -74,7 +101,7 @@ clude chat -r sess_123456
 # 清空会话上下文（保留 system）
 /clear
 
-# 生成项目记忆文件（CLAUDE.md）
+# 生成项目记忆文件（CLUDE.md）
 /init
 ```
 

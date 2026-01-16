@@ -8,6 +8,14 @@
 - **工具插件（Tool Plugin）**：新增 tool（例如 Jira、K8s、内部 API）
 - **策略插件（Policy Plugin）**：新增/覆盖策略规则（企业合规）
 
+### 1.2 CLI 命令扩展（对标 Claude Code 的 commands）
+- **自定义命令（项目级）**：`.clude/commands/*.md`
+  - **用途**：把常用 prompt/流程沉淀成可复用命令（例如 `/review <path>`、`/release-notes`）
+  - **行为**：命令只做 prompt 模板展开，执行仍走 AgentLoop（受 ToolSpec/Policy/Confirm/Audit 约束）
+  - **能力**：
+    - 参数校验：`args/required/usage`
+    - 命令级权限声明：`allowed_tools/disallowed_tools/allow_network`（仅本次执行生效）
+
 ### 1.2 插件包结构（建议）
 - `manifest.json`
   - `name`, `version`

@@ -169,7 +169,7 @@ class AgentLoop:
         repo_map = self.tools.generate_repo_map()
         env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
 
-        # Claude Code 对标：自动加载 CLAUDE.md 作为项目记忆（只读、失败不阻塞）
+        # Claude Code 对标：自动加载 CLUDE.md 作为项目记忆（只读、失败不阻塞）
         project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)
         self._project_memory_meta: dict[str, object] = project_memory_meta
         self._project_memory_emitted: bool = False
@@ -184,9 +184,9 @@ class AgentLoop:
             ChatMessage(role="system", content=combined_system_prompt),
         ]
         if bool(project_memory_meta.get("loaded")):
-            self.logger.info(f"[dim]已加载 CLAUDE.md 项目记忆: {project_memory_meta}[/dim]")
+            self.logger.info(f"[dim]已加载 CLUDE.md 项目记忆: {project_memory_meta}[/dim]")
         else:
-            self.logger.info("[dim]未加载 CLAUDE.md（未找到或为空）[/dim]")
+            self.logger.info("[dim]未加载 CLUDE.md（未找到或为空）[/dim]")
         self.logger.info("[dim]初始化系统提示词（包含 Repo Map/环境信息/可选项目记忆）[/dim]")
 
     def run_turn(
