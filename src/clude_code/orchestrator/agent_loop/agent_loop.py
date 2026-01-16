@@ -252,6 +252,9 @@ class AgentLoop:
                 except Exception as ex:
                     self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
 
+        # 让 live UI/TUI 能展示“默认 chat 日志”的开场行
+        _ev("turn_start", {"trace_id": trace_id})
+
         # 设置运行时上下文，供 display 工具使用
         self._current_ev = _ev
         self._current_trace_id = trace_id
@@ -283,6 +286,16 @@ class AgentLoop:
         _ev("user_message", {"text": user_text})
         user_content = user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
         self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
+        # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
+        _ev(
+            "user_content_built",
+            {
+                "preview": user_content[:2000],
+                "truncated": len(user_content) > 2000,
+                "messages_count": len(self.messages) + 1,  # 即将 append
+                "planning_prompt_included": bool(planning_prompt),
+            },
+        )
         self.messages.append(ChatMessage(role="user", content=user_content))
         self._trim_history(max_messages=30)
         self.logger.debug(f"[dim]当前消息历史长度: {len(self.messages)}[/dim]")
@@ -465,6 +478,14 @@ class AgentLoop:
         if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):
             if enable_planning:
                 self.logger.info("[dim]检测到能力询问或通用对话，跳过显式规划阶段。[/dim]")
+                _ev(
+                    "planning_skipped",
+                    {
+                        "reason": "capability_query_or_general_chat",
+                        "category": classification.category.value,
+                        "confidence": classification.confidence,
+                    },
+                )
                 enable_planning = False
         # 业界兜底：短文本 + UNCERTAIN 往往是问候/寒暄/无任务输入，不应进入规划
         # if classification.category == IntentCategory.UNCERTAIN:

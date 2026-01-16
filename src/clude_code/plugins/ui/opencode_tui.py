@@ -56,20 +56,20 @@ def run_opencode_tui(
         SUB_TITLE = "opencode"
         CSS = """
         Screen { layout: vertical; }
-        #main { height: 1fr; }
+        /* 主区（对话/输出 + 操作面板）与事件区尽量等高，便于排查问题 */
+        #main { height: 1fr; min-height: 10; }
         /* 顶部 clude chat 面板：按内容自适应，避免多余空白 */
         #header_panel { height: auto; min-height: 3; }
         #left { width: 3fr; }
         #right { width: 2fr; }
         /* 输入框：需要给边框/提示留空间，否则会导致无法输入或不可见 */
         #input_row { height: 3; min-height: 3; }
-        /* 事件区：稍微收紧，给主内容更多空间 */
-        #events { height: 8; }
+        /* 事件区：提高高度（与主区接近等高）；并给最小高度避免太扁 */
+        #events { height: 1fr; min-height: 10; }
         _Log { border: solid $primary; }
         /* 所有小窗口标题居中（对齐你的要求） */
-        #header_panel, #conversation, #status, #ops, #events, #input { border-title-align: center; }
-        /* 右侧：状态按内容自适应，操作面板吃掉剩余高度 */
-        #status { height: auto; }
+        #header_panel, #conversation, #ops, #events, #input { border-title-align: center; }
+        /* 右侧：操作面板吃掉剩余高度 */
         #ops { height: 1fr; min-height: 8; }
         """
 
@@ -105,6 +105,17 @@ def run_opencode_tui(
             self._llm_completion = 0
             self._tps = 0.0
             self._verbosity: str = "compact"  # compact|verbose|debug（仅影响“对话/输出”的块内容）
+            # 对话窗格风格：log = 复刻 chat 默认“执行日志流”；block = 结构化块
+            self._conversation_mode: str = "log"
+            self._llm_round: int = 0
+
+            # LLM 请求历史（用于“操作面板”的多条进度条展示）
+            # 每条：{id, idx, kind, step_id, start_ts, elapsed_ms, status, model, prompt_tokens, completion_tokens}
+            self._llm_req_seq: int = 0
+            self._llm_requests: deque[dict[str, Any]] = deque(maxlen=12)
+            self._active_llm_id: int | None = None
+            self._spinner_frames: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+            self._spinner_idx: int = 0
 
         def _now_hhmmss(self) -> str:
             try:
@@ -126,6 +137,240 @@ def run_opencode_tui(
                 "error": "red",
                 "success": "green",
             }.get(lv, "cyan")
+
+        def _event_phase(self) -> str:
+            """把内部状态映射到更稳定的 phase 展示字段（用于事件窗格摘要）。"""
+            st = (self._state or "").strip().upper()
+            if st in {"INTAKE", "PLANNING", "EXECUTING", "VERIFY", "DONE"}:
+                return st
+            if st in {"IDLE"}:
+                return "IDLE"
+            return st or "UNK"
+
+        def _event_level_code(self, et: str, data: dict[str, Any]) -> str:
+            """
+            事件级别（用于事件窗格摘要）：
+            - E: Error
+            - W: Warning
+            - I: Info
+            - D: Debug
+            """
+            et = (et or "").strip()
+            if et in {"plan_parse_failed", "policy_deny_tool", "policy_deny_cmd", "denied_by_user"}:
+                return "E"
+            if et in {"stuttering_detected"}:
+                return "W"
+            if et == "tool_result":
+                ok = bool((data or {}).get("ok"))
+                return "I" if ok else "E"
+            if et in {"llm_request_params", "llm_usage"}:
+                return "D"
+            return "I"
+
+        def _event_summary(self, et: str, data: dict[str, Any]) -> str:
+            """把不同事件压缩成一段“人能扫读”的摘要（一级节点用）。"""
+            data = data or {}
+            if et == "state":
+                return f"state={data.get('state')} reason={data.get('reason') or data.get('step') or data.get('mode')}"
+            if et == "intent_classified":
+                return f"category={data.get('category')} conf={data.get('confidence')}"
+            if et == "planning_llm_request":
+                return f"attempt={data.get('attempt')}"
+            if et == "plan_generated":
+                return f"title={data.get('title')} steps={data.get('steps')}"
+            if et == "plan_step_start":
+                return f"{data.get('idx')}/{data.get('total')} step_id={data.get('step_id')}"
+            if et == "llm_request_params":
+                return (
+                    f"model={data.get('model')} prompt={data.get('prompt_tokens_est')} "
+                    f"max={data.get('max_tokens')} temp={data.get('temperature')}"
+                )
+            if et == "llm_usage":
+                return (
+                    f"prompt={data.get('prompt_tokens_est')} completion={data.get('completion_tokens_est')} "
+                    f"elapsed_ms={data.get('elapsed_ms')}"
+                )
+            if et == "tool_call_parsed":
+                tool = str(data.get("tool") or "")
+                args = data.get("args") or {}
+                evs = self._summarize_tool_args(tool, args if isinstance(args, dict) else {})
+                evs_s = " ".join(evs[:3]) if evs else ""
+                return f"tool={tool}" + (f" {evs_s}" if evs_s else "")
+            if et == "tool_result":
+                tool = str(data.get("tool") or "")
+                ok = bool(data.get("ok"))
+                err = data.get("error")
+                code = ""
+                msg = ""
+                if isinstance(err, dict):
+                    code = str(err.get("code") or "")
+                    msg = str(err.get("message") or "")
+                else:
+                    msg = str(err or "")
+                if msg and len(msg) > 80:
+                    msg = msg[:79] + "…"
+                return f"tool={tool} ok={ok}" + (f" code={code}" if code else "") + (f" err={msg}" if msg and not ok else "")
+            if et == "display":
+                title = str(data.get("title") or "display")
+                content = str(data.get("content") or "")
+                content = content.strip().replace("\n", " ")
+                if len(content) > 80:
+                    content = content[:79] + "…"
+                return f"title={title} {content}".strip()
+            if et in {"policy_deny_tool"}:
+                return f"tool={data.get('tool')} reason={data.get('reason')}"
+            if et in {"policy_deny_cmd"}:
+                c = str(data.get("command") or "")
+                c = c.replace("\n", " ")
+                if len(c) > 80:
+                    c = c[:79] + "…"
+                return f"cmd={c} reason={data.get('reason')}"
+            if et == "denied_by_user":
+                return f"tool={data.get('tool')}"
+            return ""
+
+        def _event_icon(self, lvl: str, et: str, data: dict[str, Any]) -> tuple[str, str]:
+            """事件摘要行的小图标（更好扫读）。返回 (icon, style)。"""
+            if et == "tool_result":
+                ok = bool((data or {}).get("ok"))
+                return ("✓" if ok else "✗", "bold green" if ok else "bold red")
+            if lvl == "E":
+                return ("✗", "bold red")
+            if lvl == "W":
+                return ("⚠", "bold yellow")
+            if lvl == "D":
+                return ("·", "dim")
+            return ("•", "bold white")
+
+        def _event_name_style(self, et: str) -> str:
+            et = (et or "").strip()
+            if et.startswith("llm_"):
+                return "bold magenta"
+            if et.startswith("tool_"):
+                return "bold yellow"
+            if et.startswith("plan_") or et.startswith("planning_"):
+                return "bold cyan"
+            if et.startswith("policy_") or et in {"denied_by_user"}:
+                return "bold red"
+            if et == "state":
+                return "bold blue"
+            if et == "display":
+                return "bold cyan"
+            return "bold"
+
+        def _one_line(self, s: Any, limit: int = 140) -> str:
+            try:
+                t = str(s or "").replace("\n", " ").strip()
+            except Exception:
+                return ""
+            if len(t) > limit:
+                t = t[: limit - 1] + "…"
+            return t
+
+        def _fmt_duration(self, seconds: float) -> str:
+            try:
+                s = max(0, int(seconds))
+                m, s = divmod(s, 60)
+                h, m = divmod(m, 60)
+                if h > 0:
+                    return f"{h}:{m:02d}:{s:02d}"
+                return f"0:{m:02d}:{s:02d}"
+            except Exception:
+                return "0:00:00"
+
+        def _format_llm_progress_line(self, *, idx: int, purpose: str, done: bool, elapsed_s: float) -> Text:
+            """
+            控制面板里的 LLM 请求进度行，形态对齐你给的参考：
+            1. LLM 请求 [目的]   0% -:--:--
+            """
+            mid = (purpose or "分析").strip()
+            if len(mid) > 24:
+                mid = mid[:23] + "…"
+            # 样式对齐：LLM 请求 [xxxxxxx]   0% -:--:--
+            mid = f"[{mid}]"
+            pct = "100%" if done else "0%"
+            tail = self._fmt_duration(elapsed_s) if done else "-:--:--"
+            spin = "" if done else (self._spinner_frames[self._spinner_idx % len(self._spinner_frames)] + " ")
+
+            t = Text()
+            t.append(f"{idx}. ", style="dim")
+            t.append(spin, style="yellow" if not done else "dim")
+            t.append("LLM 请求 ", style="bold")
+            t.append(mid, style="bold cyan" if done else "bold yellow")
+            t.append("   ", style="dim")
+            t.append(f"{pct} ", style="bold green" if done else "yellow")
+            t.append(tail, style="white" if done else "dim")
+            return t
+
+        def _llm_start(self, *, kind: str, step_id: str | None = None, purpose: str | None = None) -> None:
+            self._llm_req_seq += 1
+            p = (purpose or "").strip()
+            if not p:
+                # 先给一个占位目的；更准确的目的会在 llm_request_params 里根据 stage/step_id 自动修正
+                p = "准备请求"
+            rec: dict[str, Any] = {
+                "id": self._llm_req_seq,
+                "idx": self._llm_req_seq,
+                "kind": kind,  # planning|execute_step|react|unknown
+                "step_id": step_id,
+                "purpose": p,
+                "start_ts": time.time(),
+                "elapsed_ms": None,
+                "status": "running",
+                "model": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+            }
+            self._llm_requests.append(rec)
+            self._active_llm_id = rec["id"]
+
+        def _llm_attach_params(self, data: dict[str, Any]) -> None:
+            if self._active_llm_id is None:
+                return
+            try:
+                rec = next((r for r in reversed(self._llm_requests) if r.get("id") == self._active_llm_id), None)
+                if not rec:
+                    return
+                # 用 stage/step_id 推导“本次请求目的”（这比仅靠 kind/step_id 更准确）
+                stage = str(data.get("stage") or "").strip()
+                sid = str(data.get("step_id") or "").strip() or None
+                if stage:
+                    rec["kind"] = stage
+                    rec["step_id"] = sid
+                    if stage == "planning":
+                        rec["purpose"] = "生成整体计划"
+                    elif stage == "replan":
+                        rec["purpose"] = f"重规划 {sid}" if sid else "重规划步骤"
+                    elif stage == "execute_step":
+                        # execute_step 的核心目标：分析当前步骤并决定下一动作（工具/完成/重规划）
+                        rec["purpose"] = f"分析步骤 {sid}" if sid else "分析并决定下一步"
+                    elif stage == "react_fallback":
+                        rec["purpose"] = "ReAct 决策/直接回答"
+                    else:
+                        # 其它阶段：给一个可读兜底
+                        rec["purpose"] = stage
+                if data.get("model"):
+                    rec["model"] = data.get("model")
+                if isinstance(data.get("prompt_tokens_est"), int):
+                    rec["prompt_tokens"] = data.get("prompt_tokens_est")
+            except Exception:
+                pass
+
+        def _llm_finish(self, data: dict[str, Any]) -> None:
+            if self._active_llm_id is None:
+                return
+            try:
+                rec = next((r for r in reversed(self._llm_requests) if r.get("id") == self._active_llm_id), None)
+                if not rec:
+                    return
+                elapsed_ms = data.get("elapsed_ms")
+                if isinstance(elapsed_ms, int) and elapsed_ms >= 0:
+                    rec["elapsed_ms"] = elapsed_ms
+                if isinstance(data.get("completion_tokens_est"), int):
+                    rec["completion_tokens"] = data.get("completion_tokens_est")
+                rec["status"] = "done"
+            finally:
+                self._active_llm_id = None
 
         def _push_structured_block(
             self,
@@ -195,6 +440,54 @@ def run_opencode_tui(
                 except Exception:
                     pass
 
+        def _push_chat_log(self, text: str, *, style: str = "white") -> None:
+            """在对话窗格输出“chat 默认日志流”的一行。"""
+            t = (text or "").rstrip()
+            if not t:
+                return
+            conv = self.query_one("#conversation", _Log)
+            conv.write(Text(t, style=style))
+            if self._follow:
+                try:
+                    conv.scroll_end(animate=False)
+                except Exception:
+                    pass
+
+        def _format_args_one_line(self, args: Any, *, limit: int = 220) -> str:
+            try:
+                s = json.dumps(args, ensure_ascii=False, default=str)
+            except Exception:
+                s = str(args)
+            s = s.replace("\n", " ").strip()
+            if len(s) > limit:
+                s = s[: limit - 1] + "…"
+            return s
+
+        def _format_tool_result_summary(self, tool: str, ok: bool, data: dict[str, Any]) -> str:
+            """尽量用人能理解的方式概括 tool_result。"""
+            err = data.get("error")
+            if not ok:
+                if isinstance(err, dict):
+                    code = err.get("code")
+                    msg = err.get("message")
+                    return f"失败: {code} {self._one_line(msg, 140)}".strip()
+                return f"失败: {self._one_line(err, 140)}".strip()
+            payload = data.get("payload") or {}
+            if tool == "list_dir" and isinstance(payload, dict):
+                # 兼容不同实现：items/entries 可能存在
+                items = payload.get("items") or payload.get("entries")
+                if isinstance(items, list):
+                    return f"成功: {len(items)} 项"
+            if tool == "grep" and isinstance(payload, dict):
+                hits = payload.get("hits") or payload.get("matches") or payload.get("count")
+                if isinstance(hits, int):
+                    return f"成功: 找到 {hits} 个匹配"
+            if tool == "read_file" and isinstance(payload, dict):
+                content = payload.get("content") or payload.get("text")
+                if isinstance(content, str):
+                    return f"成功: 读取 {len(content)} 字符"
+            return "成功"
+
         def _summarize_tool_args(self, tool: str, args: dict[str, Any]) -> list[str]:
             """从 args 中提炼“对话区可读证据”，避免 dump 全量 JSON。"""
             tool = (tool or "").strip()
@@ -237,10 +530,10 @@ def run_opencode_tui(
                 with Vertical(id="left"):
                     yield _Log(id="conversation")
                 with Vertical(id="right"):
-                    yield _Log(id="status")
                     yield _Log(id="ops")
             with Horizontal(id="input_row"):
                 yield Input(placeholder="输入内容，回车发送（q 退出）", id="input")
+            # 事件窗格：纯日志输出（不支持折叠/展开，便于“顺序回放 + 复制粘贴”排障）
             yield _Log(id="events")
             yield Footer()
 
@@ -248,20 +541,18 @@ def run_opencode_tui(
             # 为每个“窗口”设置边框标题（对齐 enhanced 的分区命名）
             header_panel = self.query_one("#header_panel", _Log)
             conversation = self.query_one("#conversation", _Log)
-            status_panel = self.query_one("#status", _Log)
             ops_panel = self.query_one("#ops", _Log)
             events_panel = self.query_one("#events", _Log)
             input_box = self.query_one("#input", Input)
 
             header_panel.border_title = "clude chat"
             conversation.border_title = "对话/输出"
-            status_panel.border_title = "状态"
             ops_panel.border_title = "操作面板"
             events_panel.border_title = "事件"
             input_box.border_title = "you"
 
             # 标题居中（Textual 支持 border_title_align）
-            for w in (header_panel, conversation, status_panel, ops_panel, events_panel, input_box):
+            for w in (header_panel, conversation, ops_panel, events_panel, input_box):
                 try:
                     w.border_title_align = "center"  # type: ignore[attr-defined]
                 except Exception:
@@ -309,13 +600,24 @@ def run_opencode_tui(
                 pass
 
             self._refresh_header_panel()
-            self._refresh_status()
             self._refresh_ops()
 
             self.query_one("#events", _Log).write(
-                "[dim]提示：滚轮可滚动历史；按 f 切换跟随输出；按 End 回到底部。[/dim]"
+                Text("提示：事件窗格为顺序日志（不支持折叠/展开）；关键事件会输出摘要 + JSON。", style="dim")
             )
             self.set_interval(0.05, self._drain_events)
+            # 仅用于“正在请求中”的 spinner 动画：轻量刷新 ops
+            self.set_interval(0.15, self._tick_ops_spinner)
+
+        def _tick_ops_spinner(self) -> None:
+            """请求进行中时刷新 spinner（不依赖新事件到来）。"""
+            if self._active_llm_id is None and not self._busy:
+                return
+            self._spinner_idx = (self._spinner_idx + 1) % 10_000
+            try:
+                self._refresh_ops()
+            except Exception:
+                pass
 
         def _refresh_header_panel(self) -> None:
             """顶部 `clude chat` 窗口：承载 enhanced 顶栏里的关键运行态信息。"""
@@ -340,22 +642,18 @@ def run_opencode_tui(
             # 第二行：Context/Output/TPS
             hp.write(Text(f"  {self._render_top_metrics()}", style="dim"))
 
-        def _refresh_status(self) -> None:
-            """右侧“状态”窗格：保留环境/模型信息，避免与顶部重复。"""
-            status = self.query_one("#status", _Log)
-            status.clear()
-            t = Table(show_header=False, box=None, pad_edge=False)
-            t.add_column(justify="left", style="bold", width=6)
-            t.add_column(justify="left")
-
-            t.add_row("模型", self._model[:48])
-            if self._base_url:
-                t.add_row("地址", self._base_url[:80])
-            t.add_row("状态", str(self._state))
-            t.add_row("步骤", str(self._last_step))
-            t.add_row("事件", str(self._last_event))
-            t.add_row("任务", f"{self._active_tasks} 活跃 / {len(self._recent_completed)} 最近完成")
-            status.write(t)
+            # 第三行：把原“状态”窗格信息合并进来（模型/地址/任务）
+            row3 = Table.grid(expand=True)
+            row3.add_column(justify="left", ratio=3, no_wrap=True)
+            row3.add_column(justify="left", ratio=5, no_wrap=True)
+            row3.add_column(justify="right", ratio=4, no_wrap=True)
+            model = (self._model or "auto")[:48]
+            base = (self._base_url or "")[:80]
+            t_model = Text(f"模型: {model}", style="dim")
+            t_base = Text(f"地址: {base}" if base else "地址: -", style="dim")
+            t_tasks = Text(f"任务: {self._active_tasks} 活跃 / {len(self._recent_completed)} 最近完成", style="dim")
+            row3.add_row(t_model, t_base, t_tasks)
+            hp.write(row3)
 
         def _refresh_ops(self) -> None:
             """刷新右侧“操作面板”窗格（对齐 enhanced 的快照信息）。"""
@@ -367,10 +665,31 @@ def run_opencode_tui(
             llm_t.add_column(justify="left")
             if self._last_llm_messages is not None:
                 llm_t.add_row("LLM", f"messages={self._last_llm_messages}")
-            llm_t.add_row("用量", self._render_top_metrics())
             ops.write(llm_t)
 
             ops.write(Text(""))
+
+            # LLM 请求历史（多条）
+            if self._llm_requests:
+                ops.write(Text("LLM 请求", style="bold dim"))
+                for r in list(self._llm_requests)[-6:]:
+                    done = (r.get("status") == "done")
+                    start_ts = float(r.get("start_ts") or time.time())
+                    if done and isinstance(r.get("elapsed_ms"), int):
+                        elapsed_s = float(r["elapsed_ms"]) / 1000.0
+                    else:
+                        elapsed_s = time.time() - start_ts
+                    purpose = str(r.get("purpose") or "") or str(r.get("kind") or "分析")
+                    ops.write(
+                        self._format_llm_progress_line(
+                            idx=int(r.get("idx") or 0),
+                            purpose=purpose,
+                            done=done,
+                            elapsed_s=elapsed_s,
+                        )
+                    )
+                ops.write(Text(""))
+
             if self._last_tool:
                 args = f" {self._last_tool_args}" if self._last_tool_args else ""
                 t = Text()
@@ -384,7 +703,8 @@ def run_opencode_tui(
 
         def _set_follow(self, follow: bool) -> None:
             self._follow = bool(follow)
-            for wid in ("#conversation", "#status", "#ops", "#events"):
+            # RichLog panes 支持 auto_scroll
+            for wid in ("#conversation", "#ops", "#events"):
                 try:
                     self.query_one(wid, _Log).auto_scroll = self._follow
                 except Exception:
@@ -392,14 +712,15 @@ def run_opencode_tui(
 
         def action_toggle_follow(self) -> None:
             self._set_follow(not self._follow)
-            self.query_one("#events", _Log).write(
-                f"[dim]follow={'on' if self._follow else 'off'}[/dim]"
-            )
+            try:
+                self.query_one("#events", _Log).write(Text(f"follow={'on' if self._follow else 'off'}", style="dim"))
+            except Exception:
+                pass
 
         def action_jump_bottom(self) -> None:
             # 回到底部并开启 follow
             self._set_follow(True)
-            for wid in ("#conversation", "#status", "#ops", "#events"):
+            for wid in ("#conversation", "#ops", "#events"):
                 try:
                     self.query_one(wid, _Log).scroll_end(animate=False)
                 except Exception:
@@ -413,36 +734,56 @@ def run_opencode_tui(
                 ctx = f"Context: {self._llm_prompt}"
             return f"{ctx}    Output: {self._llm_completion}/∞    {self._tps:.1f} tokens/sec"
 
-        def _append_event_line(self, et: str, data: dict[str, Any], *, step: int | str | None = None) -> None:
+        def _append_event_line(
+            self,
+            et: str,
+            data: dict[str, Any],
+            *,
+            step: int | str | None = None,
+            trace_id: str | None = None,
+        ) -> None:
+            """
+            事件窗格（日志）：
+            - 每条事件输出一行强摘要（可扫读）
+            - 关键事件输出格式化 JSON（可复制粘贴排障）
+            """
             events = self.query_one("#events", _Log)
 
-            # 事件摘要行（一眼能看懂 + 可定位）
-            head = Text()
-            head.append(f"{step} " if step is not None else "", style="dim")
-            head.append(et, style="bold")
+            ts = self._now_hhmmss()
+            st = "-" if step is None else str(step)
+            tr = (trace_id or "").strip()
+            tr8 = tr[:8] if tr else "-"
+            phase = self._event_phase()
+            lvl = self._event_level_code(et, data)
+            icon, icon_style = self._event_icon(lvl, et, data)
+            summary = self._one_line(self._event_summary(et, data), 150)
 
-            # 简短摘要字段（对调试最有价值）
-            summary = ""
-            if et == "state":
-                summary = f"state={data.get('state')}"
-            elif et == "plan_step_start":
-                summary = f"{data.get('idx')}/{data.get('total')} step_id={data.get('step_id')}"
-            elif et == "llm_request_params":
-                summary = f"model={data.get('model')} api={data.get('api_mode')} messages={data.get('messages_count')}"
-            elif et == "llm_usage":
-                summary = f"prompt={data.get('prompt_tokens_est')} output={data.get('completion_tokens_est')} elapsed_ms={data.get('elapsed_ms')}"
-            elif et == "tool_call_parsed":
-                summary = f"tool={data.get('tool')}"
-            elif et == "tool_result":
-                summary = f"tool={data.get('tool')} ok={data.get('ok')}"
-
+            label_text = Text()
+            label_text.append(f"[{ts}] ", style="dim")
+            label_text.append(f"{icon} ", style=icon_style)
+            label_text.append(f"{phase} ", style="dim")
+            label_text.append(f"step={st} ", style="dim")
+            label_text.append(et, style=self._event_name_style(et))
+            label_text.append("  ", style="dim")
+            label_text.append(f"trace={tr8}", style="dim cyan")
             if summary:
-                head.append(" ", style="dim")
-                head.append(summary, style="dim")
-            events.write(head)
+                label_text.append("  |  ", style="dim")
+                label_text.append(summary, style="white" if lvl != "D" else "dim")
 
-            # 关键事件：输出格式化 JSON（可滚轮查看完整细节）
-            if et in {"llm_request_params", "llm_usage", "tool_call_parsed", "tool_result", "plan_generated", "replan_generated", "plan_parse_failed"}:
+            events.write(label_text)
+
+            # 输出 JSON（只对关键事件，避免刷屏）
+            if et in {
+                "llm_request_params",
+                "llm_usage",
+                "tool_call_parsed",
+                "tool_result",
+                "plan_generated",
+                "replan_generated",
+                "plan_parse_failed",
+                "policy_deny_tool",
+                "policy_deny_cmd",
+            }:
                 try:
                     s = json.dumps(data, ensure_ascii=False, default=str, indent=2)
                 except Exception:
@@ -466,10 +807,63 @@ def run_opencode_tui(
             trace_id = ev.get("trace_id")
 
             conversation = self.query_one("#conversation", _Log)
-            status = self.query_one("#status", _Log)
             ops = self.query_one("#ops", _Log)
 
-            self._append_event_line(et, data, step=ev.get("step"))
+            self._append_event_line(et, data, step=ev.get("step"), trace_id=trace_id)
+
+            # --- 对话/输出：chat 默认日志流（你要求的格式） ---
+            if self._conversation_mode == "log":
+                if et == "turn_start":
+                    self._llm_round = 0
+                    self._push_chat_log(f"开始新的一轮对话 trace_id={trace_id}", style="bold cyan")
+                elif et == "user_message":
+                    self._push_chat_log(f"用户输入: {data.get('text')}", style="white")
+                elif et == "intent_classified":
+                    cat = data.get("category")
+                    conf = data.get("confidence")
+                    # category 可能是 {value: "..."} 或字符串
+                    if isinstance(cat, dict) and "value" in cat:
+                        cat = cat.get("value")
+                    self._push_chat_log(f"意图识别结果: {cat} (置信度: {conf})", style="dim")
+                elif et == "planning_skipped":
+                    self._push_chat_log("检测到能力询问或通用对话，跳过显式规划阶段。", style="dim")
+                elif et == "user_content_built":
+                    prev = str(data.get("preview") or "")
+                    trunc = bool(data.get("truncated"))
+                    if trunc:
+                        prev = prev + "…"
+                    self._push_chat_log(f"user input LLM  user_content={prev}", style="dim")
+                elif et == "llm_request_params":
+                    # 以 params 事件作为“本轮请求”计数入口（包含 stage/messages）
+                    self._llm_round += 1
+                    mc = data.get("messages_count")
+                    self._push_chat_log(f"→ 第 {self._llm_round} 轮：请求 LLM（消息数={mc}）", style="bold")
+                    self._push_chat_log(
+                        f"LLM 请求参数: model={data.get('model')} api_mode={data.get('api_mode')} messages={data.get('messages_count')}",
+                        style="dim",
+                    )
+                elif et == "llm_response_data":
+                    self._push_chat_log(f"LLM 返回摘要: text_length={data.get('text_length')}", style="dim")
+                elif et == "tool_call_parsed":
+                    tool = str(data.get("tool") or "")
+                    args = data.get("args") or {}
+                    self._push_chat_log(
+                        f"🔧 解析到工具调用: {tool} [轮次] {self._llm_round} [参数] {self._format_args_one_line(args)}",
+                        style="yellow",
+                    )
+                    self._push_chat_log(f"▶ 执行工具: {tool}", style="yellow")
+                elif et == "display":
+                    # display 属于 Agent 主动输出
+                    content = str(data.get("content") or "").strip()
+                    if content:
+                        self._push_chat_log(f"ℹ️ {self._one_line(content, 240)}", style="cyan")
+                elif et == "tool_result":
+                    tool = str(data.get("tool") or "")
+                    ok = bool(data.get("ok"))
+                    icon = "✓" if ok else "✗"
+                    style = "green" if ok else "red"
+                    summary = self._format_tool_result_summary(tool, ok, data)
+                    self._push_chat_log(f"{icon} 工具执行{'成功' if ok else '失败'}: {tool} [结果] {summary}", style=style)
 
             def _push_block(title: str, lines: list[str], *, color: str = "cyan") -> None:
                 """在对话窗格输出 Claude Code 风格阶段块（对齐 enhanced 的视觉语言）。"""
@@ -494,17 +888,17 @@ def run_opencode_tui(
                 self._operation = str(data.get("reason") or data.get("step") or data.get("mode") or "运行中")
                 self._active_tasks = 1 if self._busy else 0
                 self._refresh_header_panel()
-                self._refresh_status()
-                # 对话区：给一条“过程解释”块（更像 Claude Code 的可读叙事）
-                self._push_structured_block(
-                    title="状态切换",
-                    level="progress" if self._state in {"PLANNING", "EXECUTING"} else "info",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"state={self._state}",
-                    decision=str(data.get("reason") or data.get("step") or data.get("mode") or ""),
-                )
+                if self._conversation_mode != "log":
+                    # 对话区：结构化块
+                    self._push_structured_block(
+                        title="状态切换",
+                        level="progress" if self._state in {"PLANNING", "EXECUTING"} else "info",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"state={self._state}",
+                        decision=str(data.get("reason") or data.get("step") or data.get("mode") or ""),
+                    )
                 return
 
             # 开场：项目记忆加载状态（对齐 enhanced 的“项目记忆已加载（CLUDE.md）”块）
@@ -546,28 +940,29 @@ def run_opencode_tui(
                 self._operation = f"执行步骤 {idx}/{total}: {step_id}"
                 self._active_tasks = 1 if self._busy else 0
                 self._refresh_header_panel()
-                self._refresh_status()
-                self._push_structured_block(
-                    title="执行步骤开始",
-                    level="progress",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"{idx}/{total}  step_id={step_id}",
-                    decision="开始执行本步骤；后续将根据模型输出调用工具并回喂结果。",
-                    evidence=[f"step_id={step_id}"],
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="执行步骤开始",
+                        level="progress",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"{idx}/{total}  step_id={step_id}",
+                        decision="开始执行本步骤；后续将根据模型输出调用工具并回喂结果。",
+                        evidence=[f"step_id={step_id}"],
+                    )
                 return
 
             if et == "user_message":
-                txt = str(data.get("text", "")).strip()
-                if txt:
-                    t = Text()
-                    t.append("you: ", style="bold blue")
-                    t.append(txt)
-                    conversation.write(t)
-                    if self._follow:
-                        conversation.scroll_end(animate=False)
+                if self._conversation_mode != "log":
+                    txt = str(data.get("text", "")).strip()
+                    if txt:
+                        t = Text()
+                        t.append("you: ", style="bold blue")
+                        t.append(txt)
+                        conversation.write(t)
+                        if self._follow:
+                            conversation.scroll_end(animate=False)
                 return
 
             if et in {"intent_classified"}:
@@ -589,7 +984,10 @@ def run_opencode_tui(
                 self._operation = "规划：LLM 请求"
                 self._active_tasks = 1
                 self._refresh_header_panel()
-                self._refresh_status()
+                # 记录一次 LLM 请求（规划）
+                if self._active_llm_id is None:
+                    self._llm_start(kind="planning", step_id=None, purpose="生成计划")
+                    self._refresh_ops()
                 self._push_structured_block(
                     title="进入规划阶段（生成 Plan）",
                     level="progress",
@@ -636,47 +1034,47 @@ def run_opencode_tui(
                 return
 
             if et in {"assistant_text", "assistant"}:
-                txt = str(data.get("text", "")).strip()
-                if txt:
-                    t = Text()
-                    t.append("assistant: ", style="bold magenta")
-                    t.append(txt)
-                    conversation.write(t)
-                    if self._follow:
-                        conversation.scroll_end(animate=False)
+                if self._conversation_mode != "log":
+                    txt = str(data.get("text", "")).strip()
+                    if txt:
+                        t = Text()
+                        t.append("assistant: ", style="bold magenta")
+                        t.append(txt)
+                        conversation.write(t)
+                        if self._follow:
+                            conversation.scroll_end(animate=False)
                 # 对齐 enhanced：assistant_text 视为本轮已结束
                 self._state = "DONE"
                 self._operation = "本轮结束"
                 self._active_tasks = 0
                 self._refresh_header_panel()
-                self._refresh_status()
                 self._refresh_ops()
                 return
 
             if et == "display":
-                content = str(data.get("content", "")).strip()
-                level = str(data.get("level") or "info")
-                title = str(data.get("title") or "Agent 输出").strip()
-                thought = str(data.get("thought") or "").strip()
-                explanation = str(data.get("explanation") or "").strip()
-                ev_lines = data.get("evidence")
-                evidence: list[str] | None = None
-                if isinstance(ev_lines, list):
-                    evidence = [str(x) for x in ev_lines if str(x).strip()]
-                if content:
-                    self._push_structured_block(
-                        title=title,
-                        level=level,
-                        step=ev.get("step"),
-                        ev=et,
-                        trace_id=trace_id,
-                        summary=content,
-                        decision=(thought or explanation),
-                        evidence=evidence,
-                        hint="（display 工具输出）",
-                        # display 的核心价值就是“过程可见”，因此强制显示 Why（思考过程）
-                        force_show_decision=True,
-                    )
+                if self._conversation_mode != "log":
+                    content = str(data.get("content", "")).strip()
+                    level = str(data.get("level") or "info")
+                    title = str(data.get("title") or "Agent 输出").strip()
+                    thought = str(data.get("thought") or "").strip()
+                    explanation = str(data.get("explanation") or "").strip()
+                    ev_lines = data.get("evidence")
+                    evidence: list[str] | None = None
+                    if isinstance(ev_lines, list):
+                        evidence = [str(x) for x in ev_lines if str(x).strip()]
+                    if content:
+                        self._push_structured_block(
+                            title=title,
+                            level=level,
+                            step=ev.get("step"),
+                            ev=et,
+                            trace_id=trace_id,
+                            summary=content,
+                            decision=(thought or explanation),
+                            evidence=evidence,
+                            hint="（display 工具输出）",
+                            force_show_decision=True,
+                        )
                 return
 
             if et == "llm_request":
@@ -687,17 +1085,26 @@ def run_opencode_tui(
                     self._last_llm_messages = mc
                 self._active_tasks = 1
                 self._refresh_header_panel()
-                self._refresh_status()
+                # 记录一次 LLM 请求（执行步骤）
+                if self._active_llm_id is None:
+                    sid = str(data.get("step_id") or "") or None
+                    self._llm_start(kind="execute_step", step_id=sid, purpose=(f"执行 {sid}" if sid else "执行步骤"))
                 self._refresh_ops()
-                conversation.write(Text("🤖 LLM 请求中...", style="dim"))
-                if self._follow:
-                    conversation.scroll_end(animate=False)
+                if self._conversation_mode != "log":
+                    conversation.write(Text("🤖 LLM 请求中...", style="dim"))
+                    if self._follow:
+                        conversation.scroll_end(animate=False)
                 return
 
             if et == "llm_request_params":
                 pt = data.get("prompt_tokens_est")
                 if isinstance(pt, int) and pt >= 0:
                     self._llm_prompt = pt
+                # 附加本次请求的参数（用于 ops 历史展示）
+                try:
+                    self._llm_attach_params(data)
+                except Exception:
+                    pass
                 mc = data.get("messages_count")
                 if isinstance(mc, int) and mc >= 0:
                     self._last_llm_messages = mc
@@ -705,7 +1112,6 @@ def run_opencode_tui(
                 self._operation = "LLM 请求"
                 self._active_tasks = 1
                 self._refresh_header_panel()
-                self._refresh_status()
                 self._refresh_ops()
                 self._push_structured_block(
                     title="LLM 请求参数",
@@ -736,8 +1142,12 @@ def run_opencode_tui(
                 self._operation = "LLM 返回"
                 self._active_tasks = 0
                 self._recent_completed.append("LLM")
+                # 结算本次 LLM 请求耗时
+                try:
+                    self._llm_finish(data)
+                except Exception:
+                    pass
                 self._refresh_header_panel()
-                self._refresh_status()
                 self._refresh_ops()
                 return
 
@@ -752,7 +1162,6 @@ def run_opencode_tui(
                 self._operation = f"工具: {tool}"
                 self._active_tasks = 1
                 self._refresh_header_panel()
-                self._refresh_status()
                 self._refresh_ops()
                 args = data.get("args", {}) or {}
                 evs = self._summarize_tool_args(tool, args if isinstance(args, dict) else {})
@@ -789,7 +1198,6 @@ def run_opencode_tui(
                 self._active_tasks = 0
                 self._recent_completed.append(f"{'✓' if ok else '✗'} {tool}")
                 self._refresh_header_panel()
-                self._refresh_status()
                 self._refresh_ops()
                 level = "success" if ok else "error"
                 code = ""
@@ -829,6 +1237,8 @@ def run_opencode_tui(
                     break
                 self._apply_event(ev)
                 drained += 1
+
+        # 事件窗格已改为纯日志输出：不再支持 Tree 的展开/收起交互
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             txt = (event.value or "").strip()
