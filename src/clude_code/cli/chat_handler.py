@@ -15,6 +15,7 @@ from clude_code.cli.shortcuts import ShortcutHandler, ShortcutAction, PromptResu
 from clude_code.cli.config_manager import get_config_manager
 from clude_code.cli.cli_logging import get_cli_logger
 from clude_code.cli.slash_commands import SlashContext, handle_slash_command
+from clude_code.cli.session_store import save_session
 
 # 使用主题化的控制台
 console = Console(theme=CLAUDE_THEME)
@@ -24,9 +25,12 @@ class ChatHandler:
     负责处理交互式聊天循环与 AgentLoop 的集成。
     支持动画界面、快捷键和配置管理。
     """
-    def __init__(self, cfg: CludeConfig):
+    def __init__(self, cfg: CludeConfig, *, session_id: str | None = None, history: list[Any] | None = None):
         self.cfg = cfg
-        self.agent = AgentLoop(cfg)
+        self.agent = AgentLoop(cfg, session_id=session_id)
+        if history:
+            # 只追加 user/assistant 历史，system 由本轮最新 repo map/CLAUDE.md 生成
+            self.agent.messages.extend(history)  # type: ignore[arg-type]
 
         # 初始化统一的日志系统
         self.cli_logger = get_cli_logger()
@@ -166,6 +170,15 @@ class ChatHandler:
         self.debug_mode = debug
         turn = self.agent.run_turn(prompt, confirm=_confirm, debug=debug)
         self._last_trace_id = getattr(turn, "trace_id", None)
+        try:
+            save_session(
+                workspace_root=self.cfg.workspace_root,
+                session_id=self.agent.session_id,
+                messages=self.agent.messages,
+                last_trace_id=self._last_trace_id,
+            )
+        except Exception:
+            pass
 
         fmt = (output_format or "text").strip().lower()
         if fmt == "json":
@@ -232,6 +245,15 @@ class ChatHandler:
                 turn = self.agent.run_turn(user_text, confirm=_confirm, debug=True, on_event=on_event_wrapper)
                 self._last_trace_id = getattr(turn, "trace_id", None)
                 self._log_turn_end(turn)
+                try:
+                    save_session(
+                        workspace_root=self.cfg.workspace_root,
+                        session_id=self.agent.session_id,
+                        messages=self.agent.messages,
+                        last_trace_id=self._last_trace_id,
+                    )
+                except Exception:
+                    pass
                 
                 # 结束后固定状态
                 if hasattr(display, "active_state"):
@@ -259,6 +281,15 @@ class ChatHandler:
             turn = self.agent.run_turn(user_text, confirm=_confirm, debug=debug)
             self._last_trace_id = getattr(turn, "trace_id", None)
             self._log_turn_end(turn)
+            try:
+                save_session(
+                    workspace_root=self.cfg.workspace_root,
+                    session_id=self.agent.session_id,
+                    messages=self.agent.messages,
+                    last_trace_id=self._last_trace_id,
+                )
+            except Exception:
+                pass
             self._print_assistant_response(turn, debug=debug, show_trace=not debug)
         except Exception as e:
             self.cli_logger.error(f"AgentLoop 运行异常 (Simple): {e}")

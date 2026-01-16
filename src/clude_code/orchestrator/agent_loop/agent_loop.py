@@ -100,7 +100,7 @@ class AgentLoop:
     - RAG 语义搜索集成
     """
     
-    def __init__(self, cfg: CludeConfig) -> None:
+    def __init__(self, cfg: CludeConfig, *, session_id: str | None = None) -> None:
         """
         初始化 AgentLoop 实例。
         
@@ -129,8 +129,8 @@ class AgentLoop:
             workspace_root=cfg.workspace_root,
             log_to_console=False,  # 只写入文件，不输出到控制台
         )
-        # keep it simple & stable enough for MVP; later replace with uuid4
-        self.session_id = f"sess_{id(self)}"
+        # 会话 ID：用于 trace/audit 关联。支持从 CLI 恢复会话时复用旧 session_id
+        self.session_id = session_id or f"sess_{id(self)}"
         self.logger.info(f"[dim]初始化 AgentLoop，session_id={self.session_id}[/dim]")
         self.llm = LlamaCppHttpClient(
             base_url=cfg.llm.base_url,

@@ -62,6 +62,8 @@ def chat(
     print_mode: bool = typer.Option(False, "--print", "-p", help="非交互：执行一次 prompt 后退出（对标 Claude Code -p）"),
     output_format: str = typer.Option("text", "--output-format", help="输出格式：text|json（--print 时生效）"),
     yes: bool = typer.Option(False, "--yes", help="非交互模式下自动同意需要确认的操作（有风险）"),
+    cont: bool = typer.Option(False, "--continue", "-c", help="继续最近会话（对标 Claude Code -c）"),
+    resume: str = typer.Option("", "--resume", "-r", help="恢复指定会话 ID（对标 Claude Code -r）"),
 ) -> None:
     """启动交互式 Agent 会话（或使用 --print 非交互执行）。"""
     from clude_code.cli.chat_handler import ChatHandler
@@ -70,7 +72,24 @@ def chat(
     if model:
         cfg.llm.model = model
     
-    handler = ChatHandler(cfg)
+    # 会话恢复：-c / -r
+    from clude_code.cli.session_store import load_latest_session, load_session
+
+    history = None
+    session_id = None
+    if resume:
+        loaded = load_session(cfg.workspace_root, resume.strip())
+        if loaded is None:
+            raise typer.BadParameter(f"未找到会话: {resume}")
+        history = loaded.history
+        session_id = loaded.session_id
+    elif cont:
+        loaded = load_latest_session(cfg.workspace_root)
+        if loaded is not None:
+            history = loaded.history
+            session_id = loaded.session_id
+
+    handler = ChatHandler(cfg, session_id=session_id, history=history)
     
     if select_model:
         handler.select_model_interactively()

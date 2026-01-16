@@ -50,6 +50,18 @@ clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 clude chat --select-model
 ```
 
+- **会话恢复（对标 Claude Code -c/-r）**
+  - `-c/--continue`：继续最近一次保存的会话（从 `.clude/sessions/latest.json` 指针加载）
+  - `-r/--resume <session_id>`：恢复指定会话
+
+```bash
+# 继续最近会话
+clude chat -c
+
+# 恢复指定会话
+clude chat -r sess_123456
+```
+
 - **Slash Commands（对标 Claude Code）**
   - 在交互模式中输入 `/命令` 可直接执行本地命令（不走 LLM），用于管理会话/配置/权限等：
     - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug`
