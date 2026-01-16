@@ -16,6 +16,7 @@ from typing import Any, Callable
 import json
 from rich.text import Text
 from rich.table import Table
+from rich.syntax import Syntax
 from collections import deque
 
 
@@ -234,8 +235,16 @@ def run_opencode_tui(
             """刷新右侧“操作面板”窗格（对齐 enhanced 的快照信息）。"""
             ops = self.query_one("#ops", _Log)
             ops.clear()
+            # 结构化：LLM + Tool 快照（便于排查）
+            llm_t = Table(show_header=False, box=None, pad_edge=False)
+            llm_t.add_column(justify="left", style="bold", width=8)
+            llm_t.add_column(justify="left")
             if self._last_llm_messages is not None:
-                ops.write(Text(f"LLM: messages={self._last_llm_messages}", style="dim"))
+                llm_t.add_row("LLM", f"messages={self._last_llm_messages}")
+            llm_t.add_row("用量", self._render_top_metrics())
+            ops.write(llm_t)
+
+            ops.write(Text(""))
             if self._last_tool:
                 args = f" {self._last_tool_args}" if self._last_tool_args else ""
                 t = Text()
@@ -278,20 +287,44 @@ def run_opencode_tui(
                 ctx = f"Context: {self._llm_prompt}"
             return f"{ctx}    Output: {self._llm_completion}/∞    {self._tps:.1f} tokens/sec"
 
-        def _append_event_line(self, et: str, data: dict[str, Any]) -> None:
+        def _append_event_line(self, et: str, data: dict[str, Any], *, step: int | str | None = None) -> None:
             events = self.query_one("#events", _Log)
-            # Textual 窗格可滚动：这里尽量保留完整信息，但设置上限避免超长卡顿
-            try:
-                s = json.dumps(data, ensure_ascii=False, default=str)
-            except Exception:
-                s = str(data)
-            if len(s) > 4000:
-                s = s[:3999] + "…"
-            t = Text()
-            t.append(et, style="dim")
-            t.append(" ")
-            t.append(s)
-            events.write(t)
+
+            # 事件摘要行（一眼能看懂 + 可定位）
+            head = Text()
+            head.append(f"{step} " if step is not None else "", style="dim")
+            head.append(et, style="bold")
+
+            # 简短摘要字段（对调试最有价值）
+            summary = ""
+            if et == "state":
+                summary = f"state={data.get('state')}"
+            elif et == "plan_step_start":
+                summary = f"{data.get('idx')}/{data.get('total')} step_id={data.get('step_id')}"
+            elif et == "llm_request_params":
+                summary = f"model={data.get('model')} api={data.get('api_mode')} messages={data.get('messages_count')}"
+            elif et == "llm_usage":
+                summary = f"prompt={data.get('prompt_tokens_est')} output={data.get('completion_tokens_est')} elapsed_ms={data.get('elapsed_ms')}"
+            elif et == "tool_call_parsed":
+                summary = f"tool={data.get('tool')}"
+            elif et == "tool_result":
+                summary = f"tool={data.get('tool')} ok={data.get('ok')}"
+
+            if summary:
+                head.append(" ", style="dim")
+                head.append(summary, style="dim")
+            events.write(head)
+
+            # 关键事件：输出格式化 JSON（可滚轮查看完整细节）
+            if et in {"llm_request_params", "llm_usage", "tool_call_parsed", "tool_result", "plan_generated", "replan_generated", "plan_parse_failed"}:
+                try:
+                    s = json.dumps(data, ensure_ascii=False, default=str, indent=2)
+                except Exception:
+                    s = str(data)
+                if len(s) > 8000:
+                    s = s[:7999] + "…"
+                events.write(Syntax(s, "json", word_wrap=True, line_numbers=False))
+
             if self._follow:
                 try:
                     events.scroll_end(animate=False)
@@ -309,7 +342,7 @@ def run_opencode_tui(
             status = self.query_one("#status", _Log)
             ops = self.query_one("#ops", _Log)
 
-            self._append_event_line(et, data)
+            self._append_event_line(et, data, step=ev.get("step"))
 
             def _push_block(title: str, lines: list[str], *, color: str = "cyan") -> None:
                 """在对话窗格输出 Claude Code 风格阶段块（对齐 enhanced 的视觉语言）。"""
@@ -377,6 +410,8 @@ def run_opencode_tui(
                 self._active_tasks = 1 if self._busy else 0
                 self._refresh_header_panel()
                 self._refresh_status()
+                # 对话区也给一个“阶段块”，更像 enhanced，便于人读
+                _push_block("执行步骤开始", [f"{idx}/{total}  step_id={step_id}"], color="yellow")
                 return
 
             if et == "user_message":
@@ -429,6 +464,9 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 self._refresh_status()
                 self._refresh_ops()
+                conversation.write(Text("🤖 LLM 请求中...", style="dim"))
+                if self._follow:
+                    conversation.scroll_end(animate=False)
                 return
 
             if et == "llm_request_params":
@@ -461,6 +499,7 @@ def run_opencode_tui(
                 self._recent_completed.append("LLM")
                 self._refresh_header_panel()
                 self._refresh_status()
+                self._refresh_ops()
                 return
 
             if et == "tool_call_parsed":
@@ -476,6 +515,13 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 self._refresh_status()
                 self._refresh_ops()
+                # 对话区：显示一行可读摘要
+                t = Text()
+                t.append("tool: ", style="bold yellow")
+                t.append(f"{tool} {args_str}")
+                conversation.write(t)
+                if self._follow:
+                    conversation.scroll_end(animate=False)
                 return
 
             if et == "tool_result":
