@@ -91,7 +91,7 @@ allow_network: false
 
 - **Slash Commands（对标 Claude Code）**
   - 在交互模式中输入 `/命令` 可直接执行本地命令（不走 LLM），用于管理会话/配置/权限等：
-    - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug`
+    - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug` `/cost`
   - 示例：
 
 ```bash

@@ -51,6 +51,7 @@ def _print_help(ctx: SlashContext) -> None:
     ctx.console.print("- `/init`：初始化项目记忆文件 `CLUDE.md`（对标 Claude Code）")
     ctx.console.print("- `/memory`：显示 `CLUDE.md` 路径与前若干行")
     ctx.console.print("- `/bug [描述]`：生成 bug 报告文件到 `.clude/bugs/`")
+    ctx.console.print("- `/cost`：显示本会话用量/成本估算（LLM 请求次数/耗时、token 估算、工具调用统计）")
     ctx.console.print("- `/commands`：列出 `.clude/commands/*.md` 自定义命令")
     ctx.console.print("- `/reload-commands`：重新加载自定义命令（无需重启）")
     ctx.console.print("")
@@ -228,8 +229,30 @@ def _bug(ctx: SlashContext, desc: str | None) -> None:
     body.append(f"- workspace_root: {ctx.cfg.workspace_root}\n")
     body.append(f"- model: {ctx.cfg.llm.model}\n")
     body.append(f"- base_url: {ctx.cfg.llm.base_url}\n")
+    try:
+        sid = getattr(ctx.agent, "session_id", None)
+        if sid:
+            body.append(f"- session_id: {sid}\n")
+    except Exception:
+        pass
     if ctx.last_trace_id:
         body.append(f"- last_trace_id: {ctx.last_trace_id}\n")
+
+    # 用量摘要（如果可用）
+    try:
+        usage = getattr(ctx.agent, "usage", None)
+        if usage is not None:
+            s = usage.summary()
+            body.append("\n## 用量/成本（估算）\n")
+            body.append(f"- llm_requests: {s.get('llm_requests')}\n")
+            body.append(f"- llm_total_ms: {s.get('llm_total_ms')}\n")
+            body.append(f"- prompt_tokens_est: {s.get('prompt_tokens_est')}\n")
+            body.append(f"- completion_tokens_est: {s.get('completion_tokens_est')}\n")
+            body.append(f"- total_tokens_est: {s.get('total_tokens_est')}\n")
+            body.append(f"- tool_calls: {s.get('tool_calls')}\n")
+            body.append(f"- tool_failures: {s.get('tool_failures')}\n")
+    except Exception:
+        pass
     body.append("\n## 附件（建议）\n")
     body.append("- `.clude/logs/trace.jsonl`（筛选 trace_id）\n")
     body.append("- `.clude/logs/audit.jsonl`（筛选 trace_id）\n")
@@ -238,6 +261,20 @@ def _bug(ctx: SlashContext, desc: str | None) -> None:
     p.write_text("".join(body), encoding="utf-8")
     ctx.console.print(f"[green]✓ 已生成 bug 报告[/green]: {p}")
 
+def _cost(ctx: SlashContext) -> None:
+    usage = getattr(ctx.agent, "usage", None)
+    if usage is None:
+        ctx.console.print("[yellow]当前会话未启用用量统计（usage 未初始化）[/yellow]")
+        return
+    s = usage.summary()
+    ctx.console.print("[bold]本会话用量/成本（估算）[/bold]")
+    ctx.console.print(f"- llm_requests: {s.get('llm_requests')}")
+    ctx.console.print(f"- llm_total_ms: {s.get('llm_total_ms')}")
+    ctx.console.print(f"- prompt_tokens_est: {s.get('prompt_tokens_est')}")
+    ctx.console.print(f"- completion_tokens_est: {s.get('completion_tokens_est')}")
+    ctx.console.print(f"- total_tokens_est: {s.get('total_tokens_est')}")
+    ctx.console.print(f"- tool_calls: {s.get('tool_calls')} (failures={s.get('tool_failures')})")
+    ctx.console.print("")
 
 def _commands(ctx: SlashContext) -> None:
     cmds = load_custom_commands(ctx.cfg.workspace_root)
@@ -314,6 +351,9 @@ def handle_slash_command(ctx: SlashContext, text: str) -> bool:
         return True
     if cmd == "/bug":
         _bug(ctx, " ".join(args) if args else None)
+        return True
+    if cmd == "/cost":
+        _cost(ctx)
         return True
     if cmd == "/commands":
         _commands(ctx)

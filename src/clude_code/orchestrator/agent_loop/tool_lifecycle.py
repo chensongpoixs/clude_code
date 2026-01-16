@@ -99,6 +99,14 @@ def run_tool_lifecycle(
         audit_data["payload"] = result.payload  # 记录 hash/undo_id
     loop.audit.write(trace_id=trace_id, event="tool_call", data=audit_data)
 
+    # 3.1 记录用量（工具调用）
+    try:
+        if hasattr(loop, "usage"):
+            loop.usage.record_tool(name=name, ok=bool(result.ok))
+        _ev("tool_usage", {"tool": name, "ok": bool(result.ok), "totals": (loop.usage.summary() if hasattr(loop, "usage") else None)})
+    except Exception:
+        pass
+
     # 4. 记录详细结果到文件
     loop.file_only_logger.info(
         f"工具执行结果 [tool={name}] [ok={result.ok}] "

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable, TYPE_CHECKING
 
 from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.observability.usage import estimate_tokens
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -95,6 +97,13 @@ def llm_chat(
     """
     normalize_messages_for_llama(loop, stage, step_id=step_id, _ev=_ev)
 
+    # 0) 估算 prompt tokens（轻量，不依赖服务端 usage）
+    prompt_tokens_est = 0
+    try:
+        prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
+    except Exception:
+        prompt_tokens_est = 0
+
     # 1) 记录/打印请求参数（model 等）与请求数据摘要
     try:
         req_obj = {
@@ -120,7 +129,9 @@ def llm_chat(
         pass
 
     # 2) 发起请求
+    t0 = time.time()
     assistant_text = loop.llm.chat(loop.messages)
+    elapsed_ms = int((time.time() - t0) * 1000)
 
     # 3) 记录/打印返回数据摘要（不依赖 tool_call，tool_call 在上层解析后另行落盘）
     try:
@@ -136,6 +147,31 @@ def llm_chat(
         loop.logger.info(f"[dim]LLM 返回摘要: text_length={resp_obj['text_length']}[/dim]")
     except Exception as ex:
         loop.file_only_logger.warning(f"LLM 响应后处理异常: {ex}", exc_info=True)
+
+    # 4) 记录用量（会话级）
+    try:
+        completion_tokens_est = estimate_tokens(assistant_text)
+        if hasattr(loop, "usage"):
+            loop.usage.record_llm(
+                prompt_tokens_est=prompt_tokens_est,
+                completion_tokens_est=completion_tokens_est,
+                elapsed_ms=elapsed_ms,
+            )
+        if _ev:
+            _ev(
+                "llm_usage",
+                {
+                    "stage": stage,
+                    "step_id": step_id,
+                    "elapsed_ms": elapsed_ms,
+                    "prompt_tokens_est": prompt_tokens_est,
+                    "completion_tokens_est": completion_tokens_est,
+                    "total_tokens_est": prompt_tokens_est + completion_tokens_est,
+                    "totals": (loop.usage.summary() if hasattr(loop, "usage") else None),
+                },
+            )
+    except Exception:
+        pass
 
     return assistant_text
 

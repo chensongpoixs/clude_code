@@ -88,6 +88,38 @@
 | | `CLUDE.md` (项目记忆) | ✅ 已完成 | P1 | 自动搜索并注入 System Prompt |
 | **Plugins** | 自定义命令扩展 | ✅ 已完成 | P1 | 支持从 `.clude/commands/*.md` 加载自定义命令；支持参数校验（`args/required/usage`）与命令级权限声明（`allowed_tools/disallowed_tools/allow_network`） |
 
+### 4.0.1 Claude Code 差距清单（仅针对 `clude chat --live --live-ui enhanced`）
+
+> 说明：这里只列 **Claude Code 终端体验**（产品级）里，我们还没对齐的部分。对标来源：[anthropics/claude-code](https://github.com/anthropics/claude-code)
+
+#### Gap-A：Git 工作流（Claude Code 强项）
+- **差距**：缺少“git 一等公民工作流”（diff/commit/branch/PR 文案/变更审阅）与对应事件在 live UI 的阶段化呈现。
+- **现状模块**：暂无 `git/*` 专用模块；仅有 `run_cmd` + policy 约束的通用能力。
+- **P1 验收标准**：
+  - 新增 `git_*` 工具（至少：`git_status/git_diff/git_commit`）或一套 git workflow 子命令
+  - live UI 能显示“变更摘要→审阅→提交”的阶段块（含失败原因与回滚建议）
+
+#### Gap-B：输入侧交互（终端内编辑体验）
+- **差距**：输入区缺少更强的终端编辑与交互（历史搜索、宏命令、可视化确认、可展开详情）。
+- **现状模块**：`cli/shortcuts.py` 有基础快捷键；live UI 侧重输出呈现。
+- **P1 验收标准**：
+  - 自定义命令支持“补全提示/用法提示”更完整（已做基础校验，下一步补 completion）
+  - tool_result 支持“摘要 + 可展开详情”（至少在 classic 输出模式提供 `--show-details`）
+
+#### Gap-C：插件生命周期（生态化）
+- **差距**：缺少 Claude Code 那类“插件安装/启用/禁用/版本兼容”的产品化流程（我们目前更多是“内置插件/声明式插件”）。
+- **现状模块**：`plugins/` 已有 registry 与沙箱执行，但缺少“用户侧生命周期管理命令”与统一 UX。
+- **P2 验收标准**：
+  - `clude plugins list|enable|disable|install`（最小集）
+  - 插件版本/host_version 不兼容时能明确拒绝并给出修复建议
+
+#### Gap-D：成本/用量与反馈闭环
+- **差距**：缺少 token/cost 统计、会话成本汇总、以及更产品化的反馈采集路径（Claude Code 有 `/bug` 与数据说明）。
+- **现状模块**：有 `trace/audit` + `/bug` 文件输出，但无成本统计聚合。
+- **P2 验收标准**：
+  - `/{cost}` 或 `clude cost` 输出：本会话 token/请求次数/耗时统计（本地模型可用“估算”）
+  - `/bug` 产物自动附带 session_id、最近 trace_id、关键配置摘要（已部分具备）
+
 ### 4.1 P0 迭代（稳定性优先，先保证“能用且一致”）
 
 > 本节从 P0 开始补齐两类信息：

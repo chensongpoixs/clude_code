@@ -7,6 +7,7 @@ from clude_code.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
+from clude_code.observability.usage import SessionUsage
 from clude_code.observability.logger import get_logger
 from clude_code.policy.command_policy import evaluate_command
 from clude_code.tooling.feedback import format_feedback_message
@@ -147,6 +148,7 @@ class AgentLoop:
         )
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)
+        self.usage = SessionUsage()
         
         # Knowledge / RAG systems
         self.indexer = IndexerService(cfg)
