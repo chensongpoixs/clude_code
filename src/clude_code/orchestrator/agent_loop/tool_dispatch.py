@@ -207,9 +207,10 @@ def _h_undo_patch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
         force=bool(args.get("force", False)),
     )
 
-
+# --- IGNORE ---
+# ... Other tool handlers ...
 def _h_write_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.write_file(path=args["path"], text=args.get("text", ""))
+    return loop.tools.write_file(path=args["path"], text=args.get("text", ""), append=bool(args.get("append", False)), overwrite=bool(args.get("overwrite", True)), create_dirs=bool(args.get("create_dirs", True)));
 
 
 def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
