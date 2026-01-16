@@ -71,10 +71,22 @@ class EnhancedLiveDisplay:
             transient=True,
         )
         
-        # 状态信息
-        self.current_state = "初始化"
+        # Claude Code 风格：状态 + 左侧滚动输出 + 右侧操作面板
+        self.current_state = "IDLE"
         self.current_operation = "等待中"
-        self.last_events: deque = deque(maxlen=10)
+        self.last_events: deque[str] = deque(maxlen=12)
+        self.conversation_lines: deque[str] = deque(maxlen=22)
+
+        # 快照（用于右侧面板）
+        self.last_step: int | str = "-"
+        self.last_event: str = "等待"
+        self.last_tool: dict[str, Any] = {}
+        self.last_tool_result: dict[str, Any] = {}
+        self.last_llm_req: dict[str, Any] = {}
+        self.last_llm_resp: dict[str, Any] = {}
+
+        # 当前“正在进行的任务”ID（用于 tool_result 时完成）
+        self._current_task_id: str | None = None
         
         # 性能统计
         self.operation_times: Dict[str, List[float]] = {}
@@ -86,16 +98,46 @@ class EnhancedLiveDisplay:
     
     def _setup_layout(self) -> None:
         """设置布局"""
+        # Claude Code 风格：左侧滚动输出 + 右侧状态/操作；底部事件
         self.layout.split(
-            Layout(name="header", size=5),
+            Layout(name="header", size=4),
             Layout(name="main"),
-            Layout(name="footer", size=8)
+            Layout(name="footer", size=7),
         )
-        
+
         self.layout["main"].split_row(
-            Layout(name="progress", ratio=3),
-            Layout(name="info", ratio=2)
+            Layout(name="conversation", ratio=3),
+            Layout(name="side", ratio=2),
         )
+
+        self.layout["side"].split(
+            Layout(name="status", size=8),
+            Layout(name="ops"),
+        )
+
+    def _push_line(self, s: str) -> None:
+        s = (s or "").strip()
+        if not s:
+            return
+        # 控制长度，避免撑爆终端
+        if len(s) > 220:
+            s = s[:219] + "…"
+        self.conversation_lines.append(s)
+
+    def _push_block(self, title: str, lines: list[str] | None = None, *, color: str = "cyan") -> None:
+        """
+        Claude Code 风格的“阶段块”输出：用边界 + 缩进让阶段与信息更可读。
+        """
+        title = (title or "").strip()
+        if not title:
+            return
+        self._push_line(f"[{color}]┌─ {title}[/{color}]")
+        for ln in (lines or []):
+            ln = (ln or "").strip()
+            if not ln:
+                continue
+            self._push_line(f"[{color}]│[/{color}] {ln}")
+        self._push_line(f"[{color}]└─[/{color}]")
     
     def add_task(
         self,
@@ -214,78 +256,246 @@ class EnhancedLiveDisplay:
     
     def on_event(self, event: Dict[str, Any]) -> None:
         """处理事件"""
-        event_type = event.get("event", "")
-        event_data = event.get("data", {})
-        
+        self.last_step = event.get("step", self.last_step)
+        event_type = str(event.get("event", ""))
+        event_data = event.get("data", {}) or {}
+        self.last_event = event_type
+
+        # 记录事件历史（更像 Claude Code 的“事件轨迹”）
+        self.last_events.append(f"{event_type}: {str(event_data)[:200]}")
+
+        # --- 状态机事件 ---
+        if event_type == "state":
+            st = str(event_data.get("state", ""))
+            if st:
+                self.current_state = st
+                self.current_operation = str(event_data.get("reason") or event_data.get("step") or "运行中")
+            return
+
+        # --- 规划阶段 ---
+        if event_type == "planning_llm_request":
+            attempt = event_data.get("attempt")
+            self._push_block("规划中", [f"尝试次数: {attempt}"], color="magenta")
+            return
+
+        if event_type == "plan_generated":
+            title = str(event_data.get("title", "")).strip()
+            steps = event_data.get("steps")
+            lines: list[str] = []
+            if title:
+                lines.append(f"[bold]目标[/bold]: {title}")
+            if steps is not None:
+                lines.append(f"[bold]步骤数[/bold]: {steps}")
+            self._push_block("计划已生成", lines, color="magenta")
+            return
+
+        if event_type == "plan_parse_failed":
+            attempt = event_data.get("attempt")
+            err = str(event_data.get("error", ""))[:200]
+            self._push_block("计划解析失败", [f"attempt={attempt}", f"[red]{err}[/red]"], color="red")
+            return
+
+        if event_type == "plan_step_start":
+            step_id = event_data.get("step_id")
+            idx = event_data.get("idx")
+            total = event_data.get("total")
+            self.current_operation = f"执行步骤 {idx}/{total}: {step_id}"
+            self._push_block("执行步骤开始", [f"{idx}/{total}  step_id={step_id}"], color="yellow")
+            return
+
+        if event_type == "plan_step_blocked":
+            step_id = event_data.get("step_id")
+            unmet = event_data.get("unmet_deps")
+            self._push_block("步骤被阻塞", [f"step_id={step_id}", f"unmet_deps={unmet}"], color="yellow")
+            return
+
+        if event_type == "plan_step_done":
+            step_id = event_data.get("step_id")
+            self._push_block("步骤完成", [f"step_id={step_id}"], color="green")
+            return
+
+        if event_type == "plan_step_replan_requested":
+            step_id = event_data.get("step_id")
+            self._push_block("请求重规划", [f"step_id={step_id}"], color="yellow")
+            return
+
+        if event_type == "replan_generated":
+            title = str(event_data.get("title", "")).strip()
+            steps = event_data.get("steps")
+            replans_used = event_data.get("replans_used")
+            lines = []
+            if title:
+                lines.append(f"[bold]新计划[/bold]: {title}")
+            if steps is not None:
+                lines.append(f"[bold]步骤数[/bold]: {steps}")
+            if replans_used is not None:
+                lines.append(f"[bold]已用重规划[/bold]: {replans_used}")
+            self._push_block("重规划生成", lines, color="magenta")
+            return
+
+        # --- 对话/输出 ---
+        if event_type == "user_message":
+            txt = str(event_data.get("text", "")).strip()
+            if txt:
+                self._push_line(f"[bold blue]you[/bold blue]: {txt}")
+            return
+
+        if event_type == "display":
+            content = str(event_data.get("content", "")).strip()
+            level = str(event_data.get("level", "info"))
+            title = event_data.get("title")
+            prefix = f"[{title}] " if title else ""
+            color = {"info": "cyan", "success": "green", "warning": "yellow", "error": "red", "progress": "blue"}.get(level, "cyan")
+            for ln in (content.splitlines()[:6] if content else []):
+                self._push_line(f"[{color}]agent[/{color}]: {prefix}{ln}")
+            return
+
+        # --- LLM 事件 ---
         if event_type == "llm_request":
-            self.add_task(
-                task_type=TaskType.LLM_REQUEST,
-                description="LLM 请求处理",
-                estimated_duration=10.0,  # 基于历史数据估算
-                details={"messages": event_data.get("messages", 0)}
-            )
-        elif event_type == "llm_response":
-            # 完成最新的 LLM 任务
-            llm_tasks = [t for t in self.active_tasks.values() if t.task_type == TaskType.LLM_REQUEST]
-            if llm_tasks:
-                self.complete_task(llm_tasks[-1].task_id)
-        elif event_type == "file_read":
-            path = event_data.get("path", "")
-            self.add_task(
-                task_type=TaskType.FILE_READ,
-                description=f"读取文件: {path}",
-                estimated_duration=2.0,
-                details={"path": path}
-            )
-        elif event_type == "file_read_complete":
-            read_tasks = [t for t in self.active_tasks.values() if t.task_type == TaskType.FILE_READ]
-            if read_tasks:
-                self.complete_task(read_tasks[-1].task_id)
-        elif event_type == "file_write":
-            path = event_data.get("path", "")
-            self.add_task(
-                task_type=TaskType.FILE_WRITE,
-                description=f"写入文件: {path}",
-                estimated_duration=1.5,
-                details={"path": path}
-            )
-        elif event_type == "file_write_complete":
-            write_tasks = [t for t in self.active_tasks.values() if t.task_type == TaskType.FILE_WRITE]
-            if write_tasks:
-                self.complete_task(write_tasks[-1].task_id)
-        elif event_type == "search":
-            pattern = event_data.get("pattern", "")
-            self.add_task(
-                task_type=TaskType.SEARCH,
-                description=f"搜索: {pattern}",
-                estimated_duration=5.0,
-                details={"pattern": pattern}
-            )
-        elif event_type == "search_complete":
-            search_tasks = [t for t in self.active_tasks.values() if t.task_type == TaskType.SEARCH]
-            if search_tasks:
-                self.complete_task(search_tasks[-1].task_id)
-        elif event_type == "command_exec":
-            command = event_data.get("command", "")
-            self.add_task(
-                task_type=TaskType.COMMAND_EXEC,
-                description=f"执行命令: {command}",
-                estimated_duration=8.0,
-                details={"command": command}
-            )
-        elif event_type == "command_complete":
-            cmd_tasks = [t for t in self.active_tasks.values() if t.task_type == TaskType.COMMAND_EXEC]
-            if cmd_tasks:
-                self.complete_task(cmd_tasks[-1].task_id)
-        
-        self.last_events.append(f"{event_type}: {event_data}")
+            self.current_operation = "LLM 请求"
+            self.last_llm_req = {"messages": event_data.get("messages"), "step_id": event_data.get("step_id")}
+            self._current_task_id = self.add_task(TaskType.LLM_REQUEST, "LLM 请求", estimated_duration=10.0, details=self.last_llm_req)
+            self._push_line("[dim]🤖 LLM 请求中...[/dim]")
+            return
+
+        if event_type == "llm_request_params":
+            # 来自 llm_io.py：包含 model/base_url/api_mode/messages_count 等摘要
+            self.last_llm_req = dict(event_data) if isinstance(event_data, dict) else {"raw": str(event_data)[:200]}
+            model = str(self.last_llm_req.get("model", "auto"))
+            api_mode = str(self.last_llm_req.get("api_mode", ""))
+            msg_n = self.last_llm_req.get("messages_count")
+            self._push_line(f"[dim]LLM params: model={model} api={api_mode} messages={msg_n}[/dim]")
+            return
+
+        if event_type == "llm_response":
+            txt = str(event_data.get("text", "")).strip()
+            self.last_llm_resp = {"text_preview": txt[:240], "truncated": bool(event_data.get("truncated", False))}
+            # 完成 LLM 任务
+            if self._current_task_id:
+                self.complete_task(self._current_task_id)
+                self._current_task_id = None
+            # 展示一小段（更像 Claude Code：让用户看到模型在输出什么）
+            if txt:
+                self._push_line(f"[bold magenta]assistant[/bold magenta]: {txt.splitlines()[0][:200]}")
+            return
+
+        if event_type == "llm_response_data":
+            # 来自 llm_io.py：text_length/text_preview 等摘要
+            self.last_llm_resp = dict(event_data) if isinstance(event_data, dict) else {"raw": str(event_data)[:200]}
+            tl = self.last_llm_resp.get("text_length")
+            self._push_line(f"[dim]LLM resp: text_length={tl}[/dim]")
+            return
+
+        # --- 工具事件（Claude Code 核心体验：工具调用与结果） ---
+        if event_type == "tool_call_parsed":
+            tool = str(event_data.get("tool", ""))
+            args = event_data.get("args", {}) or {}
+            self.last_tool = {"tool": tool, "args": args}
+            self.current_operation = f"工具: {tool}"
+
+            # 将 tool 映射到任务类型（基于工具名的最小映射）
+            if tool in {"read_file", "list_dir"}:
+                ttype = TaskType.FILE_READ
+            elif tool in {"write_file"}:
+                ttype = TaskType.FILE_WRITE
+            elif tool in {"apply_patch", "undo_patch"}:
+                ttype = TaskType.PATCHING
+            elif tool in {"grep", "glob_file_search", "search_semantic"}:
+                ttype = TaskType.SEARCH
+            elif tool in {"run_cmd"}:
+                ttype = TaskType.COMMAND_EXEC
+            else:
+                ttype = TaskType.SEARCH
+
+            # 生成简短参数摘要
+            if isinstance(args, dict):
+                key_order = ["path", "pattern", "query", "command"]
+                summary_parts = []
+                for k in key_order:
+                    if k in args:
+                        summary_parts.append(f"{k}={str(args.get(k))[:80]}")
+                if not summary_parts:
+                    summary_parts = [f"{k}={str(v)[:60]}" for k, v in list(args.items())[:2]]
+                args_summary = " ".join(summary_parts)
+            else:
+                args_summary = str(args)[:120]
+
+            self._current_task_id = self.add_task(ttype, f"{tool} {args_summary}".strip(), estimated_duration=4.0, details={"tool": tool})
+            self._push_line(f"[bold yellow]tool[/bold yellow]: {tool} {args_summary}".strip())
+            return
+
+        if event_type == "tool_result":
+            tool = str(event_data.get("tool", ""))
+            ok = bool(event_data.get("ok"))
+            err = event_data.get("error")
+            payload = event_data.get("payload") or {}
+            self.last_tool_result = {"tool": tool, "ok": ok, "error": err, "payload_keys": list(payload.keys()) if isinstance(payload, dict) else []}
+
+            if self._current_task_id:
+                if ok:
+                    self.complete_task(self._current_task_id)
+                else:
+                    self.fail_task(self._current_task_id, str(err)[:160])
+                self._current_task_id = None
+
+            if ok:
+                # 更像 Claude Code：为关键工具做语义摘要
+                summary = ""
+                if tool == "grep" and isinstance(payload, dict):
+                    hits = payload.get("hits") or []
+                    engine = payload.get("engine")
+                    truncated = payload.get("truncated")
+                    if isinstance(hits, list):
+                        summary = f"hits={len(hits)} engine={engine} truncated={truncated}"
+                elif tool == "read_file" and isinstance(payload, dict):
+                    summary = f"path={payload.get('path')} read={payload.get('read_size')}B/{payload.get('total_size')}B truncated={payload.get('truncated')}"
+                    if payload.get("offset") is not None or payload.get("limit") is not None:
+                        summary += f" slice=offset={payload.get('offset')} limit={payload.get('limit')}"
+                elif tool == "run_cmd" and isinstance(payload, dict):
+                    summary = f"exit_code={payload.get('exit_code')} cwd={payload.get('cwd')}"
+                elif tool == "apply_patch" and isinstance(payload, dict):
+                    summary = f"path={payload.get('path')} replacements={payload.get('replacements')} undo_id={payload.get('undo_id')}"
+                elif tool == "undo_patch" and isinstance(payload, dict):
+                    summary = f"path={payload.get('path')} undo_id={payload.get('undo_id')}"
+                elif tool == "display" and isinstance(payload, dict):
+                    summary = f"level={payload.get('level')} truncated={payload.get('truncated')}"
+
+                line = f"[green]✓[/green] {tool} ok"
+                if summary:
+                    line += f" ({summary})"
+                self._push_line(line)
+            else:
+                self._push_line(f"[red]✗[/red] {tool} err={str(err)[:160]}")
+            return
+
+        # --- 验证阶段 ---
+        if event_type == "autofix_check":
+            ok = bool(event_data.get("ok"))
+            summary = str(event_data.get("summary", "")).strip()
+            color = "green" if ok else "yellow"
+            self._push_block("自动验证", [f"ok={ok}", summary[:240]], color=color)
+            return
+
+        if event_type == "final_verify":
+            ok = bool(event_data.get("ok"))
+            vtype = event_data.get("type")
+            summary = str(event_data.get("summary", "")).strip()
+            color = "green" if ok else "red"
+            self._push_block("最终验证", [f"ok={ok} type={vtype}", summary[:240]], color=color)
+            return
+
+        if event_type == "stop_reason":
+            reason = str(event_data.get("reason", "")).strip()
+            self._push_block("提前停止", [f"reason={reason}", str(event_data)[:240]], color="red")
+            return
     
     def render(self) -> Layout:
         """渲染完整界面"""
         # 更新布局
         self.layout["header"].update(self._render_header())
-        self.layout["progress"].update(self._render_progress())
-        self.layout["info"].update(self._render_info())
+        self.layout["conversation"].update(self._render_conversation())
+        self.layout["status"].update(self._render_status())
+        self.layout["ops"].update(self._render_ops())
         self.layout["footer"].update(self._render_footer())
         
         return self.layout
@@ -298,81 +508,61 @@ class EnhancedLiveDisplay:
         status_table.add_column(justify="left", style="bold", width=12)
         status_table.add_column(justify="left")
         
+        status_table.add_row("模式:", "Clude Code 风格（enhanced）")
         status_table.add_row("状态:", self.current_state)
-        status_table.add_row("当前操作:", self.current_operation)
-        status_table.add_row("运行时间:", f"{elapsed}秒")
-        status_table.add_row("活跃任务:", str(len(self.active_tasks)))
-        
-        return Panel(status_table, title="系统状态", border_style="blue")
+        status_table.add_row("操作:", self.current_operation)
+        status_table.add_row("运行:", f"{elapsed}s  step={self.last_step}  ev={self.last_event}")
+
+        return Panel(status_table, title="clude chat", border_style="blue")
     
-    def _render_progress(self) -> Panel:
-        """渲染进度面板"""
-        return Panel(
-            self.progress,
-            title="任务进度",
-            border_style="green"
-        )
+    def _render_conversation(self) -> Panel:
+        """左侧：滚动输出（更接近 Claude Code）"""
+        if not self.conversation_lines:
+            body = Text("（等待输出…）", style="dim")
+        else:
+            body = Text()
+            for ln in list(self.conversation_lines)[-22:]:
+                body.append(Text.from_markup(ln))
+                body.append("\n")
+        return Panel(body, title="对话 / 输出", border_style="cyan")
     
-    def _render_info(self) -> Panel:
-        """渲染信息面板"""
-        # 创建性能统计表格
-        perf_table = Table(show_header=True, box=None, title="性能统计")
-        perf_table.add_column("操作类型", style="bold")
-        perf_table.add_column("次数", justify="right")
-        perf_table.add_column("平均耗时", justify="right")
-        perf_table.add_column("总耗时", justify="right")
-        
-        for op_type, count in self.operation_counts.items():
-            if op_type in self.operation_times:
-                times = self.operation_times[op_type]
-                avg_time = sum(times) / len(times)
-                total_time = sum(times)
-                perf_table.add_row(
-                    op_type,
-                    str(count),
-                    f"{avg_time:.2f}s",
-                    f"{total_time:.2f}s"
-                )
-        
-        # 创建已完成任务表格
-        completed_table = Table(show_header=True, box=None, title="最近完成的任务")
-        completed_table.add_column("任务", style="bold")
-        completed_table.add_column("耗时", justify="right")
-        completed_table.add_column("状态")
-        
-        for task in reversed(list(self.completed_tasks)):
-            duration = time.time() - task.start_time
-            completed_table.add_row(
-                task.description[:30] + "..." if len(task.description) > 30 else task.description,
-                f"{duration:.2f}s",
-                task.status
-            )
-        
-        # 组合表格
-        return Panel(
-            Group(perf_table, completed_table),
-            title="详细信息",
-            border_style="cyan"
-        )
+    def _render_status(self) -> Panel:
+        """右侧上：状态与环境摘要"""
+        t = Table(show_header=False, box=None, pad_edge=False)
+        t.add_column(justify="left", style="bold", width=10)
+        t.add_column(justify="left")
+        t.add_row("模型", str(getattr(self.cfg.llm, "model", "") or "auto")[:40])
+        t.add_row("地址", str(getattr(self.cfg.llm, "base_url", ""))[:60])
+        t.add_row("状态", self.current_state)
+        t.add_row("步骤", str(self.last_step))
+        t.add_row("事件", self.last_event)
+        t.add_row("任务", f"{len(self.active_tasks)} 活跃 / {len(self.completed_tasks)} 最近完成")
+        return Panel(t, title="状态", border_style="blue")
+
+    def _render_ops(self) -> Panel:
+        """右侧下：最近一次工具/模型快照 + 任务进度条"""
+        snap = Table(show_header=False, box=None, pad_edge=False)
+        snap.add_column(justify="left", style="bold", width=10)
+        snap.add_column(justify="left")
+
+        tool = self.last_tool.get("tool")
+        if tool:
+            snap.add_row("工具", str(tool))
+        if self.last_tool_result:
+            snap.add_row("结果", f"ok={self.last_tool_result.get('ok')} keys={self.last_tool_result.get('payload_keys', [])[:6]}")
+        if self.last_llm_req:
+            snap.add_row("LLM", f"messages={self.last_llm_req.get('messages')} step_id={self.last_llm_req.get('step_id')}")
+
+        grp = Group(snap, Text(""), self.progress)
+        return Panel(grp, title="操作面板", border_style="green")
     
     def _render_footer(self) -> Panel:
         """渲染底部面板"""
-        # 创建事件历史表格
-        events_table = Table(show_header=False, box=None)
-        events_table.add_column("时间", style="dim", width=8)
-        events_table.add_column("事件")
-        
-        for event in reversed(list(self.last_events)):
-            events_table.add_row(
-                time.strftime("%H:%M:%S"),
-                event[:60] + "..." if len(event) > 60 else event
-            )
-        
-        return Panel(
-            events_table,
-            title="事件历史",
-            border_style="yellow"
-        )
+        events_table = Table(show_header=False, box=None, pad_edge=False)
+        events_table.add_column("最近事件", style="dim")
+        for ev in reversed(list(self.last_events)[-12:]):
+            events_table.add_row(ev[:180] + ("…" if len(ev) > 180 else ""))
+        return Panel(events_table, title="事件", border_style="yellow")
     
     def on_task_progress(self, task_progress: TaskProgress) -> None:
         """处理任务进度更新（来自 AsyncTaskManager）"""

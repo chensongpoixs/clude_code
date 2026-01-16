@@ -35,6 +35,8 @@ clude chat --live
 # 选择增强 Live UI（同一入口，不再维护第二套 chat 主循环）
 clude chat --live --live-ui enhanced
 
+# 说明：enhanced 会以“Claude Code 风格”呈现（左侧滚动输出 + 右侧状态/操作面板 + 底部事件轨迹）
+
 # 指定模型
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 
