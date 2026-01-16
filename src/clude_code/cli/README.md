@@ -44,6 +44,22 @@ clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 clude chat --select-model
 ```
 
+- **Slash Commands（对标 Claude Code）**
+  - 在交互模式中输入 `/命令` 可直接执行本地命令（不走 LLM），用于管理会话/配置/权限等：
+    - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug`
+  - 示例：
+
+```bash
+# 显示帮助
+/help
+
+# 清空会话上下文（保留 system）
+/clear
+
+# 生成项目记忆文件（CLAUDE.md）
+/init
+```
+
 - **输出与日志**
   - **控制台**：`--debug` 会输出摘要化轨迹；`--live` 会使用 Rich Live 固定显示面板
   - **文件日志**：`.clude/logs/trace.jsonl`、`.clude/logs/audit.jsonl`（详细程度更高，适合复盘）

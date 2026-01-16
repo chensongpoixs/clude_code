@@ -27,6 +27,20 @@ def run_tool_lifecycle(
     spec = TOOL_REGISTRY.get(name)
     side_effects = spec.side_effects if spec is not None else set()
 
+    # 0) 工具权限（对标 Claude Code：allowedTools/disallowedTools）
+    allowed = list(getattr(loop.cfg.policy, "allowed_tools", []) or [])
+    denied = set(getattr(loop.cfg.policy, "disallowed_tools", []) or [])
+    if allowed and name not in allowed:
+        loop.logger.warning(f"[red]✗ 工具被 allowed_tools 限制拒绝: {name}[/red]")
+        loop.audit.write(trace_id=trace_id, event="policy_deny_tool", data={"tool": name, "reason": "not_in_allowed_tools"})
+        _ev("policy_deny_tool", {"tool": name, "reason": "not_in_allowed_tools"})
+        return ToolResult(ok=False, error={"code": "E_POLICY", "message": f"tool not allowed: {name}"})
+    if name in denied:
+        loop.logger.warning(f"[red]✗ 工具被 disallowed_tools 禁止: {name}[/red]")
+        loop.audit.write(trace_id=trace_id, event="policy_deny_tool", data={"tool": name, "reason": "in_disallowed_tools"})
+        _ev("policy_deny_tool", {"tool": name, "reason": "in_disallowed_tools"})
+        return ToolResult(ok=False, error={"code": "E_POLICY", "message": f"tool disallowed: {name}"})
+
     # 1. 确认策略 (MVP: 写/执行 确认)
     if ("write" in side_effects) and loop.cfg.policy.confirm_write:
         loop.logger.info(f"[yellow]⚠ 需要用户确认写文件操作: {name}[/yellow]")

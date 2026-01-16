@@ -13,6 +13,7 @@ from clude_code.cli.animations import AnimatedWelcome, TypewriterEffect, FadeEff
 from clude_code.cli.shortcuts import ShortcutHandler, ShortcutAction, PromptResult
 from clude_code.cli.config_manager import get_config_manager
 from clude_code.cli.cli_logging import get_cli_logger
+from clude_code.cli.slash_commands import SlashContext, handle_slash_command
 
 # 使用主题化的控制台
 console = Console(theme=CLAUDE_THEME)
@@ -37,6 +38,8 @@ class ChatHandler:
         # 会话状态
         self.session_id = self._generate_session_id()
         self.debug_mode = False
+        self._last_trace_id: str | None = None
+        self._last_user_text: str | None = None
 
     def select_model_interactively(self) -> None:
         """调用公共工具进行交互式模型选择。"""
@@ -102,6 +105,23 @@ class ChatHandler:
                     # 其他动作继续处理
 
                 user_text = result.text.strip()
+                self._last_user_text = user_text
+
+                # Claude Code 风格：Slash Commands（本地命令层，不走 LLM）
+                if user_text.startswith("/"):
+                    ctx = SlashContext(
+                        console=console,
+                        cfg=self.cfg,
+                        agent=self.agent,
+                        debug=self.debug_mode,
+                        last_trace_id=self._last_trace_id,
+                        last_user_text=self._last_user_text,
+                    )
+                    try:
+                        if handle_slash_command(ctx, user_text):
+                            continue
+                    except SystemExit:
+                        break
 
                 # 处理退出命令
                 if user_text.lower() in {"exit", "quit", "/exit", "/quit"}:
@@ -177,6 +197,7 @@ class ChatHandler:
                         pass
 
                 turn = self.agent.run_turn(user_text, confirm=_confirm, debug=True, on_event=on_event_wrapper)
+                self._last_trace_id = getattr(turn, "trace_id", None)
                 self._log_turn_end(turn)
                 
                 # 结束后固定状态
@@ -203,6 +224,7 @@ class ChatHandler:
                 return Confirm.ask(msg, default=False)
 
             turn = self.agent.run_turn(user_text, confirm=_confirm, debug=debug)
+            self._last_trace_id = getattr(turn, "trace_id", None)
             self._log_turn_end(turn)
             self._print_assistant_response(turn, debug=debug, show_trace=not debug)
         except Exception as e:

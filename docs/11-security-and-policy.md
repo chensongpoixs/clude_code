@@ -37,6 +37,13 @@
   - `workspace`：对当前仓库长期有效（写入配置，需更强确认）
 - 任何确认都必须写入审计日志
 
+### 2.4 工具级权限（对标 Claude Code 的 allowedTools/disallowedTools）
+- **目标**：在“写/执行确认”之外，再增加一层**工具级 allow/deny**，避免模型误用不该使用的工具。
+- **建议实现**：
+  - `policy.allowed_tools`：允许名单（空=不限制）
+  - `policy.disallowed_tools`：禁止名单
+- **拦截点**：在工具生命周期入口（如 `tool_lifecycle.py`）最前面拦截，并写入 `audit.jsonl`（event=`policy_deny_tool`）。
+
 ## 3. 路径与文件策略
 
 ### 3.1 禁止目录（默认建议）

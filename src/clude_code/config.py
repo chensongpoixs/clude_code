@@ -19,6 +19,14 @@ class PolicyConfig(BaseModel):
     allow_network: bool = False
     confirm_write: bool = True
     confirm_exec: bool = True
+    allowed_tools: list[str] = Field(
+        default_factory=list,
+        description="允许的工具名单（空=不限制）。对标 Claude Code 的 allowedTools。",
+    )
+    disallowed_tools: list[str] = Field(
+        default_factory=list,
+        description="禁止的工具名单。对标 Claude Code 的 disallowedTools。",
+    )
 
 
 class LimitsConfig(BaseModel):
