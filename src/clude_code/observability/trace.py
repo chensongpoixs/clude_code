@@ -55,4 +55,90 @@ class TraceLogger:
         with self._path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    def read_traces(self, limit: int = 100, session_id: str | None = None) -> list[TraceEvent]:
+        """
+        读取追踪记录
+
+        Args:
+            limit: 最大记录数量
+            session_id: 过滤特定会话ID
+
+        Returns:
+            追踪事件列表
+        """
+        if not self._path.exists():
+            return []
+
+        traces = []
+        try:
+            with self._path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+
+                    try:
+                        data = json.loads(line.strip())
+                        trace_event = TraceEvent(
+                            timestamp=data["timestamp"],
+                            trace_id=data["trace_id"],
+                            session_id=data["session_id"],
+                            step=data["step"],
+                            event=data["event"],
+                            data=data["data"]
+                        )
+
+                        # 应用会话过滤
+                        if session_id and trace_event.session_id != session_id:
+                            continue
+
+                        traces.append(trace_event)
+
+                        # 检查是否达到限制
+                        if len(traces) >= limit:
+                            break
+
+                    except json.JSONDecodeError:
+                        continue  # 跳过损坏的行
+
+        except IOError:
+            return []
+
+        # 按时间戳降序排序（最新的在前面）
+        traces.sort(key=lambda t: t.timestamp, reverse=True)
+
+        return traces
+
+    @classmethod
+    def list_sessions(cls, workspace_root: str) -> list[str]:
+        """
+        列出所有可用的会话ID
+
+        Args:
+            workspace_root: 工作区根目录
+
+        Returns:
+            会话ID列表
+        """
+        trace_path = Path(workspace_root) / ".clude" / "logs" / "trace.jsonl"
+        if not trace_path.exists():
+            return []
+
+        sessions = set()
+        try:
+            with trace_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+
+                    try:
+                        data = json.loads(line.strip())
+                        sessions.add(data["session_id"])
+                    except json.JSONDecodeError:
+                        continue
+        except IOError:
+            pass
+
+        return sorted(list(sessions))
+
+
 

@@ -60,7 +60,7 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
     if missing_tools and fix:
         logger.warning(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")
         _try_fix_missing_tools(missing_tools, logger)
-        return run_doctor(fix=False, logger=logger)
+        return run_doctor(fix=False, model="", select_model=False, logger=logger)
 
     if missing_tools and not fix:
         logger.warning("\n提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。")

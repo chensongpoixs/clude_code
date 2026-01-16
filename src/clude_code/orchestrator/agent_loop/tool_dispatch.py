@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from pathlib import Path
 from typing import Any, Callable, Iterable, TYPE_CHECKING
 from dataclasses import dataclass
 
@@ -233,18 +235,20 @@ def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
     title = args.get("title")
 
     # 触发界面显示事件
-    loop._ev("display", {
-        "content": content,
-        "level": level,
-        "title": title,
-        "timestamp": time.time(),
-    })
+    if loop._current_ev is not None:
+        loop._current_ev("display", {
+            "content": content,
+            "level": level,
+            "title": title,
+            "timestamp": time.time(),
+        })
 
-    return ToolResult(True, payload={"displayed": True, "content": content})
+    return ToolResult(ok=True, payload={"displayed": True, "content": content})
 
 
 def _h_internal_repo_map(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.internal_repo_map()
+    repo_map = loop.tools.generate_repo_map()
+    return ToolResult(ok=True, payload={"repo_map": repo_map})
 
 
 def _run_local_tool(name: str, args: dict[str, Any]) -> ToolResult:
@@ -569,7 +573,7 @@ def _h_preview_multi_edit(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult
             return ToolResult(False, error={"code": "E_NO_EDITS", "message": "没有提供编辑任务"})
 
         # 获取编辑器
-        editor = get_advanced_code_editor(loop.workspace_root)
+        editor = get_advanced_code_editor(Path(loop.cfg.workspace_root))
 
         # 运行预览（同步方式调用异步函数）
         async def run_preview():
@@ -601,6 +605,299 @@ def _h_preview_multi_edit(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult
         return ToolResult(False, error={"code": "E_PREVIEW_FAILED", "message": f"预览失败: {e}"})
 
 
+def _h_question(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：question（向用户提问）。"""
+    question = args.get("question", "")
+    options = args.get("options")
+    multiple = args.get("multiple", False)
+    header = args.get("header")
+
+    return loop.tools.ask_question(question=question, options=options, multiple=multiple, header=header)
+
+
+def _spec_question() -> ToolSpec:
+    """ToolSpec：question（向用户提问）。"""
+    return ToolSpec(
+        name="question",
+        summary="向用户提问并获取回答。",
+        args_schema=_obj_schema(
+            properties={
+                "question": {"type": "string", "description": "问题文本"},
+                "options": {"type": "array", "items": {"type": "string"}, "description": "可选的选项列表"},
+                "multiple": {"type": "boolean", "default": False, "description": "是否允许多选"},
+                "header": {"type": "string", "description": "问题标题"}
+            },
+            required=["question"],
+        ),
+        example_args={"question": "您想要如何处理这个文件？", "options": ["删除", "重命名", "保留"]},
+        side_effects={"read"},  # 实际上不修改文件，但需要用户交互
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_question,
+    )
+
+
+def _h_webfetch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：webfetch（获取网页内容）。"""
+    url = args.get("url", "")
+    format = args.get("format", "markdown")
+    timeout = args.get("timeout", 30)
+
+    return loop.tools.fetch_web_content(url=url, format=format, timeout=timeout)
+
+
+def _spec_webfetch() -> ToolSpec:
+    """ToolSpec：webfetch（获取网页内容）。"""
+    return ToolSpec(
+        name="webfetch",
+        summary="获取网页内容，支持多种格式。",
+        args_schema=_obj_schema(
+            properties={
+                "url": {"type": "string", "description": "要获取的URL"},
+                "format": {"type": "string", "enum": ["markdown", "text", "html"], "default": "markdown", "description": "返回格式"},
+                "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"}
+            },
+            required=["url"],
+        ),
+        example_args={"url": "https://example.com", "format": "markdown", "timeout": 30},
+        side_effects={"network"},  # 网络访问
+        external_bins_required=set(),
+        external_bins_optional={"curl", "wget"},  # 可选的外部工具
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_webfetch,
+    )
+
+
+def _h_load_skill(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：load_skill（加载技能）。"""
+    skill_name = args.get("skill_name", "")
+
+    return loop.tools.load_skill(skill_name)
+
+
+def _spec_load_skill() -> ToolSpec:
+    """ToolSpec：load_skill（加载技能）。"""
+    return ToolSpec(
+        name="load_skill",
+        summary="加载和执行预定义的技能。",
+        args_schema=_obj_schema(
+            properties={
+                "skill_name": {"type": "string", "description": "技能名称（文件名，不含扩展名）"}
+            },
+            required=["skill_name"],
+        ),
+        example_args={"skill_name": "refactor"},
+        side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_load_skill,
+    )
+
+
+def _h_todowrite(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：todowrite（创建任务）。"""
+    content = args.get("content", "")
+    priority = args.get("priority", "medium")
+    status = args.get("status", "pending")
+
+    return loop.tools.todowrite(content=content, priority=priority, status=status)
+
+
+def _spec_todowrite() -> ToolSpec:
+    """ToolSpec：todowrite（创建任务）。"""
+    return ToolSpec(
+        name="todowrite",
+        summary="创建或更新任务列表。",
+        args_schema=_obj_schema(
+            properties={
+                "content": {"type": "string", "description": "任务内容"},
+                "priority": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium", "description": "优先级"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "default": "pending", "description": "状态"}
+            },
+            required=["content"],
+        ),
+        example_args={"content": "修复登录bug", "priority": "high", "status": "pending"},
+        side_effects={"write"},  # 可能写入任务文件
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_todowrite,
+    )
+
+
+def _h_todoread(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：todoread（读取任务）。"""
+    status = args.get("status")
+    todo_id = args.get("todo_id")
+
+    return loop.tools.todoread(status=status, todo_id=todo_id)
+
+
+def _spec_todoread() -> ToolSpec:
+    """ToolSpec：todoread（读取任务）。"""
+    return ToolSpec(
+        name="todoread",
+        summary="读取任务列表。",
+        args_schema=_obj_schema(
+            properties={
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "description": "过滤状态"},
+                "todo_id": {"type": "string", "description": "特定任务ID"}
+            },
+            required=[],
+        ),
+        example_args={"status": "pending"},
+        side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_todoread,
+    )
+
+
+def _h_websearch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：websearch（网页搜索）。"""
+    query = args.get("query", "")
+    num_results = args.get("num_results", 8)
+    livecrawl = args.get("livecrawl", "fallback")
+    search_type = args.get("search_type", "auto")
+    context_max_chars = args.get("context_max_chars", 10000)
+
+    return loop.tools.websearch(query=query, num_results=num_results, livecrawl=livecrawl, search_type=search_type, context_max_chars=context_max_chars)
+
+
+def _spec_websearch() -> ToolSpec:
+    """ToolSpec：websearch（网页搜索）。"""
+    return ToolSpec(
+        name="websearch",
+        summary="执行实时网页搜索。",
+        args_schema=_obj_schema(
+            properties={
+                "query": {"type": "string", "description": "搜索查询"},
+                "num_results": {"type": "integer", "default": 8, "minimum": 1, "description": "返回结果数量"},
+                "livecrawl": {"type": "string", "enum": ["fallback", "preferred"], "default": "fallback", "description": "实时爬取模式"},
+                "search_type": {"type": "string", "enum": ["auto", "fast", "deep"], "default": "auto", "description": "搜索类型"},
+                "context_max_chars": {"type": "integer", "default": 10000, "minimum": 1000, "description": "上下文最大字符数"}
+            },
+            required=["query"],
+        ),
+        example_args={"query": "Python async programming", "num_results": 5},
+        side_effects={"network"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_websearch,
+    )
+
+
+def _h_codesearch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：codesearch（代码搜索）。"""
+    query = args.get("query", "")
+    tokens_num = args.get("tokens_num", 5000)
+
+    return loop.tools.codesearch(query=query, tokens_num=tokens_num)
+
+
+def _spec_codesearch() -> ToolSpec:
+    """ToolSpec：codesearch（代码搜索）。"""
+    return ToolSpec(
+        name="codesearch",
+        summary="为编程任务搜索相关上下文。",
+        args_schema=_obj_schema(
+            properties={
+                "query": {"type": "string", "description": "代码搜索查询"},
+                "tokens_num": {"type": "integer", "default": 5000, "minimum": 1000, "maximum": 50000, "description": "返回的token数量"}
+            },
+            required=["query"],
+        ),
+        example_args={"query": "React useState hook examples", "tokens_num": 3000},
+        side_effects={"network"},  # 可能需要外部API
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_codesearch,
+    )
+
+
+def _h_run_task(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：run_task（运行子代理任务）。"""
+    description = args.get("description", "")
+    prompt = args.get("prompt", "")
+    subagent_type = args.get("subagent_type", "general")
+    session_id = args.get("session_id")
+
+    return loop.tools.run_task(description=description, prompt=prompt, subagent_type=subagent_type, session_id=session_id)
+
+
+def _spec_run_task() -> ToolSpec:
+    """ToolSpec：run_task（运行子代理任务）。"""
+    return ToolSpec(
+        name="run_task",
+        summary="启动和管理系统中的子代理。",
+        args_schema=_obj_schema(
+            properties={
+                "description": {"type": "string", "description": "任务描述"},
+                "prompt": {"type": "string", "description": "代理提示"},
+                "subagent_type": {"type": "string", "enum": ["general", "explore"], "default": "general", "description": "代理类型"},
+                "session_id": {"type": "string", "description": "会话ID"}
+            },
+            required=["description", "prompt"],
+        ),
+        example_args={"description": "分析代码库结构", "prompt": "请分析这个项目的架构", "subagent_type": "explore"},
+        side_effects={"exec"},  # 可能执行子代理
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_run_task,
+    )
+
+
+def _h_get_task_status(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：get_task_status（获取任务状态）。"""
+    task_id = args.get("task_id", "")
+
+    return loop.tools.get_task_status(task_id)
+
+
+def _spec_get_task_status() -> ToolSpec:
+    """ToolSpec：get_task_status（获取任务状态）。"""
+    return ToolSpec(
+        name="get_task_status",
+        summary="获取子代理任务的状态。",
+        args_schema=_obj_schema(
+            properties={
+                "task_id": {"type": "string", "description": "任务ID"}
+            },
+            required=["task_id"],
+        ),
+        example_args={"task_id": "task_123"},
+        side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_get_task_status,
+    )
+
+
 def iter_tool_specs() -> Iterable[ToolSpec]:
     """
     返回所有工具规范（保持稳定顺序）。
@@ -617,6 +914,15 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     yield _spec_display()
     yield _spec_preview_multi_edit()
     yield _spec_internal_repo_map()
+    yield _spec_question()
+    yield _spec_webfetch()
+    yield _spec_load_skill()
+    yield _spec_todowrite()
+    yield _spec_todoread()
+    yield _spec_websearch()
+    yield _spec_codesearch()
+    yield _spec_run_task()
+    yield _spec_get_task_status()
 
 
 # 注册表驱动（业界版）：同一份注册表 = tool dispatch + tool prompt/help 的来源
@@ -674,16 +980,19 @@ def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolRes
         ok, validated_or_msg = spec.validate_args(args)
         if not ok:
             logger.warning(f"[yellow]⚠ 工具 {name} 参数校验失败: {validated_or_msg}[/yellow]")
-            return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"参数校验失败: {validated_or_msg}"})
+            return ToolResult(ok=False, error={"code": "E_INVALID_ARGS", "message": f"参数校验失败: {validated_or_msg}"})
         
         # 校验通过，执行处理器（使用校验/转换后的参数，例如 "1" -> 1）
         return spec.handler(loop, validated_or_msg)  # type: ignore
 
     except KeyError as e:
         logger.error(f"[red]✗ 参数缺失: {e}[/red]", exc_info=True)
-        return ToolResult(False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})
+        return ToolResult(ok=False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {e}"})
     except Exception as e:
         logger.error(f"[red]✗ 工具执行异常: {e}[/red]", exc_info=True)
-        return ToolResult(False, error={"code": "E_TOOL", "message": str(e)})
+        return ToolResult(ok=False, error={"code": "E_TOOL", "message": str(e)})
+
+
+
 
 

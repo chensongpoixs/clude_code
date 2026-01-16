@@ -8,13 +8,19 @@ import time
 import threading
 import json
 import os
-import psutil
 from abc import ABC, abstractmethod
-from collections import defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    psutil = None
+    HAS_PSUTIL = False
 
 from clude_code.observability.logger import get_logger
 

@@ -12,7 +12,7 @@ from clude_code.cli.theme import CLAUDE_THEME, create_welcome_text, create_statu
 from clude_code.cli.animations import AnimatedWelcome, TypewriterEffect, FadeEffect
 from clude_code.cli.shortcuts import ShortcutHandler, ShortcutAction, PromptResult
 from clude_code.cli.config_manager import get_config_manager
-from clude_code.cli.logging import get_cli_logger
+from clude_code.cli.cli_logging import get_cli_logger
 
 # 使用主题化的控制台
 console = Console(theme=CLAUDE_THEME)

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .tool_dispatch import ToolSpec
+from clude_code.orchestrator.agent_loop.tool_dispatch import ToolSpec
 
 
 logger = logging.getLogger(__name__)

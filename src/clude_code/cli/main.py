@@ -8,7 +8,13 @@ app = typer.Typer(help="clude: a Clude Code-like local code agent CLI (Python)."
 
 # --- 日志初始化助手 ---
 # 使用统一的 CLI 日志系统
-from clude_code.cli.logging import get_cli_logger, get_file_logger
+from clude_code.cli.cli_logging import get_cli_logger, get_file_logger
+
+# --- 导入子命令 ---
+from clude_code.cli.observability_cmd import observability_app
+
+# --- 添加子命令 ---
+app.add_typer(observability_app, name="observability", help="可观测性相关命令")
 
 # --- 命令路由 ---
 
