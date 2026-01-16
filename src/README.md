@@ -46,7 +46,8 @@
  - **ToolSpec 契约自检**: ✅ 新增 `clude tools --validate`：用 ToolSpec.example_args 做运行时 schema 校验（只读、无副作用），用于防止“工具契约漂移/参数不一致”回归。
  - **Live 单入口（P0-2）**: ✅ `clude chat --live` 仍由 `ChatHandler` 单入口驱动；新增 `--live-ui classic|enhanced` 仅切换渲染器，避免并行维护两套 chat 主循环。
  - **增强 UI 迁移到 plugins（P0-2）**: ✅ 增强 Live UI/实验 chat 实现已迁移至 `src/clude_code/plugins/ui/`，`cli/enhanced_*` 保留为兼容层（re-export）。
- - **Slash Commands（Claude Code 对标）**: ✅ `clude chat` 支持 `/help /clear /config /model /permissions /tools /doctor /init /memory /bug` 等本地命令；并新增工具级 allow/deny（allowed_tools/disallowed_tools）在 tool_lifecycle 强制拦截。
+ - **Claude Code 对标能力 (P0)**: ✅ Slash Commands (`/help /clear /config /permissions` 等) + 工具权限 allow/deny 拦截机制。
+ - **Claude Code 界面打磨 (P0)**: ✅ `enhanced` UI 升级为 Claude Code 风格（左侧输出/右侧面板/阶段块）。
  - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。
  - **结构化回喂 + rg**: ✅ 已落地（`tooling/feedback.py` + grep 优先 `rg --json` + doctor 检测 rg）。分析见 `src/IMPLEMENTATION_ANALYSIS_FEEDBACK_RIPGREP.md`。
 

@@ -21,7 +21,7 @@ from clude_code.orchestrator.classifier import IntentClassifier, IntentCategory
 
 from .models import AgentTurn
 from .parsing import try_parse_tool_call
-from .prompts import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, load_project_memory
 from .tool_lifecycle import run_tool_lifecycle
 from .planning import execute_planning_phase
 from .execution import (
@@ -168,12 +168,26 @@ class AgentLoop:
         import platform
         repo_map = self.tools.generate_repo_map()
         env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
-        combined_system_prompt = f"{SYSTEM_PROMPT}\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
+
+        # Claude Code 对标：自动加载 CLAUDE.md 作为项目记忆（只读、失败不阻塞）
+        project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)
+        self._project_memory_meta: dict[str, object] = project_memory_meta
+        self._project_memory_emitted: bool = False
+
+        combined_system_prompt = (
+            f"{SYSTEM_PROMPT}"
+            f"{project_memory_text}"
+            f"\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
+        )
         
         self.messages: list[ChatMessage] = [
             ChatMessage(role="system", content=combined_system_prompt),
         ]
-        self.logger.info("[dim]初始化系统提示词（包含 Repo Map 和环境信息）[/dim]")
+        if bool(project_memory_meta.get("loaded")):
+            self.logger.info(f"[dim]已加载 CLAUDE.md 项目记忆: {project_memory_meta}[/dim]")
+        else:
+            self.logger.info("[dim]未加载 CLAUDE.md（未找到或为空）[/dim]")
+        self.logger.info("[dim]初始化系统提示词（包含 Repo Map/环境信息/可选项目记忆）[/dim]")
 
     def run_turn(
         self,
@@ -238,6 +252,13 @@ class AgentLoop:
         # 设置运行时上下文，供 display 工具使用
         self._current_ev = _ev
         self._current_trace_id = trace_id
+
+        # 仅在本会话首次 turn 发出“项目记忆加载状态”事件，供 live UI 展示
+        if not getattr(self, "_project_memory_emitted", False):
+            try:
+                _ev("project_memory", dict(getattr(self, "_project_memory_meta", {}) or {}))
+            finally:
+                self._project_memory_emitted = True
 
         current_state: AgentState = AgentState.INTAKE
 

@@ -272,6 +272,25 @@ class EnhancedLiveDisplay:
                 self.current_operation = str(event_data.get("reason") or event_data.get("step") or "运行中")
             return
 
+        if event_type == "project_memory":
+            loaded = bool(event_data.get("loaded"))
+            path = str(event_data.get("path", ""))
+            truncated = bool(event_data.get("truncated", False))
+            length = event_data.get("length")
+            if loaded:
+                self._push_block(
+                    "项目记忆已加载（CLAUDE.md）",
+                    [f"path={path}", f"length={length}", f"truncated={truncated}"],
+                    color="cyan",
+                )
+            else:
+                self._push_block(
+                    "未加载项目记忆（CLAUDE.md）",
+                    [f"path={path}", "原因：文件不存在/为空/读取失败"],
+                    color="cyan",
+                )
+            return
+
         # --- 规划阶段 ---
         if event_type == "planning_llm_request":
             attempt = event_data.get("attempt")

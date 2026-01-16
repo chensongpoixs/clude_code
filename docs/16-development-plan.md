@@ -76,6 +76,18 @@
 
 ## 4. 开发计划（按优先级与验收标准）
 
+### 4.0 Claude Code 深度对标计划（补齐业界 GAP）
+
+| 模块 | 对标功能 | 状态 | 优先级 | 计划/目标 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Mode** | `claude -p` (Print 模式) | ⏳ 待开发 | P1 | 支持单次 Prompt 执行并退出（脚本集成） |
+| | `claude -c/-r` (会话恢复) | ⏳ 待开发 | P1 | 索引 `.clude/logs/trace.jsonl` 实现断点续聊 |
+| **UI/UX** | `/slash` 命令系统 | ✅ 已完成 | P0 | REPL 内 `/help`, `/config`, `/permissions` 等 |
+| | 增强版 Claude Code UI | ✅ 已完成 | P0 | 左侧滚动 + 右侧面板 + 阶段块布局 |
+| **Policy** | `allowedTools` / `disallowedTools` | ✅ 已完成 | P0 | 策略引擎强制拦截 |
+| | `CLAUDE.md` (项目记忆) | ✅ 已完成 | P1 | 自动搜索并注入 System Prompt |
+| **Plugins** | 自定义命令扩展 | ⏳ 待开发 | P2 | 支持从 `.clude/commands/` 加载自定义 MD 命令 |
+
 ### 4.1 P0 迭代（稳定性优先，先保证“能用且一致”）
 
 > 本节从 P0 开始补齐两类信息：
