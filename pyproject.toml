@@ -24,6 +24,15 @@ dev = [
 ui = [
   "textual>=0.70.0",
 ]
+rag = [
+  "lancedb>=0.9.0",
+  "pyarrow>=14.0.0",
+  "fastembed>=0.4.0",
+]
+rag_ts = [
+  "tree_sitter>=0.22.0",
+  "tree_sitter_languages>=1.10.0",
+]
 
 [project.scripts]
 clude = "clude_code.cli.main:app"

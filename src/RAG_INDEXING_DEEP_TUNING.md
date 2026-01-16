@@ -40,7 +40,7 @@ RAG 在 Code Agent 里的“索引深度调优”，本质上是在三者之间�
 2. **Hybrid Retrieve**：
    - 先用 rg 做“强过滤”或补充信号；
    - 再做向量检索取 top-k；
-   - 结合 Repo Map / 符号信息做 rerank（可选）。
+   - 结合 Repo Map / 符号信息做 rerank（推荐：symbol/scope/node_type 等元数据 + 轻量词法信号）。
 3. **Context Packing**：
    - 只回喂关键片段 + 引用（路径/行号）；
    - 控制 token：截断、去重、按重要性排序。
@@ -66,7 +66,8 @@ RAG 在 Code Agent 里的“索引深度调优”，本质上是在三者之间�
 
 ### 3.2 仍建议补齐（下一阶段）
 
-- <span style="color:red">**真正的语义分块（AST-aware）**</span>：建议引入 Tree-sitter（或 LSP 的 folding/range）对函数/类块做结构化 chunk；
+- ✅ **AST-aware 语义分块（Tree-sitter）**：已引入可选 `tree_sitter` 分块器（缺依赖自动降级到启发式），并将 `symbol/node_type/scope/language/chunk_id` 元数据写入向量库；
+- ✅ **查询侧 rerank（业界推荐）**：语义检索返回包含 `score/_distance`，并基于 `symbol/scope/node_type/path/词法命中` 做轻量 rerank，提升 precision 与可解释性；
 - <span style="color:red">**更强的“变更检测”**</span>：mtime 在 Windows/网络盘上可能抖动，建议“mtime + hash + size”组合；
 - **并发索引**：使用线程池/进程池并控制并发与队列长度；
 - **向量库 schema 与维度治理**：embedding_model 变化时的迁移策略（单库多表或按模型版本分表）；

@@ -25,6 +25,8 @@ from collections import deque
 def run_opencode_tui(
     *,
     cfg: Any,
+    agent: Any,
+    debug: bool = False,
     run_turn: Callable[[str, Callable[[str], bool], Callable[[dict[str, Any]], None]], None],
 ) -> None:
     """
@@ -40,6 +42,7 @@ def run_opencode_tui(
     from textual.app import App, ComposeResult  # type: ignore[import-not-found]
     from textual.containers import Horizontal, Vertical  # type: ignore[import-not-found]
     from textual.widgets import Footer, Header, Input, RichLog  # type: ignore[import-not-found]
+    from rich.console import Console as RichConsole
 
     q: Queue[dict[str, Any]] = Queue(maxsize=50_000)
     _confirm_lock = threading.Lock()
@@ -86,6 +89,8 @@ def run_opencode_tui(
 
         def __init__(self) -> None:
             super().__init__()
+            self._agent = agent
+            self._debug = bool(debug)
             self._busy = False
             self._follow = True
             self._model = str(getattr(getattr(cfg, "llm", None), "model", "") or "auto")
@@ -112,11 +117,22 @@ def run_opencode_tui(
             # 对话窗格风格：log = 复刻 chat 默认“执行日志流”；block = 结构化块
             self._conversation_mode: str = "log"
             self._llm_round: int = 0
+            self._last_trace_id: str | None = None
+            self._last_user_text: str | None = None
 
             # 交互确认（confirm）状态
             self._pending_confirm_id: int | None = None
             self._pending_confirm_msg: str | None = None
             self._input_placeholder_normal: str = "输入内容，回车发送（q 退出）"
+            self._custom_commands: list[Any] = []
+
+            # 输入侧交互增强：历史/搜索/补全
+            self._input_history: deque[str] = deque(maxlen=200)
+            self._history_pos: int | None = None  # None=未进入历史浏览；否则为索引（0..len-1）
+            self._history_draft: str = ""  # 进入历史浏览前的草稿
+            self._search_mode: bool = False
+            self._search_query: str = ""
+            self._search_saved_draft: str = ""
 
             # LLM 请求历史（用于“操作面板”的多条进度条展示）
             # 每条：{id, idx, kind, step_id, start_ts, elapsed_ms, status, model, prompt_tokens, completion_tokens}
@@ -461,6 +477,308 @@ def run_opencode_tui(
                     conv.scroll_end(animate=False)
                 except Exception:
                     pass
+
+        def _load_command_names(self) -> list[str]:
+            """用于 Tab 补全：Slash Commands + 自定义命令。"""
+            base = [
+                "/help",
+                "/clear",
+                "/config",
+                "/model",
+                "/permissions",
+                "/tools",
+                "/doctor",
+                "/init",
+                "/memory",
+                "/bug",
+                "/cost",
+                "/commands",
+                "/reload-commands",
+            ]
+            out = list(base)
+            try:
+                for c in (self._custom_commands or []):
+                    name = getattr(c, "name", None)
+                    if name:
+                        out.append("/" + str(name).lstrip("/"))
+            except Exception:
+                pass
+            # 去重 + 排序
+            return sorted(set([x for x in out if x.startswith("/")]))
+
+        def _history_set(self, value: str) -> None:
+            inp = self.query_one("#input", Input)
+            inp.value = value
+
+        def _history_prev(self) -> None:
+            if self._pending_confirm_id is not None or self._search_mode:
+                return
+            inp = self.query_one("#input", Input)
+            if not self._input_history:
+                return
+            if self._history_pos is None:
+                self._history_draft = inp.value
+                self._history_pos = len(self._input_history) - 1
+            else:
+                self._history_pos = max(0, self._history_pos - 1)
+            self._history_set(self._input_history[self._history_pos])
+
+        def _history_next(self) -> None:
+            if self._pending_confirm_id is not None or self._search_mode:
+                return
+            if self._history_pos is None:
+                return
+            if self._history_pos >= len(self._input_history) - 1:
+                # 回到草稿并退出历史模式
+                self._history_set(self._history_draft)
+                self._history_pos = None
+                return
+            self._history_pos += 1
+            self._history_set(self._input_history[self._history_pos])
+
+        def _search_start(self) -> None:
+            if self._pending_confirm_id is not None:
+                return
+            inp = self.query_one("#input", Input)
+            self._search_mode = True
+            self._search_query = ""
+            self._search_saved_draft = inp.value
+            inp.placeholder = "反向搜索历史：输入关键字（Enter 选中 / Esc 取消 / Backspace 删除）"
+            try:
+                inp.focus()
+            except Exception:
+                pass
+            self._push_chat_log("（Ctrl+R）进入反向搜索历史", style="dim")
+
+        def _search_cancel(self) -> None:
+            inp = self.query_one("#input", Input)
+            self._search_mode = False
+            self._search_query = ""
+            inp.placeholder = self._input_placeholder_normal
+            inp.value = self._search_saved_draft
+
+        def _search_apply(self) -> None:
+            inp = self.query_one("#input", Input)
+            self._search_mode = False
+            self._search_query = ""
+            inp.placeholder = self._input_placeholder_normal
+
+        def _search_update(self) -> None:
+            """根据 query 更新当前匹配，并在输入框显示匹配结果。"""
+            inp = self.query_one("#input", Input)
+            q = self._search_query.strip().lower()
+            if not q:
+                inp.value = self._search_saved_draft
+                return
+            # 从最近历史开始找
+            match = None
+            for s in reversed(self._input_history):
+                if q in (s or "").lower():
+                    match = s
+                    break
+            if match is None:
+                inp.value = ""
+            else:
+                inp.value = match
+            # 同时写事件窗格（C：对话/输出 + 事件）
+            try:
+                self._emit_local_event(name="history_search", data={"query": q, "matched": match is not None})
+            except Exception:
+                pass
+
+        def _complete_command(self) -> None:
+            if self._pending_confirm_id is not None or self._search_mode:
+                return
+            inp = self.query_one("#input", Input)
+            t = inp.value or ""
+            if not t.startswith("/"):
+                return
+            # 只补全命令名（第一个 token）
+            token = t.split()[0]
+            cmds = self._load_command_names()
+            cand = [c for c in cmds if c.startswith(token)]
+            if not cand:
+                return
+            if len(cand) == 1:
+                inp.value = cand[0] + (" " if len(t.split()) == 1 and not t.endswith(" ") else "")
+                return
+            # 多候选：取公共前缀 + 输出候选列表到事件窗格
+            common = cand[0]
+            for c in cand[1:]:
+                i = 0
+                while i < len(common) and i < len(c) and common[i] == c[i]:
+                    i += 1
+                common = common[:i]
+            if common and common != token:
+                inp.value = common
+            self.query_one("#events", _Log).write(
+                Text("补全候选: " + "  ".join(cand[:20]) + (" …" if len(cand) > 20 else ""), style="dim")
+            )
+            self._emit_local_event(name="completion", data={"prefix": token, "candidates": cand[:50], "more": len(cand) > 50})
+
+        def on_key(self, event: Any) -> None:
+            """
+            输入侧增强：
+            - ↑/↓：历史浏览
+            - Ctrl+R：反向搜索历史
+            - Tab：命令补全
+            """
+            try:
+                inp = self.query_one("#input", Input)
+                if not inp.has_focus:
+                    return
+            except Exception:
+                return
+
+            k = getattr(event, "key", "") or ""
+
+            # 反向搜索模式：拦截字符/控制键
+            if self._search_mode:
+                if k == "escape":
+                    event.prevent_default()
+                    self._search_cancel()
+                    return
+                if k == "enter":
+                    event.prevent_default()
+                    self._search_apply()
+                    return
+                if k == "backspace":
+                    event.prevent_default()
+                    self._search_query = self._search_query[:-1]
+                    self._search_update()
+                    return
+                ch = getattr(event, "character", None)
+                if isinstance(ch, str) and len(ch) == 1 and ch.isprintable():
+                    event.prevent_default()
+                    self._search_query += ch
+                    self._search_update()
+                    return
+                return
+
+            if k in {"up"}:
+                event.prevent_default()
+                self._history_prev()
+                return
+            if k in {"down"}:
+                event.prevent_default()
+                self._history_next()
+                return
+            if k in {"ctrl+r"}:
+                event.prevent_default()
+                self._search_start()
+                return
+            if k in {"tab"}:
+                event.prevent_default()
+                self._complete_command()
+                return
+
+        def _emit_local_event(self, *, name: str, data: dict[str, Any]) -> None:
+            """把本地命令/扩展行为写到事件窗格（JSON）。"""
+            try:
+                self._append_event_line(
+                    f"local_{name}",
+                    data,
+                    step="-",
+                    trace_id=self._last_trace_id,
+                )
+            except Exception:
+                pass
+
+        def _run_local_command(self, txt: str) -> bool:
+            """
+            opencode 内本地命令层：
+            - 先尝试 .clude/commands 自定义命令展开（保持与 ChatHandler 一致）
+            - 再尝试 Slash Commands（/init 等，不走 LLM）
+            输出：同时写入 对话/输出（可读文本）和 事件（结构化 JSON）
+            """
+            raw = (txt or "").strip()
+            if not raw.startswith("/"):
+                return False
+
+            # 记录 last_user_text，供 /bug 关联
+            self._last_user_text = raw
+
+            # 轻量刷新自定义命令（允许用户热更新 .clude/commands/*.md）
+            try:
+                from clude_code.cli.custom_commands import load_custom_commands, expand_custom_command
+
+                self._custom_commands = load_custom_commands(getattr(cfg, "workspace_root", "."))
+                expanded = expand_custom_command(commands=self._custom_commands, user_text=raw)
+            except Exception:
+                expanded = None
+
+            if expanded is not None:
+                if expanded.errors:
+                    for e in expanded.errors:
+                        self._push_chat_log(e, style="red")
+                    self._emit_local_event(name="custom_command_error", data={"text": raw, "errors": expanded.errors})
+                    return True
+                # 自定义命令会展开为 prompt，并可能带 policy_overrides；这类需要走 AgentLoop 执行
+                self._push_chat_log(f"执行自定义命令: /{expanded.command.name}", style="dim")
+                self._emit_local_event(
+                    name="custom_command",
+                    data={
+                        "text": raw,
+                        "name": expanded.command.name,
+                        "path": expanded.command.path,
+                        "policy_overrides": expanded.policy_overrides,
+                    },
+                )
+                # 把展开后的 prompt 当成普通输入继续走后续 run_turn（由调用方处理）
+                # 返回 False 让外层继续进入“启动 worker 执行”，并把 txt 替换为 expanded.prompt
+                self._pending_expanded_prompt = expanded.prompt  # type: ignore[attr-defined]
+                self._pending_policy_overrides = expanded.policy_overrides or {}  # type: ignore[attr-defined]
+                return False
+
+            # Slash commands
+            try:
+                from clude_code.cli.slash_commands import SlashContext, handle_slash_command
+            except Exception as ex:
+                self._push_chat_log(f"本地命令层加载失败: {ex}", style="red")
+                self._emit_local_event(name="slash_load_failed", data={"text": raw, "error": str(ex)})
+                return True
+
+            # 捕获输出（写到对话/输出），同时也写结构化事件
+            cap = RichConsole(record=True, width=120)
+            ctx = SlashContext(
+                console=cap,
+                cfg=cfg,
+                agent=self._agent,
+                debug=self._debug,
+                last_trace_id=self._last_trace_id,
+                last_user_text=self._last_user_text,
+            )
+            handled = False
+            err: str | None = None
+            try:
+                handled = bool(handle_slash_command(ctx, raw))
+            except SystemExit:
+                handled = True
+            except Exception as ex:
+                handled = True
+                err = f"{type(ex).__name__}: {ex}"
+
+            if handled:
+                out = cap.export_text(clear=False)
+                out = (out or "").strip("\n")
+                if out:
+                    self._push_chat_log(f"（本地命令）{raw}", style="bold")
+                    for ln in out.splitlines()[:120]:
+                        self._push_chat_log(ln, style="dim")
+                if err:
+                    self._push_chat_log(err, style="red")
+                self._emit_local_event(
+                    name="slash",
+                    data={
+                        "text": raw,
+                        "ok": err is None,
+                        "error": err,
+                        "output_preview": "\n".join(out.splitlines()[:40]) if out else "",
+                    },
+                )
+                return True
+
+            return False
 
         def _format_args_one_line(self, args: Any, *, limit: int = 220) -> str:
             try:
@@ -814,6 +1132,8 @@ def run_opencode_tui(
                 self._last_step = ev.get("step")  # type: ignore[assignment]
             self._last_event = et or self._last_event
             trace_id = ev.get("trace_id")
+            if isinstance(trace_id, str) and trace_id:
+                self._last_trace_id = trace_id
 
             conversation = self.query_one("#conversation", _Log)
             ops = self.query_one("#ops", _Log)
@@ -827,6 +1147,7 @@ def run_opencode_tui(
                     self._push_chat_log(f"开始新的一轮对话 trace_id={trace_id}", style="bold cyan")
                 elif et == "user_message":
                     self._push_chat_log(f"用户输入: {data.get('text')}", style="white")
+                    self._last_user_text = str(data.get("text") or "").strip() or self._last_user_text
                 elif et == "intent_classified":
                     cat = data.get("category")
                     conf = data.get("confidence")
@@ -1300,6 +1621,35 @@ def run_opencode_tui(
                 self._refresh_header_panel()
                 return
 
+            # 普通输入：写入历史（避免污染 confirm 输入；避免连续重复）
+            try:
+                if txt and (not self._input_history or self._input_history[-1] != txt):
+                    self._input_history.append(txt)
+                self._history_pos = None
+                self._history_draft = ""
+            except Exception:
+                pass
+
+            # opencode 本地命令层（/init 等）：不走 LLM，输出写到 对话/输出 + 事件
+            if txt.startswith("/"):
+                # 自定义命令展开可能需要走 LLM（返回 False 时用替换后的 prompt 继续走）
+                try:
+                    setattr(self, "_pending_expanded_prompt", None)
+                    setattr(self, "_pending_policy_overrides", {})
+                except Exception:
+                    pass
+                handled = self._run_local_command(txt)
+                # handled=True：本地命令已完成，无需走 LLM
+                if handled:
+                    return
+                # handled=False：要继续走 LLM，但可能有自定义命令展开/策略覆盖
+                try:
+                    p = getattr(self, "_pending_expanded_prompt", None)
+                    if isinstance(p, str) and p.strip():
+                        txt = p.strip()
+                except Exception:
+                    pass
+
             if self._busy:
                 self.query_one("#events", _Log).write("[yellow]当前正在执行上一条请求，请稍候…[/yellow]")
                 return
@@ -1345,7 +1695,23 @@ def run_opencode_tui(
                         pass
 
                 try:
-                    run_turn(txt, _confirm, _on_event)
+                    # 自定义命令可能带临时 policy_overrides（仅本次 turn 生效）
+                    old_policy: dict[str, Any] = {}
+                    try:
+                        overrides = getattr(self, "_pending_policy_overrides", {}) or {}
+                        if isinstance(overrides, dict) and overrides:
+                            p = getattr(cfg, "policy", None)
+                            if p is not None:
+                                for k, v in overrides.items():
+                                    old_policy[k] = getattr(p, k, None)
+                                    setattr(p, k, v)
+                        run_turn(txt, _confirm, _on_event)
+                    finally:
+                        if old_policy:
+                            p = getattr(cfg, "policy", None)
+                            if p is not None:
+                                for k, v in old_policy.items():
+                                    setattr(p, k, v)
                 finally:
                     self._busy = False
 

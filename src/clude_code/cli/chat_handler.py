@@ -119,7 +119,7 @@ class ChatHandler:
                     except Exception:
                         pass
 
-                run_opencode_tui(cfg=self.cfg, run_turn=_run_turn)
+                run_opencode_tui(cfg=self.cfg, agent=self.agent, debug=self.debug_mode, run_turn=_run_turn)
                 return
 
         while True:

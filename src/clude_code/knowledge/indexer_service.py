@@ -11,6 +11,7 @@ from typing import Any, List, Optional, Dict
 from clude_code.config import CludeConfig
 from clude_code.knowledge.vector_store import VectorStore
 from clude_code.knowledge.embedder import CodeEmbedder
+from clude_code.knowledge.chunking import build_chunker, detect_language_from_path
 
 
 class IndexerService:
@@ -23,6 +24,7 @@ class IndexerService:
         self.workspace_root = Path(cfg.workspace_root)
         self.store = VectorStore(cfg)
         self.embedder = CodeEmbedder(cfg)
+        self.chunker = build_chunker(cfg)
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger(__name__)
@@ -32,7 +34,10 @@ class IndexerService:
         self.total_files = 0
 
         # 索引状态持久化（业界标配：可恢复的增量索引）
-        self._state_path = self.workspace_root / ".clude" / "index_state.json"
+        # 版本隔离：table_name/chunker 变化时触发重新索引（避免“state 认为已索引，但表为空/策略不同”）
+        table_name = str(getattr(cfg.rag, "table_name", "") or "code_chunks")
+        chunker_name = str(getattr(cfg.rag, "chunker", "") or "heuristic").lower()
+        self._state_path = self.workspace_root / ".clude" / f"index_state_{table_name}_{chunker_name}.json"
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state: Dict[str, Dict[str, Any]] = {}  # rel_path -> {"mtime": float, "hash": str, "skipped": bool}
         self._load_state()
@@ -140,26 +145,63 @@ class IndexerService:
             return
         
         # --- 深度调优：基于逻辑块的分块 ---
-        chunks = self._smart_chunking(content)
+        chunks = []
+        try:
+            # tree-sitter 模式缺依赖/解析失败时会返回空；自动降级到启发式（业界常见“可用优先”策略）
+            chunks = list(self.chunker.chunk(text=content, path=rel_path))  # type: ignore[attr-defined]
+        except Exception:
+            chunks = []
+        if not chunks:
+            chunks = self._smart_chunking(content)
         
         final_chunks = []
-        if not chunks: return
+        if not chunks:
+            return
 
         # 批量获取向量（更高效 + 节流）
-        texts = [c["text"] for c in chunks]
+        # 兼容两类结构：dict（历史）与 CodeChunk（新）
+        texts: list[str] = []
+        for c in chunks:
+            if isinstance(c, dict):
+                texts.append(str(c.get("text") or ""))
+            else:
+                texts.append(str(getattr(c, "text", "") or ""))
         vectors: list[list[float]] = []
         batch_size = int(getattr(self.cfg.rag, "embed_batch_size", 64) or 64)
         for i in range(0, len(texts), max(1, batch_size)):
             vectors.extend(self.embedder.embed_texts(texts[i : i + batch_size]))
         
         for i, vec in enumerate(vectors):
+            c = chunks[i]
+            if isinstance(c, dict):
+                c_text = str(c.get("text") or "")
+                c_start = int(c.get("start") or 1)
+                c_end = int(c.get("end") or c_start)
+                lang = detect_language_from_path(rel_path)
+                symbol = None
+                node_type = None
+                scope = None
+            else:
+                c_text = str(getattr(c, "text", "") or "")
+                c_start = int(getattr(c, "start_line", 1) or 1)
+                c_end = int(getattr(c, "end_line", c_start) or c_start)
+                lang = getattr(c, "language", None)
+                symbol = getattr(c, "symbol", None)
+                node_type = getattr(c, "node_type", None)
+                scope = getattr(c, "scope", None)
+            chunk_id = f"{rel_path}:{c_start}-{c_end}:{symbol or node_type or 'chunk'}"
             final_chunks.append({
                 "vector": vec,
-                "text": chunks[i]["text"],
+                "text": c_text,
                 "path": rel_path,
-                "start_line": chunks[i]["start"],
-                "end_line": chunks[i]["end"],
+                "start_line": c_start,
+                "end_line": c_end,
                 "file_hash": file_hash,
+                "language": lang,
+                "symbol": symbol,
+                "node_type": node_type,
+                "scope": scope,
+                "chunk_id": chunk_id,
             })
         
         # 向量库依赖缺失时，索引应“降级停用”而不是持续报错占用资源

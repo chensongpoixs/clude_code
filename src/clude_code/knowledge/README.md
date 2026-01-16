@@ -6,6 +6,7 @@
 - `embedder.py`: 封装 `fastembed`，负责将代码块转化为向量。
 - `vector_store.py`: 封装 `LanceDB`，负责向量的持久化存储与相似度搜索。
 - `indexer_service.py`: 后台异步索引服务，静默扫描工作区并更新索引。
+- `chunking.py`: 分块策略（启发式 / tree-sitter AST-aware），并产出 `symbol/node_type/scope` 等元数据。
 
 ## 模块流程
 ![Knowledge Flow](module_flow.svg)

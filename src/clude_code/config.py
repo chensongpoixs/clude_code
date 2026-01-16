@@ -75,6 +75,10 @@ class RAGConfig(BaseModel):
         default=".clude/vector_db",
         description="向量数据库存储路径。"
     )
+    table_name: str = Field(
+        default="code_chunks_v2",
+        description="向量表名（用于 schema/策略演进与迁移；变更后会触发重新索引）。",
+    )
     chunk_size: int = Field(default=500, description="代码分块大小（字符数）。")
     chunk_overlap: int = Field(default=50, description="分块重叠大小。")
 
@@ -85,6 +89,15 @@ class RAGConfig(BaseModel):
     chunk_target_lines: int = Field(default=40, ge=5, le=500, description="启发式分块目标行数（优先在空行/定义边界切分）。")
     chunk_max_lines: int = Field(default=60, ge=5, le=2000, description="启发式分块最大行数（硬上限）。")
     chunk_overlap_lines: int = Field(default=5, ge=0, le=200, description="分块行重叠（提升跨块召回稳定性）。")
+
+    # --- AST/tree-sitter 分块（业界推荐：函数/类/符号级 chunk） ---
+    chunker: str = Field(
+        default="heuristic",
+        description="分块器：heuristic（默认，启发式）| tree_sitter（AST-aware，缺依赖时自动降级）。",
+    )
+    ts_max_node_lines: int = Field(default=220, ge=20, le=5000, description="tree-sitter 单个语法节点 chunk 最大行数（超过会再切分）。")
+    ts_min_node_lines: int = Field(default=6, ge=1, le=200, description="tree-sitter 节点最小行数（太小的节点会被合并/跳过）。")
+    ts_leading_context_lines: int = Field(default=2, ge=0, le=30, description="tree-sitter chunk 向上附带的注释/空行上下文行数（用于可读性）。")
 
 
 class CludeConfig(BaseSettings):

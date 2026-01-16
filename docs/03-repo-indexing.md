@@ -26,7 +26,7 @@
 - **输入**：query、目录 scope、top_k
 - **输出**：`SemanticHit[]`（chunk_id、score、文件/行范围）
 - **实现要点**：
-  - chunk 策略：按函数/类（优先）、或按固定窗口
+  - chunk 策略：按函数/类/符号（AST-aware，优先）→ 退化到启发式（def/class/空行）→ 最后退化到固定窗口
   - 向量库：本地 SQLite/FAISS/自研（可替换）
   - 异步索引构建：首次缺索引时降级到 grep
 
@@ -58,6 +58,10 @@
 - `end_line: number`
 - `content_hash: string`
 - `tokens_estimate?: number`
+ - `language?: string`（语言推断）
+ - `symbol?: string`（函数/类/类型名）
+ - `node_type?: string`（AST 节点类型）
+ - `scope?: string`（父作用域路径，如 `ClassA/method_x`）
 
 ## 3. 索引生命周期
 

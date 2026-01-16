@@ -28,6 +28,7 @@ src/clude_code/cli/slash_commands.py
 src/clude_code/cli/theme.py
 src/clude_code/cli/utils.py
 src/clude_code/core/async_manager.py
+src/clude_code/knowledge/chunking.py
 src/clude_code/knowledge/embedder.py
 src/clude_code/knowledge/indexer_service.py
 src/clude_code/knowledge/vector_store.py
