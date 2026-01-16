@@ -413,11 +413,16 @@ def _spec_write_file() -> ToolSpec:
         args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
+                "file_name": {"type": "string", "description": "可选的文件名，仅用于日志记录和显示"},
+                "append": {"type": "boolean", "default": False, "description": "是否追加到文件末尾"},
+                "overwrite": {"type": "boolean", "default": True, "description": "是否覆盖已有文件"},
+                "create_dirs": {"type": "boolean", "default": True, "description": "是否创建缺失的父目录"},
                 "text": {"type": "string", "default": "", "description": "写入内容"},
             },
-            required=["path"],
+            required=["path", "file_name", "text", "append", "overwrite", "create_dirs"],
+
         ),
-        example_args={"path": "notes.txt", "text": "hello"},
+        example_args={"path": "file_name", "text": "hello world", "append": False, "overwrite": True, "create_dirs": True},
         side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),
