@@ -233,23 +233,29 @@ def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
     实现原理：
     1. 从 AgentLoop 获取当前的 _ev 回调和 trace_id
-    2. 通过 _ev("display", {...}) 触发界面更新
-    3. 返回 ToolResult 给模型（payload 包含显示内容）
+    2. 调用 tooling/tools/display.py 中的 display 函数
+    3. 通过事件机制广播到 UI（--live 模式）
     """
-    content = args.get("content", "")
+    from clude_code.tooling.tools.display import display
+
+    # 兼容旧字段：message -> content
+    content = args.get("content")
+    if not isinstance(content, str) or not content.strip():
+        content = args.get("message", "")
     level = args.get("level", "info")
     title = args.get("title")
 
-    # 触发界面显示事件
-    if loop._current_ev is not None:
-        loop._current_ev("display", {
-            "content": content,
-            "level": level,
-            "title": title,
-            "timestamp": time.time(),
-        })
+    _ev = getattr(loop, "_current_ev", None)
+    trace_id = getattr(loop, "_current_trace_id", None)
 
-    return ToolResult(ok=True, payload={"displayed": True, "content": content})
+    return display(
+        loop=loop,
+        content=str(content),
+        level=str(level) if isinstance(level, str) else "info",
+        title=str(title) if isinstance(title, str) else None,
+        _ev=_ev,
+        trace_id=trace_id,
+    )
 
 
 def _h_internal_repo_map(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -486,15 +492,25 @@ def _spec_display() -> ToolSpec:
     """ToolSpec：display（只读）。"""
     return ToolSpec(
         name="display",
-        summary="显示消息给用户（只读）。",
+        summary="向用户输出信息（进度、分析结果、说明等，只读）。",
         args_schema=_obj_schema(
             properties={
-                "message": {"type": "string", "description": "要显示的消息"},
+                "content": {"type": "string", "description": "要显示的内容（支持 Markdown）"},
+                "level": {
+                    "type": "string",
+                    "enum": ["info", "success", "warning", "error", "progress"],
+                    "default": "info",
+                    "description": "消息级别",
+                },
+                "title": {"type": ["string", "null"], "description": "可选标题"},
+
+                # 兼容字段：历史上曾使用 message（保留以避免旧 prompt/脚本失效）
+                "message": {"type": ["string", "null"], "description": "兼容字段：等价于 content（后续将废弃）"},
             },
-            required=["message"],
+            required=["content"],
         ),
-        example_args={"message": "操作已完成"},
-        side_effects={"read"},
+        example_args={"content": "正在分析文件...", "level": "progress"},
+        side_effects=set(),  # 无副作用（只读展示）
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,

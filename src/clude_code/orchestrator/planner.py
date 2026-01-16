@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
-from typing import Optional, List, Union;
+from typing import Any, List, Optional, Union
 from pydantic import BaseModel, Field, ValidationError
 
 

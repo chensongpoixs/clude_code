@@ -62,3 +62,24 @@
 - **测试驱动**: 为每个 Tool 和编排逻辑编写本地 Mock 测试。
 - **审计记录**: 所有新增步骤必须产生对应的 `Audit` 和 `Trace` 日志。
 
+---
+
+## 近期治理计划补充（全仓审计结论 → 可执行改造项）
+
+> 目标：把“全仓模块逻辑梳理 + 问题清单（P0/P1/P2）+ 对标业界建议”映射到路线图，形成可验收的迭代计划。
+>
+> 详单见：`docs/16-development-plan.md`
+
+### P0（立刻修：契约一致性与入口收敛）
+- **P0-ToolSpec 单一真实源**：统一 ToolSpec schema/handler/实现/文档，避免“工具看起来可用但不生效”的断裂。
+- **P0-chat/live 单入口**：收敛多套 chat/live 实现，避免行为分裂（增强能力走 feature flag / 注入式扩展）。
+
+### P1（健壮性治理：日志/异常/配置/注册表合流）
+- **异常可观测性统一**：任何异常至少写 file-only；用户可见路径输出友好摘要并保留 trace_id。
+- **配置一致性**：修正默认值/约束矛盾；doctor/启动输出关键配置摘要（RAG device、embedding 模型、索引状态）。
+- **Tool Registry 合流**：以 ToolSpec Registry 为唯一事实源，其它 registry 仅做视图/统计。
+
+### P2（业界对标增强：质量门禁与 RAG 深度调优）
+- **质量门禁落地**：ruff/mypy/tests/CI/pre-commit 固化，防止迭代回退。
+- **RAG 深度调优**：AST/tree-sitter 分块 + chunk 元数据（符号/作用域）+ 检索融合（grep/semantic/repo map）。
+
