@@ -210,7 +210,12 @@ def _h_undo_patch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 # --- IGNORE ---
 # ... Other tool handlers ...
 def _h_write_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.write_file(path=args["path"], text=args.get("text", "") );
+    return loop.tools.write_file(
+        path=args["path"],
+        text=args.get("text", ""),
+        content_based=bool(args.get("content_based", False)),
+        insert_at_line=args.get("insert_at_line")
+    );
 
 
 def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -313,7 +318,7 @@ def _spec_glob_file_search() -> ToolSpec:
             },
             required=["glob_pattern"],
         ),
-        example_args={"glob_pattern": "**/*.*", "target_directory": "."},
+        example_args={"glob_pattern": "**/test.md", "target_directory": "."},
         side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -415,10 +420,12 @@ def _spec_write_file() -> ToolSpec:
             properties={
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
                 "text": {"type": "string", "default": "", "description": "写入内容"},
+                "content_based": {"type": "boolean", "default": False, "description": "是否根据现有内容智能决定写入行为：空文件则写入，有内容则追加"},
+                "insert_at_line": {"type": "integer", "description": "在指定行号插入内容（从0开始）。如果指定此参数，将忽略content_based设置"},
             },
             required=["path"],
-        ), 
-        example_args={"path": "notes.md",  "text": "hello world",  },
+        ),
+        example_args={"path": "notes.md", "text": "hello world", "content_based": True, "insert_at_line": 5},
         side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),

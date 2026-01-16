@@ -39,8 +39,8 @@ class LocalTools:
             limit=limit,
         )
 
-    def write_file(self, path: str, text: str) -> ToolResult:
-        return _write_file_impl(workspace_root=self.workspace_root, path=path, text=text)
+    def write_file(self, path: str, text: str, content_based: bool = False, insert_at_line: int | None = None) -> ToolResult:
+        return _write_file_impl(workspace_root=self.workspace_root, path=path, text=text, content_based=content_based, insert_at_line=insert_at_line)
 
     def apply_patch(
         self,
