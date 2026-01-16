@@ -12,3 +12,5 @@ Provides-Extra: dev
 Requires-Dist: ruff>=0.7.0; extra == "dev"
 Requires-Dist: mypy>=1.11.0; extra == "dev"
 Requires-Dist: pytest>=8.0.0; extra == "dev"
+Provides-Extra: ui
+Requires-Dist: textual>=0.70.0; extra == "ui"

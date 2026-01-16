@@ -84,6 +84,7 @@
 | | `claude -c/-r` (会话恢复) | ✅ 已完成 | P1 | `.clude/sessions/` 持久化历史；`-c` 继续最新会话，`-r` 恢复指定会话 |
 | **UI/UX** | `/slash` 命令系统 | ✅ 已完成 | P0 | REPL 内 `/help`, `/config`, `/permissions` 等 |
 | | 增强版 Claude Code UI | ✅ 已完成 | P0 | 左侧滚动 + 右侧面板 + 阶段块布局 |
+| | OpenCode 风格 TUI（Textual，多窗格滚动） | ✅ 已完成（可选依赖） | P1 | `--live-ui opencode`：多窗格、鼠标滚轮滚动历史、减少整屏刷新 |
 | **Policy** | `allowedTools` / `disallowedTools` | ✅ 已完成 | P0 | 策略引擎强制拦截 |
 | | `CLUDE.md` (项目记忆) | ✅ 已完成 | P1 | 自动搜索并注入 System Prompt |
 | **Plugins** | 自定义命令扩展 | ✅ 已完成 | P1 | 支持从 `.clude/commands/*.md` 加载自定义命令；支持参数校验（`args/required/usage`）与命令级权限声明（`allowed_tools/disallowed_tools/allow_network`） |

@@ -90,6 +90,38 @@ class ChatHandler:
         # 设置调试模式
         self.debug_mode = debug
 
+        # OpenCode 风格 TUI：直接进入 Textual UI（自身包含输入框与历史滚动）
+        if live and (live_ui or "classic").strip().lower() in {"opencode", "textual"}:
+            try:
+                from clude_code.plugins.ui.opencode_tui import run_opencode_tui
+            except Exception:
+                console.print(
+                    "[red]未安装 Textual，无法启用 opencode UI。[/red]\n"
+                    "请安装可选依赖：\n"
+                    "[dim]pip install -e \".[ui]\"[/dim]"
+                )
+                # 降级回原 live 逻辑
+            else:
+                def _run_turn(
+                    text: str,
+                    confirm: Any,
+                    on_event: Any,
+                ) -> None:
+                    turn = self.agent.run_turn(text, confirm=confirm, debug=self.debug_mode, on_event=on_event)
+                    self._last_trace_id = getattr(turn, "trace_id", None)
+                    try:
+                        save_session(
+                            workspace_root=self.cfg.workspace_root,
+                            session_id=self.agent.session_id,
+                            messages=self.agent.messages,
+                            last_trace_id=self._last_trace_id,
+                        )
+                    except Exception:
+                        pass
+
+                run_opencode_tui(cfg=self.cfg, run_turn=_run_turn)
+                return
+
         while True:
             try:
                 # 每轮都做一次轻量刷新（支持用户新增/修改 .clude/commands/*.md 后生效）
@@ -231,7 +263,13 @@ class ChatHandler:
     def _run_with_live(self, user_text: str, debug: bool, *, live_ui: str = "classic") -> None:
         """带 50 行实时面板的执行模式，支持动画和增强确认。"""
         # P0-2：统一入口，UI 可选但事件协议与 AgentLoop 共享，避免双主链路分裂
-        if (live_ui or "classic").strip().lower() == "enhanced":
+        ui_mode = (live_ui or "classic").strip().lower()
+
+        # opencode/textual 模式在 run_loop 已接管（包含输入框与滚动），此处不再处理
+        if ui_mode in {"opencode", "textual"}:
+            ui_mode = "enhanced"
+
+        if ui_mode == "enhanced":
             # P0-2：增强 UI 已迁移至 plugins/ui（可选实现，不污染主链路）
             from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay
 

@@ -21,6 +21,9 @@ dev = [
   "mypy>=1.11.0",
   "pytest>=8.0.0",
 ]
+ui = [
+  "textual>=0.70.0",
+]
 
 [project.scripts]
 clude = "clude_code.cli.main:app"

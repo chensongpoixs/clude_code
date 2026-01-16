@@ -18,7 +18,7 @@
   - **`--select-model`**：启动时调用 `/v1/models` 获取列表并交互选择（仅对 `openai_compat` 有意义）
   - **`--debug`**：输出可观测执行轨迹（并写入 `.clude/logs/trace.jsonl`）
   - **`--live`**：固定 50 行实时刷新 UI（开启后会自动启用 `--debug`；结束后保持最终状态显示）
-  - **`--live-ui`**：Live UI 风格（`classic|enhanced`，仅在 `--live` 时生效；默认 `classic`）
+  - **`--live-ui`**：Live UI 风格（`classic|enhanced|opencode`，仅在 `--live` 时生效；默认 `classic`）
 
 - **示例**
 
@@ -34,6 +34,9 @@ clude chat --live
 
 # 选择增强 Live UI（同一入口，不再维护第二套 chat 主循环）
 clude chat --live --live-ui enhanced
+
+# 选择 OpenCode 风格 TUI（Textual，多窗格滚动/鼠标滚轮查看历史）
+clude chat --live --live-ui opencode
 
 # 说明：enhanced 会以“Claude Code 风格”呈现（左侧滚动输出 + 右侧状态/操作面板 + 底部事件轨迹）
 
