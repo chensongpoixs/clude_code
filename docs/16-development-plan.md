@@ -78,20 +78,84 @@
 
 ### 4.1 P0 迭代（稳定性优先，先保证“能用且一致”）
 
+> 本节从 P0 开始补齐两类信息：
+> - **现有代码实现原理**：当前代码真实的调用链路、关键文件与关键机制。
+> - **在现有代码上做 P0 完善的思考过程**：为什么要这么改、改什么、怎么验收。
+
 #### P0-1 统一工具契约：ToolSpec 单一真实源
-- **工作项**：
-  - 全量检查 ToolSpec 的 `args_schema`、handler 读取字段、实际实现函数签名、`docs/02-tool-protocol.md` 是否一致。
-  - 为历史字段保留兼容层（如 `message` → `content`），并标注废弃计划。
+
+##### 现有实现原理（现状代码怎么工作的）
+
+- **工具事实来源（ToolSpec Registry）**：`src/clude_code/orchestrator/agent_loop/tool_dispatch.py`
+  - **ToolSpec 定义**：工具的事实字段集中在 ToolSpec：`name/summary/args_schema/example_args/side_effects/visible_in_prompt/callable_by_model/handler`。
+  - **系统提示词工具清单渲染**：`render_tools_for_system_prompt()` 遍历 ToolSpec，生成 `SYSTEM_PROMPT` 的“可用工具清单”。
+  - **运行时参数强校验**：`ToolSpec.validate_args()` 依据 `args_schema` 动态创建 Pydantic 模型进行强校验（含 default 生效、enum 检查、extra forbid 等），失败返回 `E_INVALID_ARGS`。
+  - **分发入口**：`dispatch_tool()` 负责：
+    - 未知工具 → `E_NO_TOOL`
+    - `callable_by_model=False` 的内部项 → `E_NO_TOOL`
+    - 参数校验失败 → `E_INVALID_ARGS`
+    - 校验通过 → `spec.handler(loop, validated_args)`
+
+- **工具生命周期（确认/策略/审计/验证闭环）**：`src/clude_code/orchestrator/agent_loop/tool_lifecycle.py`
+  - 依据 `side_effects` 决策确认与策略：
+    - `write`：按 `cfg.policy.confirm_write` 询问用户
+    - `exec`：先 `evaluate_command()` 安全评估，再按 `cfg.policy.confirm_exec` 询问用户
+  - 写入审计：`AuditLogger`（`.clude/logs/audit.jsonl`）
+  - 修改类工具成功后触发选择性验证：`Verifier.run_verify(modified_paths=...)`
+
+- **工具底层实现**：
+  - 文件/搜索/补丁/命令：`src/clude_code/tooling/local_tools.py` → `src/clude_code/tooling/tools/*`
+  - 编排器能力类工具（如语义检索）：handler 调 `AgentLoop` 能力方法（避免把 RAG 细节堆到 LocalTools）
+
+##### P0 完善思考过程（为什么要改、改什么、怎么验证）
+
+**问题本质**：只要 ToolSpec、handler、底层实现、文档中任意一处不一致，就会出现“工具看起来可用但不生效”“模型按 schema 传参被忽略”“不同 UI/入口行为不同”等割裂。  
+业界做法是：**ToolSpec 必须是唯一真实源（Single Source of Truth）**，其它层只能引用它，不能维护第二份“工具事实”。
+
+- **工作项（在现有代码上最小侵入的落地方案）**：
+  - 全量检查 ToolSpec 的 `args_schema`、handler 读取字段、底层实现函数签名、`docs/02-tool-protocol.md` 是否一致。
+  - 为历史字段保留兼容层（如 `message` → `content`），并标注废弃计划（何时移除、如何提示）。
+  - 增加“一键自检”，把契约漂移变成可检测问题（建议新增 `clude doctor --check-tools` 或 `clude tools --validate`）。
+
 - **验收标准**：
-  - `clude tools --json --schema` 输出与运行时校验一致。
-  - 任意工具按 schema 调用不会出现“参数被忽略/无法生效”的情况。
+  - `clude tools --json --schema` 输出与运行时校验一致
+  - 所有工具的 `example_args` 能通过 `validate_args()`
+  - 任意工具按 schema 调用不会出现“参数被忽略/无法生效”
 
 #### P0-2 收敛 chat/live 单入口
-- **工作项**：
-  - 明确默认入口文件（建议只保留一套 chat handler + live view）。
-  - 增强版能力通过配置/flag 注入，而不是并行存在两套主路径。
+
+##### 现有实现原理（现状代码怎么工作的）
+
+- **默认入口**：`src/clude_code/cli/main.py` 的 `clude chat` 当前使用 `src/clude_code/cli/chat_handler.py::ChatHandler`
+  - `ChatHandler` 内部创建 `AgentLoop(cfg)`
+  - 普通模式：`_run_simple()` → `AgentLoop.run_turn(..., debug=debug)`
+  - Live 模式：`_run_with_live()` 使用 `LiveDisplay`，并把 `on_event_wrapper` 传给 `AgentLoop.run_turn(..., on_event=...)`
+
+- **Live UI（50 行面板）**：`src/clude_code/cli/live_view.py::LiveDisplay`
+  - 接收事件（如 `llm_request/llm_response/tool_call_parsed/tool_result/display`）
+  - 更新面板状态与“思考窗口”
+  - `display` 事件用于 Agent 主动输出中间信息（进度/阶段结论）
+
+- **并行存在的增强版链路（潜在分裂风险）**：
+  - `src/clude_code/cli/enhanced_chat_handler.py::EnhancedChatHandler`
+  - `src/clude_code/cli/enhanced_live_view.py::EnhancedLiveDisplay`
+  - 当前默认入口未使用增强版，但代码并行存在，后续很容易出现“某功能只在一条链路修了/加了”的维护分裂。
+
+##### P0 完善思考过程（为什么要改、改什么、怎么验证）
+
+**问题本质**：两套 chat/live 主链路并行时，display、日志、确认交互、事件协议、错误展示都可能出现“只在 A 修复、B 没修复”的分裂。  
+业界做法：**默认主路径必须唯一**；增强能力通过开关/注入/配置扩展，而不是长期维护两套主链路。
+
+- **工作项（两条路线二选一即可）**：
+  - 路线 A（推荐）：合并增强能力到默认链路  
+    把增强 UI 的价值点（细粒度进度/任务）抽为可选组件，注入 `LiveDisplay`，避免第二套主循环。
+  - 路线 B：保留增强版但必须显式开关且共享核心  
+    CLI 增加 `--ui enhanced`（或配置项）选择 UI；关键约束：共享同一个 `AgentLoop` 与同一套事件协议，不复制粘贴核心逻辑。
+
 - **验收标准**：
-  - 同一输入在普通模式与 `--live` 模式下的行为一致（仅 UI 呈现不同）。
+  - 同一输入在普通模式与 `--live` 模式下行为一致（仅 UI 呈现不同）
+  - `display`、tool 事件、确认交互在所有启用的 UI 模式下行为一致
+  - 不存在两份独立的“chat 主循环 + on_event glue code”长期并行维护
 
 ### 4.2 P1 迭代（健壮性与可维护性）
 

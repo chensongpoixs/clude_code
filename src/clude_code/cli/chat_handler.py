@@ -69,7 +69,7 @@ class ChatHandler:
         import uuid
         return str(uuid.uuid4())[:8]
 
-    def run_loop(self, debug: bool, live: bool) -> None:
+    def run_loop(self, debug: bool, live: bool, *, live_ui: str = "classic") -> None:
         """主交互循环，支持动画界面和快捷键。"""
         # 显示欢迎界面
         self._show_welcome()
@@ -114,7 +114,7 @@ class ChatHandler:
 
                 # 执行用户查询
                 if live:
-                    self._run_with_live(user_text, debug=self.debug_mode)
+                    self._run_with_live(user_text, debug=self.debug_mode, live_ui=live_ui)
                 else:
                     self._run_simple(user_text, debug=self.debug_mode)
 
@@ -128,9 +128,16 @@ class ChatHandler:
                     console.print(traceback.format_exc())
                 continue
 
-    def _run_with_live(self, user_text: str, debug: bool) -> None:
+    def _run_with_live(self, user_text: str, debug: bool, *, live_ui: str = "classic") -> None:
         """带 50 行实时面板的执行模式，支持动画和增强确认。"""
-        display = LiveDisplay(console, self.cfg)
+        # P0-2：统一入口，UI 可选但事件协议与 AgentLoop 共享，避免双主链路分裂
+        if (live_ui or "classic").strip().lower() == "enhanced":
+            # P0-2：增强 UI 已迁移至 plugins/ui（可选实现，不污染主链路）
+            from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay
+
+            display = EnhancedLiveDisplay(console, self.cfg)
+        else:
+            display = LiveDisplay(console, self.cfg)
 
         def _confirm(msg: str) -> bool:
             """增强的确认提示"""
@@ -173,9 +180,13 @@ class ChatHandler:
                 self._log_turn_end(turn)
                 
                 # 结束后固定状态
-                display.active_state = "DONE"
-                display.last_event = "done"
-                display._push_thought_block("[done] 本轮结束")
+                if hasattr(display, "active_state"):
+                    display.active_state = "DONE"  # type: ignore[attr-defined]
+                    display.last_event = "done"  # type: ignore[attr-defined]
+                    if hasattr(display, "_push_thought_block"):
+                        display._push_thought_block("[done] 本轮结束")  # type: ignore[attr-defined]
+                elif hasattr(display, "set_state"):
+                    display.set_state("DONE", "本轮结束")  # type: ignore[attr-defined]
                 live_view.update(display.render())
                 
                 self._print_assistant_response(turn, debug=True, show_trace=True)

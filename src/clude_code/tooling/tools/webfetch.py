@@ -5,12 +5,17 @@ WebFetch tool - 获取网页内容
 """
 from __future__ import annotations
 
-import requests
 import time
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from clude_code.tooling.types import ToolResult, ToolError
+
+try:
+    import requests  # type: ignore
+except Exception:
+    # 可选依赖：缺失时不应阻塞整个 CLI 导入链路
+    requests = None  # type: ignore
 
 
 def fetch_web_content(
@@ -29,6 +34,14 @@ def fetch_web_content(
     Returns:
         ToolResult: 包含网页内容的工具结果
     """
+    if requests is None:
+        return ToolResult(
+            ok=False,
+            error={
+                "code": "E_DEP_MISSING",
+                "message": "requests 未安装，无法进行 webfetch。请安装依赖：pip install requests",
+            },
+        )
     try:
         # 验证URL
         parsed = urlparse(url)
@@ -54,12 +67,30 @@ def fetch_web_content(
             content = response.text
         elif format == "text":
             # 简单的HTML到文本转换
-            from bs4 import BeautifulSoup
+            try:
+                from bs4 import BeautifulSoup  # type: ignore
+            except Exception:
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "code": "E_DEP_MISSING",
+                        "message": "bs4 未安装，无法将 HTML 转为 text。请安装依赖：pip install beautifulsoup4",
+                    },
+                )
             soup = BeautifulSoup(response.text, 'html.parser')
             content = soup.get_text(separator='\n', strip=True)
         elif format == "markdown":
             # 使用html2text转换
-            import html2text
+            try:
+                import html2text  # type: ignore
+            except Exception:
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "code": "E_DEP_MISSING",
+                        "message": "html2text 未安装，无法将 HTML 转为 markdown。请安装依赖：pip install html2text",
+                    },
+                )
             h = html2text.HTML2Text()
             h.ignore_links = False
             h.ignore_images = False
@@ -86,23 +117,28 @@ def fetch_web_content(
             payload=result_data
         )
 
-    except requests.Timeout:
-        return ToolResult(
-            ok=False,
-            error={
-                "message": f"Request timeout after {timeout} seconds",
-                "code": "WEBFETCH_TIMEOUT"
-            }
-        )
-    except requests.RequestException as e:
-        return ToolResult(
-            ok=False,
-            error={
-                "message": f"Network error: {str(e)}",
-                "code": "WEBFETCH_NETWORK_ERROR"
-            }
-        )
     except Exception as e:
+        # requests 的异常类型在不同版本可能不同，这里统一做 best-effort 分类
+        try:
+            if hasattr(requests, "Timeout") and isinstance(e, requests.Timeout):  # type: ignore[attr-defined]
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "message": f"Request timeout after {timeout} seconds",
+                        "code": "WEBFETCH_TIMEOUT"
+                    }
+                )
+            if hasattr(requests, "RequestException") and isinstance(e, requests.RequestException):  # type: ignore[attr-defined]
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "message": f"Network error: {str(e)}",
+                        "code": "WEBFETCH_NETWORK_ERROR"
+                    }
+                )
+        except Exception:
+            # 分类失败不影响返回
+            pass
         return ToolResult(
             ok=False,
             error={

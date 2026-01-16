@@ -427,7 +427,7 @@ def _spec_write_file() -> ToolSpec:
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
                 "text": {"type": "string", "default": "", "description": "写入内容"},
                 "content_based": {"type": "boolean", "default": False, "description": "是否根据现有内容智能决定写入行为：空文件则写入，有内容则追加"},
-                "insert_at_line": {"type": "integer", "description": "在指定行号插入内容（从0开始）。如果指定此参数，将忽略content_based设置"},
+                "insert_at_line": {"type": "integer", "default": 0, "description": "在指定行号插入内容（从0开始）。如果指定此参数，将忽略content_based设置"},
             },
             required=["path"],
         ),

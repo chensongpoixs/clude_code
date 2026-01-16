@@ -18,6 +18,7 @@
   - **`--select-model`**：启动时调用 `/v1/models` 获取列表并交互选择（仅对 `openai_compat` 有意义）
   - **`--debug`**：输出可观测执行轨迹（并写入 `.clude/logs/trace.jsonl`）
   - **`--live`**：固定 50 行实时刷新 UI（开启后会自动启用 `--debug`；结束后保持最终状态显示）
+  - **`--live-ui`**：Live UI 风格（`classic|enhanced`，仅在 `--live` 时生效；默认 `classic`）
 
 - **示例**
 
@@ -30,6 +31,9 @@ clude chat --debug
 
 # 开启 50 行 Live UI（不刷屏；排障/演示用）
 clude chat --live
+
+# 选择增强 Live UI（同一入口，不再维护第二套 chat 主循环）
+clude chat --live --live-ui enhanced
 
 # 指定模型
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"

@@ -9,6 +9,15 @@
 
 本模块提供可扩展的工具插件系统，支持用户通过 YAML/JSON 配置文件注册自定义工具，并在沙箱环境中安全执行。
 
+## 补充：UI 插件（实验性，P0-2）
+
+为避免 `cli/` 主链路膨胀，本项目把“增强 Live UI/实验交互实现”以**内置插件形态**收纳在：
+- `src/clude_code/plugins/ui/`
+
+说明：
+- 这类 UI 插件**不属于外部 tool 插件**（不走 `.clude/plugins/*.yaml`），主要用于代码组织与可选启用。
+- `clude chat` 仍保持 `ChatHandler` 单入口；UI 仅通过参数 `--live-ui classic|enhanced` 选择渲染器。
+
 ## 业界对比
 
 | 项目 | 插件系统 | 定义方式 | 沙箱隔离 | 安全控制 |

@@ -10,13 +10,50 @@ from clude_code.config import CludeConfig
 
 console = Console()
 
-def run_tools_list(schema: bool, as_json: bool, all_specs: bool) -> None:
+def _validate_tool_specs(specs) -> tuple[bool, list[dict[str, str]]]:
+    """
+    校验 ToolSpec 契约一致性（MVP 版）：
+    - 使用 ToolSpec.example_args 执行 validate_args（Pydantic 运行时强校验）
+    - 仅做“契约层”校验，不执行工具（避免 write/exec 副作用）
+    返回: (ok, failures)
+    """
+    failures: list[dict[str, str]] = []
+    for s in specs:
+        try:
+            ok, msg_or_args = s.validate_args(s.example_args or {})
+            if not ok:
+                failures.append(
+                    {
+                        "tool": s.name,
+                        "error": str(msg_or_args),
+                    }
+                )
+        except Exception as e:
+            failures.append({"tool": s.name, "error": f"校验异常: {type(e).__name__}: {e}"})
+    return (len(failures) == 0), failures
+
+
+def run_tools_list(schema: bool, as_json: bool, all_specs: bool, validate: bool = False) -> None:
     """列出可用工具清单。"""
     # 使用新的工具注册表
     from clude_code.orchestrator.agent_loop.tool_dispatch import get_tool_registry
     registry = get_tool_registry()
 
     specs = registry.list_tools(callable_only=not all_specs, include_deprecated=False)
+
+    if validate:
+        ok, failures = _validate_tool_specs(specs)
+        if ok:
+            console.print("[green]✓ 工具契约校验通过：所有工具的 example_args 均可通过运行时 schema 校验[/green]")
+            return
+        console.print(f"[red]✗ 工具契约校验失败：{len(failures)} 个工具不通过[/red]")
+        table = Table(show_header=True, box=None)
+        table.add_column("工具名", style="bold cyan", width=20)
+        table.add_column("错误", style="red")
+        for f in failures[:50]:
+            table.add_row(f["tool"], f["error"])
+        console.print(table)
+        raise typer.Exit(code=2)
 
     if as_json:
         payload = []

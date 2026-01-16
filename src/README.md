@@ -43,6 +43,9 @@
 ### 第一阶段：编辑稳定性 (P0)
 - **Patch Engine**: ✅ 已引入 `apply_patch`（支持多处/全量替换，含可选 fuzzy），并提供 `undo_patch` 回滚与 hash 证据链。下一步补“原子写”与“敏感信息脱敏”。
 - **Schema Guard**: 在工具执行前强制 Pydantic 校验，对 LLM 错误输出进行自动重试。
+ - **ToolSpec 契约自检**: ✅ 新增 `clude tools --validate`：用 ToolSpec.example_args 做运行时 schema 校验（只读、无副作用），用于防止“工具契约漂移/参数不一致”回归。
+ - **Live 单入口（P0-2）**: ✅ `clude chat --live` 仍由 `ChatHandler` 单入口驱动；新增 `--live-ui classic|enhanced` 仅切换渲染器，避免并行维护两套 chat 主循环。
+ - **增强 UI 迁移到 plugins（P0-2）**: ✅ 增强 Live UI/实验 chat 实现已迁移至 `src/clude_code/plugins/ui/`，`cli/enhanced_*` 保留为兼容层（re-export）。
  - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。
  - **结构化回喂 + rg**: ✅ 已落地（`tooling/feedback.py` + grep 优先 `rg --json` + doctor 检测 rg）。分析见 `src/IMPLEMENTATION_ANALYSIS_FEEDBACK_RIPGREP.md`。
 

@@ -65,11 +65,13 @@ clude chat --debug
   - **`--select-model`**：从 `/v1/models` 交互选择模型（openai_compat）
   - **`--debug`**：输出可观测轨迹，并写入 `.clude/logs/trace.jsonl`
   - **`--live`**：固定 50 行实时刷新 UI（开启后自动启用 `--debug`，结束后保持最终状态）
+  - **`--live-ui`**：Live UI 风格（`classic|enhanced`，仅 `--live` 生效）
 
 ```bash
 clude chat
 clude chat --debug
 clude chat --live
+clude chat --live --live-ui enhanced
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 ```
 
@@ -79,11 +81,13 @@ clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
   - **`--schema`**：附带 JSON Schema
   - **`--json`**：JSON 输出
   - **`--all`**：包含内部/不可调用项（诊断用）
+  - **`--validate`**：校验工具契约（使用 ToolSpec.example_args 做运行时 schema 校验，不执行工具、无副作用）
 
 ```bash
 clude tools
 clude tools --json
 clude tools --json --schema
+clude tools --validate
 ```
 
 ### 3.3 `clude doctor`

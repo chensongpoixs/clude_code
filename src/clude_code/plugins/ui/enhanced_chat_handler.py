@@ -1,15 +1,23 @@
 """
-兼容层（Deprecated）：
-
-P0-2 已将增强 chat/live 实验实现迁移到 `src/clude_code/plugins/ui/`，避免 `cli/` 主链路膨胀。
-请改用：
-- `from clude_code.plugins.ui.enhanced_chat_handler import EnhancedChatHandler`
+增强的聊天处理器，支持异步操作和细粒度进度指示
 """
+from __future__ import annotations
 
-from clude_code.plugins.ui.enhanced_chat_handler import (  # noqa: F401
-    EnhancedAgentLoop,
-    EnhancedChatHandler,
-)
+import asyncio
+from typing import Any, Optional
+import time
+
+from rich.console import Console
+from rich.live import Live
+from rich.prompt import Confirm, Prompt
+
+from clude_code.config import CludeConfig
+from clude_code.core.async_manager import AsyncTaskManager, get_async_manager
+from clude_code.llm.streaming_client import StreamingLLMClient, CachedStreamingLLMClient
+from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay, SimpleProgressDisplay, TaskType
+from clude_code.orchestrator.agent_loop import AgentLoop
+from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.tooling.local_tools import ToolResult
 
 
 class EnhancedAgentLoop(AgentLoop):

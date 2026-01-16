@@ -29,10 +29,11 @@ def tools(
     schema: bool = typer.Option(False, "--schema", help="输出 JSON Schema"),
     as_json: bool = typer.Option(False, "--json", help="以 JSON 格式输出"),
     all_specs: bool = typer.Option(False, "--all", help="包含内部规范项"),
+    validate: bool = typer.Option(False, "--validate", help="校验工具契约（使用 ToolSpec.example_args 做运行时 schema 校验）"),
 ) -> None:
     """列出可用工具清单。"""
     from clude_code.cli.info_cmds import run_tools_list
-    run_tools_list(schema, as_json, all_specs)
+    run_tools_list(schema, as_json, all_specs, validate)
 
 @app.command()
 def models() -> None:
@@ -56,6 +57,7 @@ def chat(
     select_model: bool = typer.Option(False, "--select-model", help="交互式选择模型"),
     debug: bool = typer.Option(False, "--debug", help="显示执行轨迹"),
     live: bool = typer.Option(False, "--live", help="启用 50 行实时刷新界面"),
+    live_ui: str = typer.Option("classic", "--live-ui", help="Live UI 风格：classic|enhanced（仅在 --live 时生效）"),
 ) -> None:
     """启动交互式 Agent 会话。"""
     from clude_code.cli.chat_handler import ChatHandler
@@ -69,7 +71,10 @@ def chat(
     if select_model:
         handler.select_model_interactively()
     
-    handler.run_loop(debug=debug, live=live)
+    live_ui = (live_ui or "classic").strip().lower()
+    if live_ui not in {"classic", "enhanced"}:
+        raise typer.BadParameter("live_ui 必须为 classic 或 enhanced")
+    handler.run_loop(debug=debug, live=live, live_ui=live_ui)
 
 if __name__ == "__main__":
     app()

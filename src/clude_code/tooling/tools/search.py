@@ -5,11 +5,16 @@ WebSearch tool - 网页搜索工具
 """
 from __future__ import annotations
 
-import requests
 import time
 from typing import List, Optional, Literal
 
 from clude_code.tooling.types import ToolResult, ToolError
+
+try:
+    import requests  # type: ignore
+except Exception:
+    # 业界做法：可选依赖缺失时，工具应“可导入、可降级”，而不是让整个 CLI 崩溃。
+    requests = None  # type: ignore
 
 
 def websearch(
@@ -32,6 +37,14 @@ def websearch(
     Returns:
         ToolResult: 搜索结果
     """
+    if requests is None:
+        return ToolResult(
+            ok=False,
+            error={
+                "code": "E_DEP_MISSING",
+                "message": "requests 未安装，无法进行 websearch。请安装依赖：pip install requests",
+            },
+        )
     try:
         # 这里需要配置实际的搜索API（例如Exa AI）
         # 现在返回模拟结果
@@ -92,6 +105,14 @@ def codesearch(
     Returns:
         ToolResult: 代码搜索结果
     """
+    if requests is None:
+        return ToolResult(
+            ok=False,
+            error={
+                "code": "E_DEP_MISSING",
+                "message": "requests 未安装，无法进行 codesearch。请安装依赖：pip install requests",
+            },
+        )
     try:
         # 这里需要配置实际的代码搜索API（例如Exa Code API）
         # 现在返回模拟结果
