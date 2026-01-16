@@ -13,7 +13,7 @@
 | :--- | :--- | :--- | :--- |
  | **验证闭环** | `verification/` | 100% | **高**: 零配置探测 + 命令白名单 + 环境隔离 + 多语言解析器（Python/Node.js/Go/Rust）。 |
 | **基础交互** | `cli/main.py` | 85% | **高**: 交互流畅，支持交互式自动修复 (--fix)。 |
-| **核心编排** | `orchestrator/agent_loop.py` + `orchestrator/planner.py` | 95% | **高**: 显式 Plan→依赖调度→按步执行→失败重规划→最终验证的两级编排；支持死锁检测、步骤 ID 校验、信号容错。 |
+| **核心编排** | `orchestrator/agent_loop/agent_loop.py` + `orchestrator/planner.py` | 95% | **高**: 显式 Plan→依赖调度→按步执行→失败重规划→最终验证的两级编排；支持死锁检测、步骤 ID 校验、信号容错。 |
  | **模型接入** | `llm/llama_cpp_http.py` | 80% | **高**: 本地化适配极佳，模型自寻优。 |
  | **工具箱** | `tooling/local_tools.py` | 88% | **高**: 增强了 apply_patch 的多点模糊匹配与 undo_patch 的哈希追踪。 |
  | **知识/RAG** | `knowledge/` | 70% | **中**: 落地 LanceDB 异步索引，支持语义召回。 |
@@ -44,10 +44,12 @@
 - **Patch Engine**: ✅ 已引入 `apply_patch`（支持多处/全量替换，含可选 fuzzy），并提供 `undo_patch` 回滚与 hash 证据链。下一步补“原子写”与“敏感信息脱敏”。
 - **Schema Guard**: 在工具执行前强制 Pydantic 校验，对 LLM 错误输出进行自动重试。
  - **ToolSpec 契约自检**: ✅ 新增 `clude tools --validate`：用 ToolSpec.example_args 做运行时 schema 校验（只读、无副作用），用于防止“工具契约漂移/参数不一致”回归。
- - **Live 单入口（P0-2）**: ✅ `clude chat --live` 仍由 `ChatHandler` 单入口驱动；新增 `--live-ui classic|enhanced` 仅切换渲染器，避免并行维护两套 chat 主循环。
+ - **Live 单入口（P0-2）**: ✅ `clude chat --live` 仍由 `ChatHandler` 单入口驱动；`--live-ui classic|enhanced|opencode(textual)` 仅切换渲染器，避免并行维护两套 chat 主循环。
  - **增强 UI 迁移到 plugins（P0-2）**: ✅ 增强 Live UI/实验 chat 实现已迁移至 `src/clude_code/plugins/ui/`，`cli/enhanced_*` 保留为兼容层（re-export）。
  - **Claude Code 对标能力 (P0)**: ✅ Slash Commands (`/help /clear /config /permissions` 等) + 工具权限 allow/deny 拦截机制。
  - **Claude Code 界面打磨 (P0)**: ✅ `enhanced` UI 升级为 Claude Code 风格（左侧输出/右侧面板/阶段块）。
+ - **OpenCode TUI 打磨（P0-UX）**: ✅ `--live-ui opencode`：多窗格滚动；事件窗格为“强摘要 + JSON”的顺序日志；控制面板展示“每次 LLM 请求目的 + 进度/耗时（含 spinner）”；对话/输出默认显示 chat 风格执行日志流。
+ - **display 工具（可观测输出）**: ✅ 支持 `thought/explanation/evidence` 并在 UI 中展示（对齐 Claude Code 的 message_user/过程可见）。
 - **Claude Code 运行模式对标 (P1)**: ✅ `clude chat -p/--print` 非交互一次性执行；✅ `clude chat -c/-r` 会话持久化与恢复（`.clude/sessions/`）。
 - **Claude Code 自定义命令对标 (P1)**: ✅ 从 `.clude/commands/*.md` 加载自定义命令，支持参数校验（`args/required/usage`）与命令级权限声明（`allowed_tools/disallowed_tools/allow_network`）。
  - **Debug Trace**: ✅ `clude chat --debug` 可显示每步可观测轨迹，并写入 `.clude/logs/trace.jsonl`。

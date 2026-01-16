@@ -15,6 +15,7 @@ from threading import Thread
 from typing import Any, Callable
 import json
 import time
+import threading
 from rich.text import Text
 from rich.table import Table
 from rich.syntax import Syntax
@@ -41,6 +42,9 @@ def run_opencode_tui(
     from textual.widgets import Footer, Header, Input, RichLog  # type: ignore[import-not-found]
 
     q: Queue[dict[str, Any]] = Queue(maxsize=50_000)
+    _confirm_lock = threading.Lock()
+    _confirm_seq = 0
+    _confirm_waiters: dict[int, dict[str, Any]] = {}
 
     class _Log(RichLog):
         """RichLog 默认可滚动，支持鼠标滚轮查看历史。"""
@@ -108,6 +112,11 @@ def run_opencode_tui(
             # 对话窗格风格：log = 复刻 chat 默认“执行日志流”；block = 结构化块
             self._conversation_mode: str = "log"
             self._llm_round: int = 0
+
+            # 交互确认（confirm）状态
+            self._pending_confirm_id: int | None = None
+            self._pending_confirm_msg: str | None = None
+            self._input_placeholder_normal: str = "输入内容，回车发送（q 退出）"
 
             # LLM 请求历史（用于“操作面板”的多条进度条展示）
             # 每条：{id, idx, kind, step_id, start_ts, elapsed_ms, status, model, prompt_tokens, completion_tokens}
@@ -532,7 +541,7 @@ def run_opencode_tui(
                 with Vertical(id="right"):
                     yield _Log(id="ops")
             with Horizontal(id="input_row"):
-                yield Input(placeholder="输入内容，回车发送（q 退出）", id="input")
+                yield Input(placeholder=self._input_placeholder_normal, id="input")
             # 事件窗格：纯日志输出（不支持折叠/展开，便于“顺序回放 + 复制粘贴”排障）
             yield _Log(id="events")
             yield Footer()
@@ -864,6 +873,24 @@ def run_opencode_tui(
                     style = "green" if ok else "red"
                     summary = self._format_tool_result_summary(tool, ok, data)
                     self._push_chat_log(f"{icon} 工具执行{'成功' if ok else '失败'}: {tool} [结果] {summary}", style=style)
+                elif et == "confirm_request":
+                    # 交互确认提示（由后台线程发起）
+                    cid = data.get("id")
+                    msg = str(data.get("message") or "").strip()
+                    if isinstance(cid, int):
+                        self._pending_confirm_id = cid
+                        self._pending_confirm_msg = msg
+                        self._push_chat_log("⚠ 需要确认（输入 y/n 后回车）：", style="bold yellow")
+                        if msg:
+                            for ln in msg.splitlines()[:12]:
+                                self._push_chat_log(f"  {ln}", style="yellow")
+                        inp = self.query_one("#input", Input)
+                        inp.placeholder = "确认：输入 y/n 后回车（y=允许，n=拒绝）"
+                        try:
+                            inp.focus()
+                        except Exception:
+                            pass
+                        self._refresh_header_panel()
 
             def _push_block(title: str, lines: list[str], *, color: str = "cyan") -> None:
                 """在对话窗格输出 Claude Code 风格阶段块（对齐 enhanced 的视觉语言）。"""
@@ -1245,6 +1272,34 @@ def run_opencode_tui(
             self.query_one("#input", Input).value = ""
             if not txt:
                 return
+
+            # confirm 模式：优先消费输入（即使 _busy=True）
+            if self._pending_confirm_id is not None:
+                v = txt.strip().lower()
+                allow = v in {"y", "yes", "允许", "是", "确认", "ok"}
+                deny = v in {"n", "no", "拒绝", "否", "取消", "cancel"}
+                if not (allow or deny):
+                    self.query_one("#events", _Log).write(Text("请输入 y 或 n（确认模式）", style="yellow"))
+                    return
+                cid = self._pending_confirm_id
+                with _confirm_lock:
+                    waiter = _confirm_waiters.get(cid)
+                    if waiter is not None:
+                        waiter["allow"] = bool(allow)
+                        ev0: threading.Event = waiter["event"]
+                        ev0.set()
+                self._push_chat_log(f"confirm: {'允许' if allow else '拒绝'}", style="green" if allow else "red")
+                self._pending_confirm_id = None
+                self._pending_confirm_msg = None
+                inp = self.query_one("#input", Input)
+                inp.placeholder = self._input_placeholder_normal
+                try:
+                    inp.focus()
+                except Exception:
+                    pass
+                self._refresh_header_panel()
+                return
+
             if self._busy:
                 self.query_one("#events", _Log).write("[yellow]当前正在执行上一条请求，请稍候…[/yellow]")
                 return
@@ -1262,20 +1317,26 @@ def run_opencode_tui(
 
             def _worker() -> None:
                 def _confirm(_msg: str) -> bool:
-                    # 说明：TUI 版暂未实现交互确认（Modal），先默认拒绝，避免卡住终端输入。
+                    # 交互确认：后台线程阻塞等待 UI 输入 y/n
+                    nonlocal _confirm_seq
+                    with _confirm_lock:
+                        cid = int(_confirm_seq)
+                        _confirm_seq += 1
+                        ev0 = threading.Event()
+                        _confirm_waiters[cid] = {"event": ev0, "allow": None, "msg": _msg}
                     try:
-                        q.put_nowait(
-                            {
-                                "event": "display",
-                                "data": {
-                                    "content": "TUI(opencode) 模式暂不支持交互确认(confirm)。如需写文件/执行命令，请用 classic/enhanced，或临时关闭 confirm_write/confirm_exec。",
-                                    "level": "warning",
-                                },
-                            }
-                        )
+                        q.put_nowait({"event": "confirm_request", "data": {"id": cid, "message": _msg}})
                     except Exception:
-                        pass
-                    return False
+                        # UI 队列写失败：兜底拒绝
+                        with _confirm_lock:
+                            _confirm_waiters.pop(cid, None)
+                        return False
+                    # 等待用户输入（默认不超时；防止卡死可加上限）
+                    ok = ev0.wait(timeout=60 * 30)
+                    with _confirm_lock:
+                        allow = bool((_confirm_waiters.get(cid) or {}).get("allow")) if ok else False
+                        _confirm_waiters.pop(cid, None)
+                    return bool(allow)
 
                 def _on_event(e: dict[str, Any]) -> None:
                     try:

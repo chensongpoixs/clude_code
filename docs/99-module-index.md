@@ -11,6 +11,7 @@
 - **补充能力（已落地）**：
   - `-p/-c/-r`：非交互执行与会话恢复（`.clude/sessions/`）
   - `.clude/commands/*.md`：项目级自定义命令（参数校验 + 命令级权限声明）
+  - `--live-ui opencode(textual)`：OpenCode 风格 TUI（多窗格滚动；对话/输出默认日志流；控制面板显示 LLM 请求进度；事件窗格强摘要 + JSON）
 
 ### 1.2 代理编排层（Orchestrator）
 - `docs/01-e2e-flow-and-state-machine.md`
