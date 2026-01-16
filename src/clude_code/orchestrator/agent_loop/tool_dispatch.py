@@ -210,7 +210,7 @@ def _h_undo_patch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 # --- IGNORE ---
 # ... Other tool handlers ...
 def _h_write_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.write_file(path=args["path"], text=args.get("text", ""), append=bool(args.get("append", False)), overwrite=bool(args.get("overwrite", True)), create_dirs=bool(args.get("create_dirs", True)));
+    return loop.tools.write_file(path=args["path"], text=args.get("text", "") );
 
 
 def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -411,19 +411,14 @@ def _spec_write_file() -> ToolSpec:
     return ToolSpec(
         name="write_file",
         summary="写入文件（写文件）。",
-        args_schema=_obj_schema(
+         args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
-                "file_name": {"type": "string", "description": "文件名，仅用于日志记录和显示, 文件实际路径由 path 指定， file_name 可与 path 不同， 文件名后缀可根据写入内容自动调整，例如写入 JSON 内容时可自动改为 .json 后缀， 以便代码编辑器识别"},
-                "append": {"type": "boolean", "default": False, "description": "是否追加到文件末尾"},
-                "overwrite": {"type": "boolean", "default": True, "description": "是否覆盖已有文件"},
-                "create_dirs": {"type": "boolean", "default": True, "description": "是否创建缺失的父目录"},
                 "text": {"type": "string", "default": "", "description": "写入内容"},
             },
-            required=["path", "file_name", "text", "append", "overwrite", "create_dirs"],
-
-        ),
-        example_args={"path": "file_name", "file_name": "example.txt", "text": "hello world", "append": False, "overwrite": True, "create_dirs": True},
+            required=["path"],
+        ), 
+        example_args={"path": "notes.md",  "text": "hello world",  },
         side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),
