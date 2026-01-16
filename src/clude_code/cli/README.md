@@ -37,6 +37,12 @@ clude chat --live --live-ui enhanced
 
 # 说明：enhanced 会以“Claude Code 风格”呈现（左侧滚动输出 + 右侧状态/操作面板 + 底部事件轨迹）
 
+# 非交互（Print 模式，对标 Claude Code -p）
+clude chat --print "总结这个项目的架构并指出三个风险点"
+
+# 非交互 + JSON 输出（便于脚本消费）
+clude chat --print --output-format json "列出当前仓库所有 TODO 项并按优先级排序"
+
 # 指定模型
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 

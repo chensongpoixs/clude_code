@@ -1,4 +1,5 @@
 from typing import Any
+import json
 import typer
 from rich.console import Console
 from rich.live import Live
@@ -147,6 +148,38 @@ class ChatHandler:
                     import traceback
                     console.print(traceback.format_exc())
                 continue
+
+    def run_print(self, prompt: str, *, debug: bool, output_format: str = "text", yes: bool = False) -> None:
+        """
+        非交互（Print）模式：执行一次 prompt 后退出。
+        对标 Claude Code 的 `-p/--print` 用法。
+        """
+        prompt = (prompt or "").strip()
+        if not prompt:
+            raise typer.BadParameter("--print 模式需要提供 prompt 文本（例如：clude chat -p \"解释这个项目\"）")
+
+        def _confirm(_msg: str) -> bool:
+            # 非交互模式默认拒绝；用户显式 --yes 才自动同意
+            return bool(yes)
+
+        # 不显示欢迎/动画，直接执行
+        self.debug_mode = debug
+        turn = self.agent.run_turn(prompt, confirm=_confirm, debug=debug)
+        self._last_trace_id = getattr(turn, "trace_id", None)
+
+        fmt = (output_format or "text").strip().lower()
+        if fmt == "json":
+            payload = {
+                "ok": True,
+                "trace_id": getattr(turn, "trace_id", None),
+                "assistant_text": getattr(turn, "assistant_text", ""),
+                "tool_used": bool(getattr(turn, "tool_used", False)),
+                "did_modify_code": bool(getattr(turn, "did_modify_code", False)),
+                "events_count": len(getattr(turn, "events", []) or []),
+            }
+            typer.echo(json.dumps(payload, ensure_ascii=False))
+        else:
+            typer.echo(getattr(turn, "assistant_text", ""))
 
     def _run_with_live(self, user_text: str, debug: bool, *, live_ui: str = "classic") -> None:
         """带 50 行实时面板的执行模式，支持动画和增强确认。"""

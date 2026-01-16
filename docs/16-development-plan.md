@@ -80,7 +80,7 @@
 
 | 模块 | 对标功能 | 状态 | 优先级 | 计划/目标 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Mode** | `claude -p` (Print 模式) | ⏳ 待开发 | P1 | 支持单次 Prompt 执行并退出（脚本集成） |
+| **Mode** | `claude -p` (Print 模式) | ✅ 已完成 | P1 | 支持单次 Prompt 执行并退出（脚本集成） |
 | | `claude -c/-r` (会话恢复) | ⏳ 待开发 | P1 | 索引 `.clude/logs/trace.jsonl` 实现断点续聊 |
 | **UI/UX** | `/slash` 命令系统 | ✅ 已完成 | P0 | REPL 内 `/help`, `/config`, `/permissions` 等 |
 | | 增强版 Claude Code UI | ✅ 已完成 | P0 | 左侧滚动 + 右侧面板 + 阶段块布局 |
