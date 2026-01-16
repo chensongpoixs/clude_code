@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from clude_code.policy.advanced_security import RiskLevel
+
 
 @dataclass(frozen=True)
 class CommandDecision:
