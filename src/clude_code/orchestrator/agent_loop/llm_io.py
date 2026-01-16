@@ -114,6 +114,8 @@ def llm_chat(
             "model": loop.llm.model or "auto",
             "temperature": loop.llm.temperature,
             "max_tokens": loop.llm.max_tokens,
+            # 估算 prompt tokens（用于 enhanced UI 实时显示 Context；不依赖服务端 usage）
+            "prompt_tokens_est": prompt_tokens_est,
             "messages_count": len(loop.messages),
             "last_role": loop.messages[-1].role if loop.messages else None,
             "last_content_preview": (loop.messages[-1].content) if (loop.messages and len(loop.messages[-1].content) > 200) else (loop.messages[-1].content if loop.messages else None),

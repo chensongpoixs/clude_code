@@ -343,7 +343,7 @@ class AgentLoop:
             )
 
         # 5) ReAct fallback
-        return self._execute_react_fallback_loop(
+        assistant_text = self._execute_react_fallback_loop(
             trace_id=trace_id,
             keywords=keywords,
             confirm=confirm,
@@ -353,6 +353,28 @@ class AgentLoop:
             _try_parse_tool_call=_try_parse_tool_call,
             _tool_result_to_message=_tool_result_to_message,
             _set_state=_set_state,
+        ).assistant_text # 获取 fallback 循环的最终文本
+
+        # LLM 空白响应的智能处理：如果 LLM 返回空白，返回一个预设的友好提示
+        cleaned_text = assistant_text.strip()
+        if not cleaned_text or len(re.sub(r'\s+', '', cleaned_text)) < 5: # 移除所有空白字符后少于5个有效字符
+            self.logger.warning(f"[yellow]LLM 返回空白或过短的有效内容，将使用预设回复。[/yellow] trace_id={trace_id}")
+            assistant_text = "你好！有什么我可以帮你做的吗？"
+            tool_used = False # 避免将预设回复标记为工具使用
+        else:
+            tool_used = False # 在 ReAct fallback 之外，assistant_text 不代表工具使用
+
+        # 5) 记录 LLM 最终响应
+        self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant_text})
+        _ev("assistant_text", {"text": assistant_text})
+        self.messages.append(ChatMessage(role="assistant", content=assistant_text))
+        self._trim_history(max_messages=30)
+
+        return AgentTurn(
+            assistant_text=assistant_text,
+            tool_used=tool_used,
+            trace_id=trace_id,
+            events=events,
         )
 
     def _extract_keywords(self, user_text: str) -> set[str]:
@@ -397,20 +419,7 @@ class AgentLoop:
             # f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
             # "{\n"
             # "  \"id\": \"step_1\",\n"
-            # "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py\",\n"
-            # "  \"dependencies\": [],\n"
-            # "  \"status\": \"pending\",\n"
-            # "  \"tools_expected\": [\"read_file\"]\n"
-            # "}\n"
-            # "现在，请输出 JSON 对象。"
-            # "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
-            # "JSON 必须严格符合以下结构：\n"
-            # "{\n"
-            # "  \"title\": \"提取_try_parse_tool_call函数代码\",\n"
-            # "  \"steps\": [\n"
-            # "    {\n"
-            # "      \"id\": \"step_1\",\n"
-            # "      \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
+            # "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
             # "      \"dependencies\": [],\n"
             # "      \"status\": \"pending\",\n"
             # "      \"tools_expected\": [\"read_file\"]\n"
@@ -812,5 +821,4 @@ class AgentLoop:
         流程图: 见 `agent_loop_semantic_search_flow.svg`
         """
         return _semantic_search_fn(self, query)
-
 

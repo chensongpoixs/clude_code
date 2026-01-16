@@ -84,10 +84,13 @@ class EnhancedLiveDisplay:
         self.last_tool_result: dict[str, Any] = {}
         self.last_llm_req: dict[str, Any] = {}
         self.last_llm_resp: dict[str, Any] = {}
+        
+        # LLM 实时统计 (对标 Claude Code)
         self.llm_stats = {
-            "prompt_tokens_est": 0,
-            "completion_tokens_est": 0,
-            "tps": 0.0,
+            "current_prompt_tokens": 0,    # 当前 turn 的 prompt token
+            "current_completion_tokens": 0, # 当前 turn 的 completion token
+            "max_tokens_limit": cfg.llm.max_tokens, # 模型最大 tokens 限制
+            "tps": 0.0,                    # Tokens Per Second
         }
 
         # 当前“正在进行的任务”ID（用于 tool_result 时完成）
@@ -117,8 +120,7 @@ class EnhancedLiveDisplay:
 
         self.layout["side"].split(
             Layout(name="status", size=8),
-            Layout(name="ops", size=10), # 调整 ops 区域大小以容纳 LLM stats
-            Layout(name="llm_stats_panel", ratio=1), # 新增 LLM 统计面板
+            Layout(name="ops"),
         )
 
     def _push_line(self, s: str) -> None:
@@ -390,6 +392,10 @@ class EnhancedLiveDisplay:
             model = str(self.last_llm_req.get("model", "auto"))
             api_mode = str(self.last_llm_req.get("api_mode", ""))
             msg_n = self.last_llm_req.get("messages_count")
+            # 优先从 llm_request_params 拿到 prompt_tokens_est（实现“请求发出就能看到 Context”）
+            pt = event_data.get("prompt_tokens_est")
+            if isinstance(pt, int) and pt >= 0:
+                self.llm_stats["current_prompt_tokens"] = pt
             self._push_line(f"[dim]LLM params: model={model} api={api_mode} messages={msg_n}[/dim]")
             return
 
@@ -413,12 +419,15 @@ class EnhancedLiveDisplay:
             return
         
         if event_type == "llm_usage":
-            prompt_tokens = event_data.get("prompt_tokens_est", 0)
+            # 兜底：部分链路可能没发 llm_request_params 或 prompt_tokens_est 缺失
+            pt = event_data.get("prompt_tokens_est")
+            if isinstance(pt, int) and pt >= 0:
+                self.llm_stats["current_prompt_tokens"] = pt
             completion_tokens = event_data.get("completion_tokens_est", 0)
             elapsed_ms = event_data.get("elapsed_ms", 0)
             
-            self.llm_stats["prompt_tokens_est"] += prompt_tokens
-            self.llm_stats["completion_tokens_est"] += completion_tokens
+            # self.llm_stats["prompt_tokens_est"] += prompt_tokens # 已经从 llm_request_params 更新
+            self.llm_stats["current_completion_tokens"] = completion_tokens # 更新当前 completion tokens
             
             tps = 0.0
             if elapsed_ms > 0:
@@ -426,7 +435,7 @@ class EnhancedLiveDisplay:
             self.llm_stats["tps"] = tps
 
             self._push_line(
-                f"[dim]LLM usage: prompt_tokens={prompt_tokens} completion_tokens={completion_tokens} "
+                f"[dim]LLM usage: completion_tokens={completion_tokens} "
                 f"elapsed={elapsed_ms}ms tps={tps:.1f}[/dim]"
             )
             return
@@ -540,9 +549,10 @@ class EnhancedLiveDisplay:
         # 更新布局
         self.layout["header"].update(self._render_header())
         self.layout["conversation"].update(self._render_conversation())
+        # 注意：Layout 有子布局时，更新父节点的 renderable 不会生效（仍渲染子布局）。
+        # 必须更新子布局，否则右侧会“停留在旧内容”。
         self.layout["status"].update(self._render_status())
         self.layout["ops"].update(self._render_ops())
-        self.layout["llm_stats_panel"].update(self._render_llm_stats_panel()) # 渲染 LLM 统计面板
         self.layout["footer"].update(self._render_footer())
         
         return self.layout
@@ -551,16 +561,51 @@ class EnhancedLiveDisplay:
         """渲染头部面板"""
         elapsed = int(time.time() - self.start_time)
         
-        status_table = Table(show_header=False, box=None, pad_edge=False)
+        status_table = Table(show_header=False, box=None, pad_edge=False, expand=True) # expand=True 让内容撑满
         status_table.add_column(justify="left", style="bold", width=12)
         status_table.add_column(justify="left")
         
-        status_table.add_row("模式:", "Clude Code 风格（enhanced）")
-        status_table.add_row("状态:", self.current_state)
-        status_table.add_row("操作:", self.current_operation)
-        status_table.add_row("运行:", f"{elapsed}s  step={self.last_step}  ev={self.last_event}")
+        # Claude Code 风格的实时 Context/Output/TPS
+        context_used = self.llm_stats["current_prompt_tokens"]
+        context_limit = self.llm_stats.get("max_tokens_limit", 0) or 0
+        # 约定：context_limit<=0 表示未知上限（不展示百分比，避免误导）
+        context_percent = (context_used / context_limit * 100) if context_limit > 0 else None
+        
+        output_used = self.llm_stats["current_completion_tokens"]
+        output_limit_str = "∞" # 假设 output 没有严格上限，或由 max_tokens_limit 间接控制
+        
+        tps = self.llm_stats["tps"]
 
-        return Panel(status_table, title="clude chat", border_style="blue")
+        metrics_line = Table(show_header=False, box=None, pad_edge=False)
+        metrics_line.add_column(width=20, justify="center") # Context
+        metrics_line.add_column(width=15, justify="center") # Output
+        metrics_line.add_column(width=20, justify="center") # TPS
+
+        context_cell = (
+            f"Context: {context_used}/{context_limit} ({context_percent:.0f}%)"
+            if isinstance(context_percent, (int, float))
+            else f"Context: {context_used}"
+        )
+        metrics_line.add_row(
+            context_cell,
+            f"Output: {output_used}/{output_limit_str}",
+            f"{tps:.1f} tokens/sec",
+        )
+        
+        # 将原有状态信息放在顶部，metrics 放在下一行
+        header_grid = Table.grid(expand=True)
+        header_grid.add_row(
+            Text.from_markup(f"模式: [bold]Clude Code 风格（enhanced）[/bold]"),
+            Text.from_markup(f"状态: [bold]{self.current_state}[/bold]"),
+            Text.from_markup(f"操作: [bold]{self.current_operation}[/bold]"),
+            Text.from_markup(f"运行: [dim]{elapsed}s  step={self.last_step}  ev={self.last_event}[/dim]"),
+        )
+        header_content = Group(
+            header_grid,
+            metrics_line,
+        )
+
+        return Panel(header_content, title="clude chat", border_style="blue")
     
     def _render_conversation(self) -> Panel:
         """左侧：滚动输出（更接近 Claude Code）"""
@@ -586,17 +631,17 @@ class EnhancedLiveDisplay:
         t.add_row("任务", f"{len(self.active_tasks)} 活跃 / {len(self.completed_tasks)} 最近完成")
         return Panel(t, title="状态", border_style="blue")
 
-    def _render_llm_stats_panel(self) -> Panel:
-        """渲染 LLM 统计信息面板"""
-        t = Table(show_header=False, box=None, pad_edge=False)
-        t.add_column(justify="left", style="bold", width=12)
-        t.add_column(justify="left")
+    # def _render_llm_stats_panel(self) -> Panel: # 移除此方法
+    #     """渲染 LLM 统计信息面板"""
+    #     t = Table(show_header=False, box=None, pad_edge=False)
+    #     t.add_column(justify="left", style="bold", width=12)
+    #     t.add_column(justify="left")
 
-        t.add_row("Prompt Tokens:", f"{self.llm_stats['prompt_tokens_est']}")
-        t.add_row("Output Tokens:", f"{self.llm_stats['completion_tokens_est']}")
-        t.add_row("Output TPS:", f"{self.llm_stats['tps']:.1f}")
+    #     t.add_row("Prompt Tokens:", f"{self.llm_stats['prompt_tokens_est']}")
+    #     t.add_row("Output Tokens:", f"{self.llm_stats['completion_tokens_est']}")
+    #     t.add_row("Output TPS:", f"{self.llm_stats['tps']:.1f}")
 
-        return Panel(t, title="LLM 用量 (估算)", border_style="magenta")
+    #     return Panel(t, title="LLM 用量 (估算)", border_style="magenta")
     
     def _render_ops(self) -> Panel:
         """右侧下：最近一次工具/模型快照 + 任务进度条"""
@@ -686,7 +731,7 @@ class SimpleProgressDisplay:
             return
         
         task = self.active_tasks[task_id]
-        if message and time.time() - self.last_event_time > 1.0:  # 限制输出频率
+        if message and time.time() - self.last_event_time > 1.0: # 限制输出频率
             self.console.print(f"[dim]  {message} ({progress*100:.1f}%)[/dim]")
             self.last_event_time = time.time()
     
