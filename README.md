@@ -4,11 +4,9 @@
 
 本仓库沉淀了从**功能分析**、**架构设计**到**模块化实现**的全过程文档与源码。
 
+> 📖 **[技术白皮书与模块进度总览](./src/README.md)** (开发者必读)
 
-
-[业界 Code Agent 技术原理深度白皮书 (Technical Whitepaper)](/src/INDUSTRY_CODE_AGENT_TECH_WHITEPAPER.md)
-
-
+---
 
 ## 1. 核心特性 (Key Features)
 
@@ -17,7 +15,8 @@
 | **本地优先 (Local-First)** | 深度集成 `llama.cpp` HTTP API，保护隐私，无须云端 Token。 | ✅ 已落地 |
 | **精准编辑 (Patch Engine)** | 借鉴 Aider 的 `Search-Replace` 块逻辑，支持 `apply_patch` 与 `undo_patch`。 | ✅ 已落地 |
 | **仓库感知 (Repo Map)** | 基于 `universal-ctags` 的符号拓扑，让 Agent 拥有全局架构视野。 | ✅ 已落地 |
-| **语义 RAG (Vector Search)** | 集成 `LanceDB` + `fastembed`，支持对大规模代码库的异步索引与语义检索。 | ✅ 已落地 |
+| **语义 RAG (Vector Search)** | 集成 `LanceDB` + `fastembed`，支持 AST 分块与混合检索 (Hybrid Search)。 | ✅ 已落地 |
+| **交互体验 (TUI)** | 支持 **OpenCode 风格 TUI** (多窗格滚动) 和 **Claude Code 风格 CLI**。 | ✅ 已落地 |
 | **安全审计 (Audit Trace)** | 全量记录工具调用日志与执行轨迹，支持 Hash 级补丁完整性校验。 | ✅ 已落地 |
 | **交互式修复 (Auto-Fix)** | `doctor --fix` 能够自动诊断并跨平台安装 `rg`、`ctags` 等外部依赖。 | ✅ 已落地 |
 
@@ -32,9 +31,8 @@
 conda create -n clude_code python=3.11 -y
 conda activate clude_code
 
-# 2. 安装项目（含开发模式）
-pip install -e .
-pip install lancedb fastembed watchdog
+# 2. 安装项目（含开发模式与 RAG 依赖）
+pip install -e ".[rag]"
 
 # 3. 配置 LLM 访问（确保 llama.cpp server 已启动）
 $env:CLUDE_WORKSPACE_ROOT="D:\Work\AI\clude_code"
@@ -45,114 +43,66 @@ $env:CLUDE_LLM__API_MODE="openai_compat"
 ### 2.2 启动对话
 
 ```powershell
-# 诊断环境与缺失工具
+# 1. 诊断环境与缺失工具
 clude doctor --fix
 
-# 进入交互式开发对话
-clude chat --debug
+# 2. 初始化项目记忆 (可选)
+# 交互选择模型并生成 CLUDE.md
+clude chat --select-model
+/init
+
+# 3. 进入交互式开发对话 (推荐使用 OpenCode TUI)
+clude chat --live --live-ui opencode
 ```
 
 ---
 
-## 3. CLI 命令参考（参数说明）
+## 3. CLI 命令参考
 
-> 参数以 `src/clude_code/cli/main.py` 为准；工具清单以 `ToolSpec` 注册表为准（`clude tools` 可直接打印）。
+> 完整参数说明请参考 `clude --help` 或 [CLI 模块文档](src/clude_code/cli/README.md)。
 
-### 3.1 `clude chat`
-- **用途**：进入交互式 Agent 会话（读/搜/改/跑命令/验证闭环）。
-- **常用参数**
-  - **`--model TEXT`**：指定 llama.cpp 的 model id
-  - **`--select-model`**：从 `/v1/models` 交互选择模型（openai_compat）
-  - **`--debug`**：输出可观测轨迹，并写入 `.clude/logs/trace.jsonl`
-  - **`--live`**：固定 50 行实时刷新 UI（开启后自动启用 `--debug`，结束后保持最终状态）
-  - **`--live-ui`**：Live UI 风格（`classic|enhanced`，仅 `--live` 生效）
-  - **`-p/--print`**：非交互一次性执行并退出（支持 `--output-format text|json`）
-  - **`-c/--continue`**：继续最近会话（从 `.clude/sessions/latest.json` 加载）
-  - **`-r/--resume <session_id>`**：恢复指定会话
+### 3.1 `clude chat` (核心入口)
 
-```bash
-clude chat
-clude chat --debug
-clude chat --live
-clude chat --live --live-ui enhanced
-clude chat -p "总结这个项目的架构并指出三个风险点"
-clude chat -c
-clude chat -r sess_123456
-clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
-```
+- **交互模式**:
+  - `clude chat`：基础对话。
+  - `clude chat --live --live-ui opencode`：**推荐**，多窗格 TUI 体验。
+  - `clude chat --live --live-ui enhanced`：Claude Code 风格侧边栏 UI。
 
-#### 3.1.1 自定义命令（.clude/commands/*.md）
+- **非交互模式**:
+  - `clude chat -p "审查代码"`：单次执行并退出。
+  - `clude chat -p --output-format json "..."`：适合脚本集成。
 
-- **目录**：`.clude/commands/*.md`
-- **调用**：在会话内输入 `/<name> ...`（支持 `args/required/usage` 参数校验与命令级权限声明）
-- **查看**：`/commands`
+- **会话管理**:
+  - `clude chat -c`：继续上一次会话。
+  - `clude chat -r <session_id>`：恢复指定会话。
 
-### 3.2 `clude tools`
-- **用途**：输出可用工具清单（同源 ToolSpec），用于排障/文档/脚本。
-- **参数**
-  - **`--schema`**：附带 JSON Schema
-  - **`--json`**：JSON 输出
-  - **`--all`**：包含内部/不可调用项（诊断用）
-  - **`--validate`**：校验工具契约（使用 ToolSpec.example_args 做运行时 schema 校验，不执行工具、无副作用）
+### 3.2 辅助命令
 
-```bash
-clude tools
-clude tools --json
-clude tools --json --schema
-clude tools --validate
-```
-
-### 3.3 `clude doctor`
-- **用途**：诊断外部依赖（rg/ctags 等）、工作区读写、llama.cpp 连通性。
-- **参数**
-  - **`--fix`**：尝试自动安装/修复缺失依赖（会交互确认）
-
-```bash
-clude doctor
-clude doctor --fix
-```
-
-### 3.4 `clude models`
-- **用途**：列出 `/v1/models`（openai_compat）返回的模型 id。
-
-```bash
-clude models
-```
-
-### 3.5 `clude version`
-
-```bash
-clude version
-```
-
----
-
-## 3. 实现流程图 (Implementation Architecture)
-
-![Core Implementation Flow](src/assets/core_implementation_flow.svg)
-
-*(注：动画展示了从 CLI 输入到 Agent 编排再到 LLM 反馈的完整闭环，SVG 源码位于 `src/assets/core_implementation_flow.svg`)*
+- `clude tools`：查看可用工具清单（支持 `--json`）。
+- `clude doctor`：环境诊断与修复。
+- `clude models`：列出可用模型。
 
 ---
 
 ## 4. 文档导航 (Documentation Index)
 
-本项目文档分为两个维度：**设计规范 (docs/)** 与 **实现分析 (src/)**。
+本项目文档体系分为设计规范、进度报告与技术深挖三部分。
 
-### 4.1 核心设计规范 (`docs/`)
-- [00 | 项目总览](./docs/00-overview.md)：产品目标、非目标与安全边界。
-- [01 | 流程与状态机](./docs/01-e2e-flow-and-state-machine.md)：Agent 运行逻辑。
-- [02 | 工具协议](./docs/02-tool-protocol.md)：JSON Schema 定义与沙箱策略。
-- [06 | 代码编辑](./docs/06-code-editing-and-patching.md)：补丁引擎详细规范。
+### 4.1 核心索引
+- **[项目总览 (Overview)](./docs/00-overview.md)**：包含完整的功能矩阵与技术文档索引。
+- **[开发计划 (Roadmap)](./docs/16-development-plan.md)**：包含最新的 P0/P1/P2 迭代计划与审计结论。
+- **[模块进度 (Progress)](./src/README.md)**：技术实现的详细计分卡与业界对比。
 
-### 4.2 落地进度报告 (`src/`)
-- [📊 模块进度总览](./src/README.md)：包含完成度百分比、下一步规划。
-- [📄 业界对比白皮书](./src/INDUSTRY_CODE_AGENT_TECH_WHITEPAPER.md)：深度技术拆解与 SVG 流程演示。
-- [🔍 RAG 实现方案](./src/IMPLEMENTATION_ANALYSIS_LANCEDB_INDEXING.md)：LanceDB 后台异步索引逻辑。
-- [🛠️ 精准补丁分析](./src/IMPLEMENTATION_ANALYSIS_PATCH_UNDO.md)：`apply_patch` 与 `undo` 的实现细节。
+### 4.2 深度技术报告 (`docs/technical-reports/`)
+- **[业界 Code Agent 技术白皮书](./docs/technical-reports/industry-whitepaper.md)**：架构原理与最佳实践。
+- **[Agent 决策链路审计与评分](./docs/17-agent-decision-audit.md)**：深度剖析 Trace ID、控制协议与重规划机制。
+- **[RAG 深度调优路线图](./docs/technical-reports/rag-tuning.md)**：Hybrid Search 与 AST Chunking 实现细节。
+- **[健壮性复盘报告](./docs/technical-reports/robustness-review.md)**：系统稳定性分析。
 
 ---
 
-## 5. 许可证与致谢
+## 5. 实现流程图
 
-本研究与开发过程借鉴了 `Aider`, `Claude Code` 与 `Cursor` 的优秀工程实践。
+![Core Implementation Flow](src/assets/core_implementation_flow.svg)
+
+*(注：动画展示了从 CLI 输入到 Agent 编排再到 LLM 反馈的完整闭环)*

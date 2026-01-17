@@ -1,12 +1,12 @@
-# 00｜总览：业界 “Claude Code / Code Agent CLI” 功能与核心模块
+# 00｜总览：业界 “Clude Code / Code Agent CLI” 功能与核心模块
 
-本报告旨在定义 **Claude Code** 及其同类 Code Agent CLI 的核心功能边界、技术架构与设计原则。通过对业界方案的分析，为 **clude-code** 的模块化落地提供顶层设计指导。
+本报告旨在定义 **“Clude Code** 及其同类 Code Agent CLI 的核心功能边界、技术架构与设计原则。通过对业界方案的分析，为 **clude-code** 的模块化落地提供顶层设计指导。
 
 ---
 
 ## 1. 目标与产品形态
 
-“Claude Code/业界 Code Agent CLI”通常指：一个在本地仓库内运行的**编程助理代理（agent）**，通过与用户对话、理解代码库、调用工具（读写文件、搜索、执行命令、跑测试、提交 Git 等）来完成工程任务。
+“Clude Code/业界 Code Agent CLI”通常指：一个在本地仓库内运行的**编程助理代理（agent）**，通过与用户对话、理解代码库、调用工具（读写文件、搜索、执行命令、跑测试、提交 Git 等）来完成工程任务。
 
 ### 1.1 典型用户价值
 - **从需求到可合并代码**：自动分析、修改、验证、生成 PR/变更说明。
@@ -83,7 +83,24 @@
 - **受控执行**：命令运行（带确认机制）。
 - **审计**：基础审计日志。
 
-### 6.2 v1 (可对标业界主流)
-- **智能感知**：全量 Vector RAG + Repo Map。
-- **高阶编辑**：精准 Patch 引擎 + 原子回滚。
-- **流程强化**：自检验证循环 + Git 深度集成。
+## 7. 技术文档索引 (Technical Index)
+
+> 汇集全仓深度技术分析与决策记录，方便架构师与开发者查阅。
+
+### 7.1 架构与决策
+- **[Agent 决策链路审计与评分 (P0)](./17-agent-decision-audit.md)**：最新架构审计，包含 Trace ID/控制协议/重规划的深度优缺点分析。
+- **[业界 Code Agent 技术白皮书](./technical-reports/industry-whitepaper.md)**：包含详细的原理图、流程图和最佳路径分析。
+- **[Robustness Review Report](./technical-reports/robustness-review.md)**：健壮性复盘与关键修复点。
+
+### 7.2 核心模块分析
+- **RAG/Knowledge**:
+  - [RAG 深度调优路线图](./technical-reports/rag-tuning.md)：Hybrid Search, AST Chunking, Rerank 策略。
+
+- **Orchestrator**:
+  - [Phase 3 Robustness Analysis](./technical-reports/orchestrator-robustness.md)：编排层健壮性分析。
+  - [Phase 3 Implementation Report](./technical-reports/orchestrator-implementation.md)：规划与执行层落地报告。
+
+- **Verification**:
+  - [Verification Analysis](../src/clude_code/verification/ANALYSIS_REPORT.md)：自动验证与自愈机制。
+
+
