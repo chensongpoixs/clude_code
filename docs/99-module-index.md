@@ -15,6 +15,7 @@
 
 ### 1.2 代理编排层（Orchestrator）
 - `docs/01-e2e-flow-and-state-machine.md`
+- `docs/17-agent-decision-audit.md`（Agent 决策链路审计：P0/P1/P2 缺口与模块级开发计划）
 - **依赖**：Context Builder、Planner、Tooling、Policy、Observability
 - **产物**：状态机、重试/降级/回滚、执行闭环
 
