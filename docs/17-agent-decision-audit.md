@@ -150,7 +150,87 @@ policy/confirm/audit/verify 的顺序清晰，且在工具层统一封装，避�
 
 ---
 
-## 5. 完整结论（Executive Summary）
+## 5. 深度细节分析与评分 (Deep Dive & Scoring)
+
+本节对关键模块的现状（As-Is）与目标（To-Be）进行深度对比评分（1-5分），分析优缺点及业界实践，为技术决策提供依据。
+
+### 5.1 模块：Trace ID 生成机制 (Orchestrator)
+
+| 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分对比 |
+| :--- | :--- | :--- | :--- |
+| **实现方式** | `hash((session_id, user_text))` | `uuid4().hex` 或 `ULID` | **1/5** → **5/5** |
+| **稳定性** | 极差。依赖 Python 进程 hash seed，跨进程/重启即变。 | 极高。全局唯一，无状态，持久化不变。 |
+| **唯一性** | 差。同 Session 同输入会碰撞，无法区分重试。 | 极高。碰撞概率可忽略。 |
+| **归因能力** | 弱。日志无法跨时间/进程关联。 | 强。支持分布式追踪，精确关联 audit/debug/UI。 |
+| **业界对标** | (反面教材) | Jaeger, Datadog, LangSmith 标准实践。 |
+
+**实施细节 (P0-1)**：
+- 引入 `uuid` 标准库。
+- 在 `AgentLoop.run_turn` 入口生成 `trace_id`。
+- `trace_id` 必须作为参数传递给所有下游：`_ev`, `audit.write`, `trace.write`, `tool_lifecycle`。
+- 确保 `/bug` 报告中携带的是这个 UUID。
+
+### 5.2 模块：步骤控制协议 (Orchestrator/Execution)
+
+| 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分对比 |
+| :--- | :--- | :--- | :--- |
+| **实现方式** | 字符串匹配 `if "STEP_DONE" in text` | 严格 JSON Envelope `{"control": "step_done"}` | **2/5** → **4.5/5** |
+| **抗噪性** | 弱。模型解释代码时提到关键字即误触发（幻觉误触）。 | 强。结构化解析，歧义性近乎 0。 |
+| **扩展性** | 差。难以携带额外信息（如失败原因）。 | 优。可携带 payload，如 `{"control": "replan", "reason": "..."}`。 |
+| **业界对标** | 早期 Prompt Engineering 做法。 | OpenAI Function Calling, Claude Code XML Tags. |
+
+**实施细节 (P0-2)**：
+- **Prompt 调整**：明确要求“若步骤完成，仅输出 `{"control": "step_done"}`，不要包含其他文本”。
+- **解析逻辑**：
+  - 优先尝试 `json.loads`。
+  - 检查 keys 是否包含 `control`。
+  - 增加“容错重试”：如果检测到类似意图但格式不对，自动回喂错误提示让模型修正。
+
+### 5.3 模块：重规划策略 (Planner)
+
+| 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分对比 |
+| :--- | :--- | :--- | :--- |
+| **实现方式** | Full Replanning (重写整个 Plan JSON) | Plan Patching (局部修补/Append-only) | **2/5** → **4.5/5** |
+| **成本 (Token)** | 高。随步骤线性增长。 | 低。仅生成变更部分。 |
+| **信息保真度** | 低。重写易丢失已完成步骤的细节（如变量、路径）。 | 高。保留历史 done steps，仅追加/修改后续。 |
+| **收敛性** | 差。容易陷入“推倒重来”的死循环。 | 优。基于已知错误微调，收敛更快。 |
+| **业界对标** | AutoGPT 早期版本。 | Devin, Cursor, Modern ReAct Agents. |
+
+**实施细节 (P0-3)**：
+- **数据结构**：定义 `PlanPatch`：
+  ```json
+  {
+    "action": "replace_steps", // 或 append_steps
+    "from_step_id": "step_3",
+    "new_steps": [...]
+  }
+  ```
+- **逻辑流**：失败时，将 `failed_step` + `tool_output_summary` + `working_memory` 喂给模型，要求生成 Patch。
+
+### 5.4 模块：上下文/记忆管理 (Memory)
+
+| 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分对比 |
+| :--- | :--- | :--- | :--- |
+| **实现方式** | FIFO Window (最近 30 条消息) | Working Memory (结构化黑板) | **2.5/5** → **4/5** |
+| **长程记忆** | 无。早期关键信息会被挤出窗口。 | 有。关键信息驻留 System Prompt。 |
+| **注意力聚焦** | 弱。模型需在长对话中“大海捞针”。 | 强。当前状态/任务一目了然。 |
+| **业界对标** | 基础 Chatbot。 | MemGPT, LangChain Memory, BabyAGI. |
+
+**实施细节 (P2-1)**：
+- **结构设计**：
+  ```python
+  class WorkingMemory:
+      entry_file: str
+      key_symbols: List[str]
+      verified_facts: List[str]
+      pending_todos: List[str]
+  ```
+- **注入机制**：在 `_build_system_prompt` 时动态渲染 `WorkingMemory` 到 Prompt 头部。
+- **更新机制**：每步完成后，允许 Agent 更新 Memory（通过隐含的 Thought 或显式工具）。
+
+---
+
+## 6. 完整结论（Executive Summary）
 
 ### 5.1 一句话结论
 当前 Agent 决策链路已经具备“规划-执行-工具闭环”的骨架，但在**可追溯标识、控制协议稳定性、重规划成本与信息保真**上存在业界 P0 级缺口；若不先收敛这些基础设施问题，后续再堆 UI/功能会被“偶发卡死/不收敛/难复盘”反复拖累。
