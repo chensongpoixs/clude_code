@@ -20,6 +20,18 @@
   - 尝试 `/config` 将 `temperature` 降低至 0.2 以下。
   - 查看 `audit.jsonl` 中的原始响应，确认是否触发了模型的“停止词”。
 
+### 1.3 ReAct 一直“等待中”(ReAct Hang / ReAct 卡住)
+- **现象**: TUI 显示 `ReAct 决策/直接回答` 长时间 0%，`llm_request_params` 后没有 `llm_response`。
+- **业界常见根因 (Industry Root Causes / 业界常见根因)**:
+  - `max_tokens` 配置过大（把“上下文窗口大小”误当作“输出上限”）。
+  - 模型服务端超时或卡死（推理负载过高/显存不足/线程数不合理）。
+  - UI 未收到失败事件，导致一直显示等待（缺少 `llm_error`）。
+- **解决方案 (Fix / 解决)**:
+  - 将 `max_tokens` 调整到 512~2048（本项目默认 1024）。
+  - 将 `timeout_s` 调整到合理范围（例如 60~120s），并确认 base_url 可达。
+  - 查看 `~/.clude/audit.jsonl` 中是否出现 `llm_error` / `timeout`（用于定位根因）。
+- **参见 (See Also / 参见)**: [`docs/21-react-hang-analysis.md`](./21-react-hang-analysis.md)
+
 ---
 
 ## 2. 工具执行 (Tool Execution)

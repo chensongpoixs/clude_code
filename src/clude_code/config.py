@@ -11,7 +11,7 @@ class LLMConfig(BaseModel):
 	#aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=409600, ge=1)  # 配置LLM返回数据最大长度  你的预期文本长度是多少？ 
+    max_tokens: int = Field(default=409600, ge=1, le=8192, description="LLM 输出 token 限制（非上下文窗口大小，通常 512-2048 足够）") 
     timeout_s: int = Field(default=120, ge=1)
 
 

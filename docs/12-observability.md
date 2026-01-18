@@ -34,6 +34,8 @@
 - **TPS**: 推理速度 (Tokens Per Second)。
 - **Step**: 当前执行步骤与总步数。
 
+> **业界对齐（Industry Alignment / 业界对齐）**：Claude Code/OpenCode 类产品会在 UI 上明确展示“LLM 请求耗时、是否超时、是否可重试”。本项目已在 ReAct 模式加入 `llm_error` 事件，避免界面长期 0% 等待。
+
 ### 2.2 成本估算
 - **SessionUsage**: 统计本轮会话的 Token 总消耗与预估成本。
 - **`display`**: 通过 `display` 工具向用户展示耗时任务的进度。
