@@ -31,7 +31,7 @@
 
 ---
 
-## 📋 P1: 健壮性提升 (Robustness Enhancement) - 进行中
+## 📋 P1: 健壮性提升 (Robustness Enhancement) - ✅ 已完成
 
 ### P1-1 异常处理规范化 ✅
 - [x] 全局扫描 `except: pass` 实例
@@ -47,23 +47,36 @@
 
 **预期收益**: 提升问题可观测性，避免静默失败。
 
-### P1-2 Tool Registry 去重
-- [ ] 审计所有 Tool 定义（确认 ToolSpec 为唯一真实源）
-- [ ] 移除冗余定义（如 `tool_dispatch.py` 外的重复 Schema）
-- [ ] 建立 Tool 版本兼容性检查
+### P1-2 Tool Registry 去重 ✅
+- [x] 审计所有 Tool 定义（确认 ToolSpec 为唯一真实源）
+- [x] 移除冗余定义（已验证：无重复 Schema）
+- [x] 建立 Tool 版本兼容性检查（`check_version_compatibility()` + `audit_duplicates()`）
+
+**已实现功能**:
+- `clude tools --audit`: 审计工具注册表（重复 Schema、废弃工具、版本分布）
+- `ToolRegistry.check_version_compatibility()`: SemVer 版本兼容性检查
+- `ToolRegistry.audit_duplicates()`: 重复 Schema 检测
+
+**审计结果**: 21 个工具，无重复定义，全部 v1.0.0
 
 **预期收益**: 降低维护成本，避免契约不一致。
 
 ---
 
-## 📋 P2: 体验与生态 (UX & Ecosystem) - 部分进行中
+## 📋 P2: 体验与生态 (UX & Ecosystem) - P2-1 已完成
 
-### 🔄 P2-1 RAG 深度调优 (进行中)
+### ✅ P2-1 RAG 深度调优 (已完成)
 - [x] Tree-sitter Chunking（基于语法树分块）
 - [x] Metadata Fusion（元数据融合：symbol/node_type/scope）
 - [x] 基础 Rerank（基于 Metadata 加权打分）
-- [ ] Hybrid Search（正式将 `rg` 结果作为 Rerank 信号）
-- [ ] 并发索引优化（线程池控制）
+- [x] Hybrid Search（正式将 `rg` 结果作为 Rerank 信号）
+- [x] 并发索引优化（线程池控制，可配置 `index_workers`）
+
+**已实现功能**:
+- `_extract_rg_signal()`: 从 query 提取标识符，执行 rg 搜索获取命中文件/行号
+- Rerank 加权：rg 行级命中 +0.35、文件级命中 +0.15
+- `ThreadPoolExecutor`: 并发索引（默认 4 线程，可配置 1-16）
+- 线程安全：`_state_lock` 保护索引状态
 
 **预期收益**: 提升代码检索精度，降低误召回。
 
@@ -102,15 +115,16 @@
 
 ### 本周重点 (This Week)
 1. **✅ P0 全部完成**: P0-1/P0-2/P0-3 均已闭环
-2. **✅ P1-1 完成**: 异常处理规范化（扫描 + 修复）——已修复 5 个关键模块
+2. **✅ P1 全部完成**: 异常处理规范化 + Tool Registry 去重
+3. **✅ P2-1 完成**: RAG 深度调优（Hybrid Search + 并发索引）
 
 ### 本月目标 (This Month)
-1. **✅ P1-1 完成**: 异常处理规范化（扫描 + 修复）
-2. **启动 P1-2**: Tool Registry 去重审计
+1. **✅ P1 全部完成**: 异常处理规范化 + Tool Registry 去重
+2. **✅ P2-1 完成**: RAG 深度调优（Hybrid Search + 并发索引）
 
 ### 下季度目标 (Next Quarter)
-1. **完成 P2-1**: RAG 深度调优（Hybrid Search + 并发优化）
-2. **启动 P2-2**: Git 工作流集成（MVP）
+1. **启动 P2-2**: Git 工作流集成（MVP）
+2. **启动 P3**: 产品化（Token 真实计费、导出、多语言 UI）
 
 ---
 
@@ -118,8 +132,8 @@
 
 | 里程碑 | 完成度 | 预计完成时间 |
 | :--- | :--- | :--- |
-| **M2: Robustness** | ✅ 100%+ (P0 全完成 + P1-1 完成) | Q1 2026 ✓ |
-| **M3: Intelligence** | 🔄 60% (RAG Chunking 完成，Rerank 调优中) | Q2 2026 |
+| **M2: Robustness** | ✅ 100% (P0 全完成 + P1 全完成) | Q1 2026 ✓ |
+| **M3: Intelligence** | ✅ 100% (P2-1 RAG 深度调优完成) | Q1 2026 ✓ |
 | **M4: Product（产品化）** | ⏳ 0% | Q3 2026 |
 
 ---

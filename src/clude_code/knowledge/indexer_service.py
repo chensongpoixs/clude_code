@@ -5,6 +5,7 @@ import hashlib
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Optional, Dict
 
@@ -28,7 +29,10 @@ class IndexerService:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger(__name__)
-        
+
+        # P2-1: 并发索引时的状态锁
+        self._state_lock = threading.Lock()
+
         self.status = "idle"
         self.indexed_files = 0
         self.total_files = 0
@@ -56,37 +60,76 @@ class IndexerService:
             self._thread.join(timeout=5)
 
     def _run_loop(self):
+        # P2-1: 并发索引配置（线程池控制）
+        max_workers = int(getattr(self.cfg.rag, "index_workers", 4) or 4)
+        max_workers = max(1, min(max_workers, 16))  # 限制在 1-16 之间
+
         while not self._stop_event.is_set():
             try:
                 self.status = "scanning"
                 # 1. 扫描出真正变化的文件
                 files_to_index = self._scan_modified_files()
                 self.total_files = len(files_to_index)
-                
+
                 if files_to_index:
-                    self.status = "indexing"
-                    for i, file_path in enumerate(files_to_index):
-                        if self._stop_event.is_set(): break
-                        self._index_file(file_path)
-                        self.indexed_files = i + 1
+                    self.status = f"indexing ({max_workers} workers)"
+                    self.indexed_files = 0
+                    self._index_errors: list[str] = []
+
+                    # P2-1: 使用 ThreadPoolExecutor 并发索引
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # 提交所有任务
+                        future_to_path = {
+                            executor.submit(self._index_file_safe, fp): fp
+                            for fp in files_to_index
+                        }
+
+                        # 收集结果（带进度更新）
+                        for future in as_completed(future_to_path):
+                            if self._stop_event.is_set():
+                                executor.shutdown(wait=False, cancel_futures=True)
+                                break
+                            path = future_to_path[future]
+                            try:
+                                future.result()
+                            except Exception as e:
+                                self._index_errors.append(f"{path}: {e}")
+                            self.indexed_files += 1
+
                     self._save_state()
-                
+
+                    if self._index_errors:
+                        self._logger.warning(f"索引完成，{len(self._index_errors)} 个文件失败")
+
                 self.status = "idle"
                 # 休眠间隔（可配置）
                 sleep_s = int(getattr(self.cfg.rag, "scan_interval_s", 30) or 30)
                 for _ in range(sleep_s):
-                    if self._stop_event.is_set(): break
+                    if self._stop_event.is_set():
+                        break
                     time.sleep(1)
             except Exception as e:
                 self.status = f"error: {str(e)}"
                 self._logger.exception("IndexerService 后台索引异常", exc_info=True)
                 time.sleep(10)
 
+    def _index_file_safe(self, path: Path) -> None:
+        """
+        P2-1: 线程安全的文件索引包装器。
+
+        捕获异常并记录，避免单个文件失败导致整个批次中断。
+        """
+        try:
+            self._index_file(path)
+        except Exception as e:
+            self._logger.warning(f"索引文件失败 [{path}]: {e}")
+            raise
+
     def _scan_modified_files(self) -> List[Path]:
         """增量扫描：仅返回自上次扫描以来修改过或新增加的文件。"""
         valid_exts = {".py", ".js", ".ts", ".go", ".rs", ".c", ".cpp", ".java"}
         exclude_dirs = {".git", "node_modules", ".venv", "venv", "dist", "build", ".clude"}
-        
+
         modified = []
         current_paths: set[str] = set()
 
@@ -95,22 +138,26 @@ class IndexerService:
                 continue
             if any(part in p.parts for part in exclude_dirs):
                 continue
-            
+
             rel_path = str(p.relative_to(self.workspace_root))
             current_paths.add(rel_path)
-            
+
             mtime = p.stat().st_mtime
-            # 如果是新文件，或者 mtime 变了（注意：这里只“发现”，不提前写入 state，避免索引失败后被错误跳过）
-            st = self._state.get(rel_path)
+            # 如果是新文件，或者 mtime 变了（注意：这里只"发现"，不提前写入 state，避免索引失败后被错误跳过）
+            # P2-1: 并发安全的状态读取
+            with self._state_lock:
+                st = self._state.get(rel_path)
             prev_mtime = float(st.get("mtime", 0.0)) if isinstance(st, dict) else 0.0
             if prev_mtime < mtime:
                 modified.append(p)
-        
+
         # 清理已删除的文件（可选：同步删除向量库中的记录）
-        deleted_paths = set(self._state.keys()) - current_paths
-        for dp in deleted_paths:
-            self.store.delete_by_path(dp)
-            del self._state[dp]
+        # P2-1: 并发安全的状态修改
+        with self._state_lock:
+            deleted_paths = set(self._state.keys()) - current_paths
+            for dp in deleted_paths:
+                self.store.delete_by_path(dp)
+                del self._state[dp]
 
         # 扫描阶段仅在发生删除时持久化（删除需要落盘；mtime 更新应在索引成功后落盘）
         if deleted_paths:
@@ -125,11 +172,13 @@ class IndexerService:
             # 护栏 1：超大文件跳过
             max_bytes = int(getattr(self.cfg.rag, "max_file_bytes", 2_000_000) or 2_000_000)
             if path.stat().st_size > max_bytes:
-                self._state.setdefault(rel_path, {})["skipped"] = True
+                with self._state_lock:
+                    self._state.setdefault(rel_path, {})["skipped"] = True
                 return
             # 护栏 2：二进制文件跳过（避免把乱码写入向量库）
             if self._is_probably_binary(path):
-                self._state.setdefault(rel_path, {})["skipped"] = True
+                with self._state_lock:
+                    self._state.setdefault(rel_path, {})["skipped"] = True
                 return
             content = path.read_text(encoding="utf-8", errors="replace")
         except Exception:
@@ -139,10 +188,12 @@ class IndexerService:
         file_hash = hashlib.md5(content.encode()).hexdigest()
 
         # 如果内容 hash 没变，则跳过（解决某些平台 mtime 抖动/拷贝导致的重复索引）
-        prev = self._state.get(rel_path, {})
-        if isinstance(prev, dict) and prev.get("hash") == file_hash:
-            self._state.setdefault(rel_path, {})["skipped"] = False
-            return
+        # P2-1: 并发安全的状态读取
+        with self._state_lock:
+            prev = self._state.get(rel_path, {})
+            if isinstance(prev, dict) and prev.get("hash") == file_hash:
+                self._state.setdefault(rel_path, {})["skipped"] = False
+                return
         
         # --- 深度调优：基于逻辑块的分块 ---
         chunks = []
@@ -215,10 +266,12 @@ class IndexerService:
             return
 
         # 只有在索引成功后才更新 state（避免失败后 mtime 被提前写入导致漏索引）
-        st = self._state.setdefault(rel_path, {})
-        st["hash"] = file_hash
-        st["mtime"] = mtime
-        st["skipped"] = False
+        # P2-1: 并发安全的状态更新
+        with self._state_lock:
+            st = self._state.setdefault(rel_path, {})
+            st["hash"] = file_hash
+            st["mtime"] = mtime
+            st["skipped"] = False
 
     def _smart_chunking(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -284,19 +337,23 @@ class IndexerService:
             return False
 
     def _load_state(self) -> None:
-        try:
-            if self._state_path.exists():
-                obj = json.loads(self._state_path.read_text(encoding="utf-8"))
-                if isinstance(obj, dict):
-                    self._state = obj  # type: ignore[assignment]
-        except Exception:
-            self._state = {}
+        # P2-1: 并发安全的状态加载（通常在启动时单线程调用，但为安全起见加锁）
+        with self._state_lock:
+            try:
+                if self._state_path.exists():
+                    obj = json.loads(self._state_path.read_text(encoding="utf-8"))
+                    if isinstance(obj, dict):
+                        self._state = obj  # type: ignore[assignment]
+            except Exception:
+                self._state = {}
 
     def _save_state(self) -> None:
-        try:
-            tmp = self._state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(self._state_path)
-        except Exception:
-            # 状态文件失败不应阻塞索引
-            pass
+        # P2-1: 并发安全的状态保存
+        with self._state_lock:
+            try:
+                tmp = self._state_path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp.replace(self._state_path)
+            except Exception:
+                # 状态文件失败不应阻塞索引
+                pass

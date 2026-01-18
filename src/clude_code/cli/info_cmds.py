@@ -114,6 +114,49 @@ def run_tools_list(schema: bool, as_json: bool, all_specs: bool, validate: bool 
     total_tools = len(specs)
     console.print(f"\n[dim]共 {total_tools} 个工具 | 按优先级和分类组织[/dim]")
 
+def run_tools_audit() -> None:
+    """
+    审计工具注册表（P1-2 去重检查）。
+
+    检查内容：
+    1. 重复 Schema（不同工具使用相同参数模式）
+    2. 废弃工具仍在注册表中
+    3. 版本一致性
+    """
+    from clude_code.orchestrator.agent_loop.tool_dispatch import get_tool_registry
+
+    console.print("[bold blue]🔍 工具注册表审计[/bold blue]\n")
+
+    registry = get_tool_registry()
+    warnings = registry.audit_duplicates()
+
+    if not warnings:
+        console.print("[green]✓ 审计通过：无重复定义或废弃工具[/green]")
+    else:
+        console.print(f"[yellow]⚠ 发现 {len(warnings)} 个潜在问题：[/yellow]")
+        for w in warnings:
+            console.print(f"  - {w}")
+
+    # 版本统计
+    specs = registry.list_tools(include_deprecated=True)
+    version_counts: dict[str, int] = {}
+    for s in specs:
+        v = s.version
+        version_counts[v] = version_counts.get(v, 0) + 1
+
+    console.print("\n[bold]版本分布：[/bold]")
+    for v, c in sorted(version_counts.items()):
+        console.print(f"  v{v}: {c} 个工具")
+
+    # 分类统计
+    categories = registry.get_categories()
+    console.print("\n[bold]分类分布：[/bold]")
+    for cat, count in sorted(categories.items()):
+        console.print(f"  {cat}: {count} 个工具")
+
+    console.print(f"\n[dim]共 {len(specs)} 个工具注册[/dim]")
+
+
 def run_models_list(logger: logging.Logger) -> None:
     """列出 llama.cpp 的模型列表。"""
     cfg = CludeConfig()

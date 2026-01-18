@@ -1,12 +1,73 @@
 from __future__ import annotations
 
+import logging
 import re
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from clude_code.tooling.local_tools import ToolResult
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
+
+# P2-1: 模块级 logger
+_logger = logging.getLogger(__name__)
+
+
+def _extract_rg_signal(loop: "AgentLoop", query: str) -> dict[str, set[int]]:
+    """
+    P2-1 Hybrid Search: 使用 ripgrep 获取词法搜索信号。
+
+    从 query 中提取关键标识符，执行 rg 搜索，返回命中的文件路径及行号集合。
+
+    Args:
+        loop: AgentLoop 实例
+        query: 用户查询
+
+    Returns:
+        dict[str, set[int]]: {相对路径: {命中行号集合}}
+    """
+    rg_hits: dict[str, set[int]] = {}
+
+    # 1. 从 query 提取搜索词（标识符 + 反引号内容）
+    ident_tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query))  # 至少 4 字符
+    bt_tokens = set(re.findall(r"`([^`]{3,64})`", query))
+    search_terms = list(ident_tokens | bt_tokens)[:5]  # 最多 5 个词
+
+    if not search_terms:
+        return rg_hits
+
+    # 2. 执行 rg 搜索（使用 OR 模式）
+    try:
+        from clude_code.tooling.tools.grep import grep as rg_grep
+
+        workspace_root = Path(loop.cfg.workspace_root)
+        # 构建 OR 模式：term1|term2|term3
+        pattern = "|".join(re.escape(t) for t in search_terms)
+
+        result = rg_grep(
+            workspace_root=workspace_root,
+            pattern=pattern,
+            path=".",
+            ignore_case=True,
+            max_hits=100,  # 限制结果数量
+        )
+
+        if result.ok and isinstance(result.payload, dict):
+            hits = result.payload.get("hits", [])
+            for h in hits:
+                if not isinstance(h, dict):
+                    continue
+                p = str(h.get("path") or "")
+                ln = h.get("line")
+                if p and ln is not None:
+                    rg_hits.setdefault(p, set()).add(int(ln))
+
+        _logger.debug(f"Hybrid Search rg 信号: {len(rg_hits)} 文件命中")
+    except Exception as e:
+        _logger.debug(f"Hybrid Search rg 搜索失败: {e}")
+
+    return rg_hits
 
 
 def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
@@ -21,11 +82,15 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
             return ToolResult(False, error={"code": "E_RAG_DISABLED", "message": "RAG 已禁用（cfg.rag.enabled=false）"})
 
         loop.logger.debug(f"[dim]执行语义搜索: {query[:50]}...[/dim]")
-        q_vector = loop.embedder.embed_query(query)
-        hits = loop.vector_store.search(q_vector, limit=5)
-        loop.logger.info(f"[green]✓ 语义搜索找到 {len(hits)} 个结果[/green]")
 
-        # 业界做法：轻量 rerank（向量分数 + 元数据 + 词法信号），提升 precision 与可解释性
+        # P2-1 Hybrid Search: 同时获取 rg 词法搜索信号
+        rg_signal = _extract_rg_signal(loop, query)
+
+        q_vector = loop.embedder.embed_query(query)
+        hits = loop.vector_store.search(q_vector, limit=8)  # 增加召回数量，rerank 后取 top-5
+        loop.logger.info(f"[green]✓ 语义搜索找到 {len(hits)} 个结果 (rg 信号: {len(rg_signal)} 文件)[/green]")
+
+        # 业界做法：轻量 rerank（向量分数 + 元数据 + 词法信号 + rg 命中），提升 precision 与可解释性
         q = (query or "").strip()
         q_lower = q.lower()
         ident_tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", q))
@@ -37,10 +102,23 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
             sym = str(h.get("symbol") or "").strip().lower()
             scope = str(h.get("scope") or "").strip().lower()
             ntype = str(h.get("node_type") or "").strip().lower()
-            path = str(h.get("path") or "").strip().lower()
+            path_raw = str(h.get("path") or "").strip()
+            path = path_raw.lower()
             text = str(h.get("text") or "").strip().lower()
+            start_line = int(h.get("start_line") or 1)
+            end_line = int(h.get("end_line") or start_line)
 
-            # symbol/scope 命中：最有效的“符号级”信号
+            # P2-1 Hybrid Search: rg 命中信号（最强信号）
+            rg_lines = rg_signal.get(path_raw, set())
+            if rg_lines:
+                # 检查 rg 命中行是否在当前 chunk 范围内
+                overlap = any(start_line <= ln <= end_line for ln in rg_lines)
+                if overlap:
+                    b += 0.35  # 行级精确命中：最强 boost
+                else:
+                    b += 0.15  # 文件级命中：次强 boost
+
+            # symbol/scope 命中：符号级信号
             if sym and (sym in tokens or sym in q_lower):
                 b += 0.25
             if scope:
@@ -53,7 +131,7 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
             if any(k in ntype for k in ("function", "method", "class", "struct", "enum", "interface", "trait", "impl")):
                 b += 0.08
 
-            # path/词法弱信号：提升“用户给了文件名/模块名/关键字”的情况
+            # path/词法弱信号：提升"用户给了文件名/模块名/关键字"的情况
             for t in list(tokens)[:8]:
                 if t and t in path:
                     b += 0.06
@@ -87,13 +165,24 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
 
         ranked.sort(key=lambda x: float(x.get("rerank_score") or 0.0), reverse=True)
 
+        # P2-1: rerank 后取 top-5（召回 8 个是为了给 rerank 留余量）
+        top_ranked = ranked[:5]
+
         payload_hits: list[dict] = []
-        for h in ranked:
+        for h in top_ranked:
+            path_raw = str(h.get("path") or "")
+            start_line = int(h.get("start_line") or 1)
+            end_line = int(h.get("end_line") or start_line)
+
+            # P2-1 Hybrid Search: 标记是否有 rg 命中
+            rg_lines = rg_signal.get(path_raw, set())
+            rg_hit = bool(rg_lines and any(start_line <= ln <= end_line for ln in rg_lines))
+
             payload_hits.append(
                 {
-                    "path": h.get("path"),
-                    "start_line": h.get("start_line"),
-                    "end_line": h.get("end_line"),
+                    "path": path_raw,
+                    "start_line": start_line,
+                    "end_line": end_line,
                     "text": h.get("text"),
                     # 可选元数据（AST-aware chunking）
                     "language": h.get("language"),
@@ -101,14 +190,16 @@ def semantic_search(loop: "AgentLoop", query: str) -> ToolResult:
                     "node_type": h.get("node_type"),
                     "scope": h.get("scope"),
                     "chunk_id": h.get("chunk_id"),
-                    # 分数：score=向量相似度归一化；rerank_score=融合元数据/词法后的最终分
+                    # 分数：score=向量相似度归一化；rerank_score=融合元数据/词法/rg后的最终分
                     "score": h.get("score"),
                     "rerank_score": h.get("rerank_score"),
                     "_distance": h.get("_distance"),
+                    # P2-1: rg 命中标记（用于可解释性）
+                    "rg_hit": rg_hit,
                 }
             )
 
-        return ToolResult(True, payload={"query": query, "hits": payload_hits})
+        return ToolResult(True, payload={"query": query, "hits": payload_hits, "rg_files": len(rg_signal)})
     except Exception as e:
         loop.logger.error(f"[red]✗ 语义搜索失败: {e}[/red]")
         return ToolResult(False, error={"code": "E_SEMANTIC_SEARCH", "message": str(e)})

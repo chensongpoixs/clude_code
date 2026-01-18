@@ -30,8 +30,13 @@ def tools(
     as_json: bool = typer.Option(False, "--json", help="以 JSON 格式输出"),
     all_specs: bool = typer.Option(False, "--all", help="包含内部规范项"),
     validate: bool = typer.Option(False, "--validate", help="校验工具契约（使用 ToolSpec.example_args 做运行时 schema 校验）"),
+    audit: bool = typer.Option(False, "--audit", help="审计工具注册表（检查重复定义、废弃工具、版本分布）"),
 ) -> None:
     """列出可用工具清单。"""
+    if audit:
+        from clude_code.cli.info_cmds import run_tools_audit
+        run_tools_audit()
+        return
     from clude_code.cli.info_cmds import run_tools_list
     run_tools_list(schema, as_json, all_specs, validate)
 

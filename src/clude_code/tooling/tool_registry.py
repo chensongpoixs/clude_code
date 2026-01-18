@@ -319,6 +319,79 @@ class ToolRegistry:
 
         return tool.external_bins_required, tool.external_bins_optional
 
+    def check_version_compatibility(self, tool_name: str, required_version: str) -> tuple[bool, str]:
+        """
+        检查工具版本兼容性（P1-2 版本兼容性检查）。
+
+        版本格式遵循 SemVer（语义化版本）：major.minor.patch
+        兼容性规则：
+        - major 版本不同 → 不兼容
+        - minor 版本：required <= actual → 兼容
+        - patch 版本：忽略
+
+        Args:
+            tool_name: 工具名称
+            required_version: 要求的最低版本（如 "1.2.0"）
+
+        Returns:
+            (是否兼容, 消息)
+        """
+        tool = self.get_tool(tool_name)
+        if not tool:
+            return False, f"工具 '{tool_name}' 不存在"
+
+        actual = tool.version
+        try:
+            req_parts = [int(x) for x in required_version.split(".")]
+            act_parts = [int(x) for x in actual.split(".")]
+            # 补齐到 3 位
+            while len(req_parts) < 3:
+                req_parts.append(0)
+            while len(act_parts) < 3:
+                act_parts.append(0)
+
+            req_major, req_minor, _ = req_parts[:3]
+            act_major, act_minor, _ = act_parts[:3]
+
+            if req_major != act_major:
+                return False, f"主版本不兼容：要求 {required_version}，实际 {actual}"
+            if req_minor > act_minor:
+                return False, f"次版本过低：要求 >= {required_version}，实际 {actual}"
+            return True, f"版本兼容：{actual} >= {required_version}"
+        except ValueError as e:
+            return False, f"版本格式解析失败: {e}"
+
+    def audit_duplicates(self) -> list[str]:
+        """
+        审计重复工具定义（P1-2 去重检查）。
+
+        检查是否有同名工具在注册表中出现多次（理论上不应该发生，
+        因为 register_tool 会覆盖，但审计可以发现潜在的重复注册尝试）。
+
+        Returns:
+            警告消息列表
+        """
+        warnings: list[str] = []
+        seen_schemas: Dict[str, str] = {}  # schema_hash -> tool_name
+
+        for name, tool in self._tools.items():
+            # 1. 检查 Schema 重复（不同工具使用相同 Schema）
+            import hashlib
+            import json
+            schema_str = json.dumps(tool.args_schema, sort_keys=True)
+            schema_hash = hashlib.md5(schema_str.encode()).hexdigest()[:8]
+            if schema_hash in seen_schemas:
+                other = seen_schemas[schema_hash]
+                warnings.append(f"潜在重复 Schema: '{name}' 与 '{other}' 的 args_schema 相同")
+            else:
+                seen_schemas[schema_hash] = name
+
+            # 2. 检查废弃工具
+            if tool.deprecated:
+                warnings.append(f"废弃工具仍在注册表中: '{name}'")
+
+        return warnings
+
 
 # 全局工具注册表实例
 _tool_registry: Optional[ToolRegistry] = None

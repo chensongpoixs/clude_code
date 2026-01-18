@@ -100,6 +100,9 @@ class RAGConfig(BaseModel):
     ts_min_node_lines: int = Field(default=6, ge=1, le=200, description="tree-sitter 节点最小行数（太小的节点会被合并/跳过）。")
     ts_leading_context_lines: int = Field(default=2, ge=0, le=30, description="tree-sitter chunk 向上附带的注释/空行上下文行数（用于可读性）。")
 
+    # --- P2-1: 并发索引优化 ---
+    index_workers: int = Field(default=4, ge=1, le=16, description="并发索引线程数（1-16，推荐 4-8）。")
+
 
 class CludeConfig(BaseSettings):
     """
