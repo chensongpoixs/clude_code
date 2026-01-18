@@ -1,94 +1,89 @@
-# 10｜记忆与知识库（Memory & Knowledge）
+# 10 | 记忆与知识库（可实现规格）(Memory & Knowledge Spec)
 
-目标：在不泄露隐私的前提下，让 agent 记住“用户偏好、仓库约定、长期上下文”，提升跨会话效率与一致性。
+> **Status (状态)**: Active Development (持续开发中)  
+> **Audience (读者)**: Maintainers / Memory System Engineers (维护者/记忆系统工程师)  
+> **Goal (目标)**: 定义 Agent 如何在不泄露隐私的前提下，记住“用户偏好、仓库约定、长期上下文”，实现跨会话的记忆（Memory/记忆）与知识管理（Knowledge/知识）。
 
-## 1. 记忆分层
+---
 
-### 1.1 短期记忆（Session Memory）
-- **范围**：当前会话/当前任务
-- **形态**：
-  - 原始对话（有限轮数）
-  - 会话摘要（每轮/每任务）
-  - 工具调用摘要（结构化）
-- **用途**：维持上下文连续性、避免重复搜索
+## 1. 记忆分层 (Memory Hierarchy)
 
-### 1.2 中期记忆（Workspace Memory）
-- **范围**：特定仓库
-- **示例**：
-  - 构建/测试命令
-  - 代码风格约定（lint、formatter）
-  - 常用入口文件与模块边界
-- **存储**：`.clude/memory/workspace.json`（建议）
+### 1.1 短期记忆 (Session Memory)
+- **范围**: 当前会话/当前任务。
+- **形态**:
+  - 原始对话 (Chat History)。
+  - 会话摘要 (Session Summary)。
+  - 结构化工具调用 (Tool Call Summaries)。
+- **实现**: 内存 + `SessionStore` (JSON 文件)。
 
-### 1.3 长期记忆（User/Org Memory）
-- **范围**：用户偏好与组织规范（跨仓库）
-- **示例**：
-  - 输出语言、格式偏好
-  - 安全策略偏好（是否允许网络）
-  - 代码审查规范
-- **注意**：必须可导出/可删除/可禁用
+### 1.2 中期记忆 (Project/Workspace Memory)
+- **范围**: 特定仓库/项目。
+- **核心载体**: `CLUDE.md` (Project Memory/项目记忆)。
+  - **定位**: 项目级的“长期上下文”与“协作规则”。
+  - **内容**: 构建命令、架构约定、关键模块路径、技术决策记录。
+  - **注入**: 每次启动自动读取并注入 System Prompt。
+- **实现**: 本地文件 `CLUDE.md` (Markdown)。
 
-## 2. 数据模型（建议）
+### 1.3 长期记忆 (User/Global Memory)
+- **范围**: 用户偏好与组织规范（跨仓库）。
+- **示例**: 输出语言偏好、安全策略偏好。
+- **实现**: `~/.clude/config.yaml` 或全局记忆库。
 
-### 2.1 MemoryItem
-- `id: string`
-- `scope: session|workspace|user|org`
-- `title: string`
-- `content: string`（尽量短、可复用）
-- `tags: string[]`
-- `created_at: timestamp`
-- `updated_at: timestamp`
-- `source: user_explicit|inferred|imported`
-- `sensitivity: public|internal|secret`
+---
 
-## 3. 写入策略（什么时候该记）
+## 2. 项目记忆：`CLUDE.md` (Project Memory)
 
-### 3.1 只在高信号时写入
-- 用户明确要求“记住/保存”
-- 仓库约定被多次验证（例如检测到 `pnpm` 且测试命令稳定）
-- 输出偏好稳定（例如总是要求中文、总是要先给计划）
+> **当前实现 (Current Implementation)**: 已落地。
 
-### 3.2 禁止自动写入的内容（默认）
-- 密钥/令牌/密码
-- 用户个人隐私
-- 公司机密（除非企业策略允许且加密存储）
+### 2.1 规范与格式
+`CLUDE.md` 位于项目根目录，是 Agent 的“外挂大脑”。
 
-## 4. 读取与注入（如何用记忆）
+```markdown
+# CLUDE.md
 
-### 4.1 检索策略
-- 先取 workspace 记忆（与当前 repo 强相关）
-- 再取 user/org 记忆（偏好与规范）
-- 结合当前任务类型做过滤（tags）
+## Project Context
+这是一个基于 Python 的 CLI 工具...
 
-### 4.2 注入方式
-- 以“约束/偏好清单”形式进入 ContextPack：
-  - “默认用 pnpm”
-  - “测试命令：pnpm test”
-  - “禁止访问网络”
+## Commands
+- Build: `python -m build`
+- Test: `pytest tests/`
 
-## 5. 生命周期与治理
+## Conventions
+- 使用 Type Hints
+- 优先使用 `pathlib` 而非 `os.path`
+```
 
-### 5.1 过期与更新
-- 基于 `updated_at` 与命中次数
-- 过期后不自动删除，但降权
+### 2.2 自动加载机制
+- **Orchestrator** 初始化时，检测 `CLUDE.md`。
+- 若存在，读取内容并附加到 `SYSTEM_PROMPT` 的 "Project Context" 区域。
+- UI 层（Enhanced/OpenCode TUI）在启动时显示“项目记忆已加载”。
 
-### 5.2 可控性
-- `memory list/search/delete`
-- 一键关闭“自动推断记忆”
-- 导出/导入（JSON）
+---
 
-## 6. 安全与隐私（必须对齐 `docs/11`）
+## 3. RAG 知识库 (Knowledge Base)
 
-### 6.1 脱敏与加密
-- `secret` 级别默认拒绝写入
-- 企业版可加密存储（本地密钥/OS keychain）
+> **当前实现 (Current Implementation)**: RAG 深度调优中 (Docs 03)。
 
-### 6.2 审计
-- 任何记忆写入/删除都写审计日志
+- **向量检索 (Vector Search)**: 解决“语义找代码”问题。
+- **符号索引 (Symbol Index)**: 解决“定义/引用跳转”问题。
+- **AST 分块 (AST Chunking)**: 提升代码片段的语义完整性。
 
-## 7. MVP 实现建议
-- 先做：workspace 级“命令与约定”记忆（显式写入）
-- 再做：用户偏好记忆（显式写入）
-- 最后做：推断式记忆 + 评分/过期治理
+---
 
+## 4. 记忆写入与治理 (Memory Write & Governance)
 
+### 4.1 写入策略
+- **显式写入**: 用户通过 `/memory` 命令更新 `CLUDE.md`。
+- **自动推断 (Roadmap)**: Agent 识别到稳定的构建命令失败模式后，建议用户更新记忆。
+
+### 4.2 安全与隐私
+- **敏感信息过滤**: 禁止将 Key/Token 写入 `CLUDE.md`。
+- **审计**: 记忆的修改通过 `update_memory` (或文件编辑) 工具进行，有完整 Audit Log。
+
+---
+
+## 5. 相关文档 (See Also)
+
+- **仓库索引与检索 (Repo Indexing)**: [`docs/03-repo-indexing.md`](./03-repo-indexing.md)
+- **上下文与提示词 (Context Spec)**: [`docs/04-context-and-prompting.md`](./04-context-and-prompting.md)
+- **RAG 深度调优 (Technical Report)**: [`docs/technical-reports/rag-tuning.md`](./technical-reports/rag-tuning.md)

@@ -1,10 +1,16 @@
-# 04｜上下文构建与提示词体系 (Context & Prompting)
+# 04 | 上下文构建与提示词体系（可实现规格）(Context & Prompting Spec)
 
-本规范定义了 Agent 的“感知层”。目标是在 Token 预算有限的情况下，为模型提供高相关、低噪音的上下文，从而提升任务一次成功率。
+> **Status (状态)**: Stable Spec (稳定规格，可直接落地实现)  
+> **Audience (读者)**: Maintainers / Prompt Engineers (维护者/提示词工程师)  
+> **Goal (目标)**: 在 Token 预算有限的情况下，为模型提供高相关、低噪音的上下文（Context/上下文）与提示词体系（Prompting/提示词工程），提升任务一次成功率与可控性。
+
+本规范定义 Agent 的“感知层（Perception Layer/感知层）”：如何收集、裁剪、排序与注入信息，使模型在最小上下文成本下做出正确决策。
 
 ---
 
-## 1. 上下文收集器 (Context Collector)
+---
+
+## 1. 上下文收集器 (Context Collector/上下文收集器)
 
 Agent 在每一轮对话前，会动态装配以下信息源：
 
@@ -18,34 +24,50 @@ Agent 在每一轮对话前，会动态装配以下信息源：
 
 ---
 
-## 2. 提示词分层体系 (Prompt Hierarchy)
+---
+
+## 2. 提示词分层体系 (Prompt Hierarchy/提示词层级)
 
 我们采用三层提示词结构，确保指令的刚性约束与任务的灵活性。
 
-### 2.1 System Prompt (固定指令)
+### 2.1 System Prompt（固定指令）
 - **身份设定**: 定义 Agent 是一个纯 CLI 编程助理。
 - **协议约束**: 强制要求通过 JSON 调用工具，严禁非必要的自由文本回复。
 - **安全准则**: 禁止删除非空目录、禁止越权访问敏感文件（如 `.env`）。
 
-### 2.2 Developer Prompt (策略注入)
+### 2.2 Developer Prompt（策略注入）
 - **代码规范**: 注入项目特定的命名约定、测试框架要求（如“优先使用 pytest”）。
 - **编辑偏好**: 强调使用 `apply_patch` 进行局部修改，而非整文件重写。
 
-### 2.3 User Message (动态任务)
+### 2.3 User Message（动态任务）
 - **任务描述**: 用户当前的自然语言指令。
 - **上下文补充**: 经过 Rerank 过滤后的代码片段块。
 
 ---
 
-## 3. 上下文压缩与裁剪 (Pruning & Compression)
+---
+
+## 3. 上下文压缩与裁剪 (Pruning & Compression/裁剪与压缩)
 
 为了防止上下文窗口溢出，系统会执行以下策略：
 1. **语义窗口采样**: 对于 `read_file` 返回的大型文件，仅保留与当前任务关键词匹配的“窗口片段”。
 2. **工具回喂摘要**: 将冗长的工具输出（如数千行的构建日志）总结为结构化摘要。
 3. **历史裁剪**: 仅保留最近 3-5 次的完整工具交互，更早的历史转化为精简的 `Action Summary`。
 
+> **工程经验（Engineering Note/工程提示）**：裁剪不是“删掉信息”，而是“保留决策所需的信息”。推荐优先保留：入口文件、关键符号定义、失败堆栈、最近一次 patch 证据链。
+
 ---
 
-## 4. 结论 (Conclusion)
+---
+
+## 4. 结论 (Conclusion/结论)
 
 上下文构建不是简单的“全量填充”，而是一场关于“信息密度”的权衡。一个优秀的 Context Builder 能够让 7B/14B 等中小型本地模型发挥出不亚于 32B/70B 模型的工程实战能力。
+
+---
+
+## 5. 相关文档（See Also / 参见）
+
+- **端到端流程与状态机（E2E Spec）**: [`docs/01-e2e-flow-and-state-machine.md`](./01-e2e-flow-and-state-machine.md)
+- **仓库索引与检索（Repo Indexing）**: [`docs/03-repo-indexing.md`](./03-repo-indexing.md)
+- **计划分解与任务执行（Planning）**: [`docs/05-planning-and-tasking.md`](./05-planning-and-tasking.md)

@@ -1,110 +1,69 @@
-# clude-code 模块进度、技术分析与规划报告 (src/)
+# 💻 Clude Code Developer Portal
 
-本文件汇总了 **clude-code** 的当前进度、技术架构分析以及与业界 Code Agent 的对比结论。
-
----
-
-## 1. 模块实现进度分析 (Progress Analysis)
-
-当前版本定位于 **MVP+ (V0.1.0)**，已实现本地模型驱动的闭环开发能力，并正在向“业界级产品体验”演进。
-
-### 1.1 落地完成度 (Scorecard)
-
-| 维度 | 实现模块 | 落地程度 | 业界对比水平 | 核心亮点 |
-| :--- | :--- | :--- | :--- | :--- |
-| **基础交互** | `cli/` | 95% | **高** | 支持 Claude Code 风格 CLI (Enhanced UI) 和 OpenCode 风格 TUI (多窗格滚动)；Slash Commands (`/help`, `/config`) 完备。 |
-| **核心编排** | `orchestrator/` | 90% | **高** | 显式 Plan → 依赖调度 → 按步执行 → 失败重规划 → 最终验证；支持死锁检测与局部重规划（P0-3 建设中）。 |
-| **工具箱** | `tooling/` | 92% | **高** | 统一 ToolSpec 契约；`apply_patch` 支持模糊匹配与 Undo 证据链；`display` 工具支持思维链可视化。 |
-| **知识/RAG** | `knowledge/` | 85% | **中高** | AST-aware (Tree-sitter) 分块 + 元数据融合；查询侧 Hybrid Rerank；LanceDB 异步索引。 |
-| **验证闭环** | `verification/` | 100% | **高** | 零配置探测 + 命令白名单 + 环境隔离 + 多语言解析器（Python/Node.js/Go/Rust）。 |
-| **模型接入** | `llm/` | 85% | **高** | 深度适配 llama.cpp；支持 Context 智能裁剪与 Token 估算；`api_mode=openai_compat` 兼容性强。 |
-| **插件系统** | `plugins/` | 88% | **高** | 声明式插件 (YAML/JSON) + 子进程沙箱；UI 插件化架构。 |
-| **安全策略** | `policy/` | 90% | **高** | RBAC 权限模型 + 工具级 Allow/Deny + 远程策略下发 + 完整审计日志 (Audit Log)。 |
-| **可观测性** | `observability/` | 80% | **中** | Trace/Audit 全链路落盘；支持 Session Usage 统计；缺可视化回放工具 (P2)。 |
+> **Internal Developer Documentation (内部开发者文档)**  
+> Source Code Analysis, Module Status, and Implementation Details. (源码分析、模块状态与实现细节)
 
 ---
 
-## 2. 技术与业界比较分析 (Industry Comparison)
+## 1. 模块全景图 (Module Panorama)
 
-我们深度对标了 **Claude Code**、**Aider** 和 **Cursor**，形成了以下差异化结论。
-
-### 2.1 核心优势 (Pros)
-1.  **彻底的本地隐私保护**: 基于 `llama.cpp` 原生 HTTP 客户端，数据不出域，适合企业内网环境。
-2.  **严格的工程契约**: 
-    - **ToolSpec**: 单一真实源，杜绝文档与代码漂移。
-    - **Pydantic Validation**: 运行时强校验，弥补小模型指令遵循能力弱的问题。
-3.  **可观测性优先**: 每一轮对话都有 `trace_id`（建设中），每一个工具调用都有 `audit log`，每一处代码修改都有 `undo hash`。
-4.  **UI/UX 灵活性**: 同时支持“流式对话流 (Classic/Enhanced)”和“交互式 TUI (OpenCode)”，满足不同用户偏好。
-
-### 2.2 待补齐差距 (Cons & Gaps)
-1.  **长窗口上下文管理**: 相比 Claude 200k/Gemini 1M 的超长窗口，本地模型 Context 有限。
-    - *对策*: 引入 `WorkingMemory` (P2) 和更激进的 Context 裁剪/摘要策略。
-2.  **Git 工作流集成**: 缺少像 Aider 那样的“Git 一等公民”体验（自动 commit message, PR review）。
-    - *对策*: 规划 Git Workflow 专用模块 (Docs/09)。
-3.  **重规划成本**: 全量重写 Plan 成本高。
-    - *对策*: 实施局部重规划 (Plan Patching) 策略 (P0-3)。
-
-### 2.3 详细分析文档
-- [Agent 决策链路审计与评分](./docs/17-agent-decision-audit.md) (★★★★★ 推荐阅读)
-- [业界 Code Agent 技术白皮书](INDUSTRY_CODE_AGENT_TECH_WHITEPAPER.md)
-- [RAG 深度调优路线图](RAG_INDEXING_DEEP_TUNING.md)
+| Module | Directory | Role | Completeness |
+| :--- | :--- | :--- | :--- |
+| **🚀 CLI** | `src/clude_code/cli` | Entry Point, TUI, Interaction | █████████░ 95% |
+| **⚙️ Orchestrator** | `src/clude_code/orchestrator` | State Machine, Planning | █████████░ 90% |
+| **🛠️ Tooling** | `src/clude_code/tooling` | File IO, Shell, Patching | █████████░ 92% |
+| **🧠 Knowledge** | `src/clude_code/knowledge` | RAG, Vector Store, Indexing | ████████░░ 85% |
+| **📡 LLM** | `src/clude_code/llm` | Client, Tokenizer | ████████░░ 85% |
+| **🛡️ Policy** | `src/clude_code/policy` | Security, Permission | █████████░ 90% |
+| **🔌 Plugins** | `src/clude_code/plugins` | Extensions, UI Plugins | ████████░░ 88% |
 
 ---
 
-## 3. 核心功能实现细节 (Implementation Details)
+## 2. 关键技术白皮书 (Technical Whitepapers)
 
-### 3.1 智能编排 (Orchestrator)
-- **原理**: 双层循环架构。外层 `run_turn` 负责意图识别与规划生成；内层 `execution` 负责 Step 级调度与 ReAct 降级。
-- **亮点**: 
-    - **State Machine**: 清晰的 INTAKE -> PLANNING -> EXECUTING -> VERIFYING 状态流转。
-    - **Deadlock Detection**: 自动检测步骤依赖死锁并中断。
+我们鼓励开发者先阅读以下核心文档，理解设计哲学：
 
-### 3.2 知识增强 (RAG)
-- **原理**: `IndexerService` 后台监听文件变更 -> `TreeSitterChunker` 提取 AST 语义块 (Symbol/Scope) -> `CodeEmbedder` 向量化 -> `LanceDB` 存储。
-- **亮点**:
-    - **Hybrid Search**: 向量相似度 + 词法匹配 + 元数据 Rerank (Symbol Boost)。
-    - **AST Metadata**: Chunk 携带 `symbol`, `node_type`, `scope`，大幅提升召回可解释性。
-
-### 3.3 交互体验 (CLI/UI)
-- **OpenCode TUI**: 基于 `Textual` 框架。
-    - **多窗格**: 左侧 Chat，右侧 状态/操作/事件，底部 Input。
-    - **异步刷新**: 主线程 UI + 后台 AgentLoop，通过 `Queue` 传递事件，界面不卡顿。
-    - **交互**: 支持鼠标滚轮、历史回溯、命令补全。
+*   **[Agent 决策链路审计报告](../docs/17-agent-decision-audit.md)**: 理解 Trace ID、Protocol 和 Re-planning 的设计权衡。
+*   **[业界 Code Agent 架构对比](../docs/technical-reports/industry-whitepaper.md)**: 为什么我们选择 Local-First 和 AST RAG。
+*   **[RAG 深度调优指南](../docs/technical-reports/rag-tuning.md)**: 向量检索与混合搜索的实现细节。
 
 ---
 
-## 4. 模块导航 (Module Navigation)
+## 3. 核心机制详解 (Core Mechanisms)
 
-为了方便开发者深入理解各子系统的实现，我们在 `src/clude_code` 的每个子目录下都生成了专属的 `README.md`：
+### 3.1 本地优先 (Local-First)
+我们不依赖云端 API。所有逻辑通过 `llama.cpp` 的 HTTP 接口完成。
+*   **Endpoint (接口地址)**: `http://127.0.0.1:8899/v1/chat/completions` (OpenAI Compat / OpenAI 兼容)
+*   **Token Counting (Token 估算)**: 本地估算，用于 Budget Control (预算控制)。
 
-- [🚀 CLI 交互](./clude_code/cli/README.md)
-- [🧠 知识/RAG](./clude_code/knowledge/README.md)
-- [📡 LLM 适配](./clude_code/llm/README.md)
-- [👁️ 可观测性](./clude_code/observability/README.md)
-- [⚙️ 核心编排](./clude_code/orchestrator/README.md)
-- [🛡️ 安全策略](./clude_code/policy/README.md)
-- [🛠️ 工具箱](./clude_code/tooling/README.md)
-- [✅ 验证闭环](./clude_code/verification/ANALYSIS_REPORT.md)
-- [🔌 插件系统](./clude_code/plugins/README.md)
+### 3.2 工具契约 (ToolSpec)
+`ToolSpec` 是单一真实源。
+1.  **Definition (定义)**: 在 `tool_dispatch.py` 中定义 Schema (模式/契约)。
+2.  **Validation (校验)**: 运行时通过 `Pydantic` 强校验。
+3.  **Generation (生成)**: 自动生成 System Prompt (系统提示词) 和 `clude tools` 文档。
+
+### 3.3 可观测性 (Observability)
+*   **Trace ID**: 贯穿全链路的 UUID。
+*   **Audit Log (审计日志)**: `~/.clude/audit.jsonl` 记录每一次工具调用。
+*   **Live UI (实时界面)**: 通过 Event Stream (事件流) 实时驱动 TUI 更新。
 
 ---
 
-## 5. 快速开始 (Quick Start)
+## 4. 开发指南 (Contribution Guide)
 
-### 常用命令
+### 环境搭建
 ```bash
-# 1. 初始化项目记忆
-clude chat --model "..." --select-model
-/init
-
-# 2. 交互式对话 (OpenCode TUI)
-clude chat --live --live-ui opencode
-
-# 3. 诊断环境
-clude doctor --fix
-
-# 4. 查看工具
-clude tools --json
+pip install -e ".[dev,rag,ui]"
 ```
+
+### 运行测试
+```bash
+pytest src/clude_code/tests/
+```
+
+### 代码规范
+*   遵循 PEP 8。
+*   所有新功能必须有对应的 `ToolSpec` 和文档更新。
+*   关键路径（Orchestrator）必须有详细的 Logging。
 
 ---

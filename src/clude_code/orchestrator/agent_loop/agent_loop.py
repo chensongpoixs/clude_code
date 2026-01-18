@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
@@ -226,7 +227,8 @@ class AgentLoop:
         
         流程图: 见 `agent_loop_run_turn_flow.svg`
         """
-        trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
+        # P0-1: Trace ID 必须跨进程稳定且全局唯一；Python 的 hash() 会受随机种子影响
+        trace_id = f"trace_{uuid.uuid4().hex}"
         self.logger.info(f"[bold cyan]开始新的一轮对话[/bold cyan] trace_id={trace_id}")
         self.logger.info(f"[dim]用户输入: {user_text[:100]}{'...' if len(user_text) > 100 else ''}[/dim]")
 

@@ -1,12 +1,14 @@
-# 07｜运行时与命令执行 (Runtime & Terminal)
+# 07 | 运行时与命令执行（可实现规格）(Runtime & Terminal Exec Spec)
 
-本规范定义了 Agent 如何在本地安全、受控地执行构建、测试与通用脚本。核心目标是平衡“执行灵活性”与“系统安全性”。
+> **Status (状态)**: Stable Spec (稳定规格，可直接落地实现)  
+> **Audience (读者)**: Maintainers / Runtime Owners (维护者/运行时负责人)  
+> **Goal (目标)**: 定义 Agent 如何在本地安全、受控地执行构建、测试与通用脚本，平衡执行灵活性（Flexibility/灵活性）与系统安全性（Safety/安全性）。
 
 ---
 
 ## 1. 命令运行规格 (Execution Spec)
 
-### 1.1 Command Runner
+### 1.1 Command Runner（命令运行器）
 - **职责**: 封装子进程管理，提供统一的执行接口。
 - **关键属性**:
     - `timeout`: 强制执行上限（默认 300s），防止僵尸进程。
@@ -39,6 +41,16 @@ Agent 有权启动后台服务（如 `npm start`, `python dev_server.py`）：
 
 ---
 
-## 4. 结论 (Conclusion)
+## 4. 相关文档（See Also / 参见）
+
+- **工具协议与权限/沙箱（Tool Protocol）**: [`docs/02-tool-protocol.md`](./02-tool-protocol.md)
+- **自动化校验与闭环自愈（Lint/Test/Build）**: [`docs/08-lint-test-build.md`](./08-lint-test-build.md)
+- **安全与策略（Security & Policy）**: [`docs/11-security-and-policy.md`](./11-security-and-policy.md)
+
+---
+
+---
+
+## 5. 结论 (Conclusion/结论)
 
 终端是 Agent 的“武馆”。一个安全的运行时环境既能让 Agent 自由地通过测试和构建来验证其想法，又能确保开发者的主机环境不受恶意或错误代码的侵害。

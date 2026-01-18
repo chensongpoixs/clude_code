@@ -1,6 +1,8 @@
-# 09｜Git 工作流集成 (Git Workflow)
+# 09 | Git 工作流集成（可实现规格）(Git Workflow Spec)
 
-本规范定义了 Agent 如何与版本控制系统协作。目标是让 Agent 成为一个“Git 公民”，产出整洁、有意义且符合团队规范的提交历史。
+> **Status (状态)**: Draft Spec (草案规格，后续结合 P2 落地)  
+> **Audience (读者)**: Maintainers / Git Integration Owners (维护者/Git 集成负责人)  
+> **Goal (目标)**: 定义 Agent 如何与版本控制系统协作，使其成为“Git 公民（Git-native/具备 Git 一等公民能力）”，产出整洁、有意义且符合团队规范的提交历史。
 
 ---
 
@@ -33,6 +35,16 @@ Agent 生成的提交消息应包含：
 
 ---
 
-## 4. 结论 (Conclusion)
+## 4. 相关文档（See Also / 参见）
+
+- **工程路线图（Roadmap）**: [`docs/16-development-plan.md`](./16-development-plan.md)
+- **工具协议与权限/沙箱（Tool Protocol）**: [`docs/02-tool-protocol.md`](./02-tool-protocol.md)
+- **安全与策略（Security & Policy）**: [`docs/11-security-and-policy.md`](./11-security-and-policy.md)
+
+---
+
+---
+
+## 5. 结论 (Conclusion/结论)
 
 Git 是 Agent 与人类协作的“通用语言”。通过规范化的 Git 集成，Agent 不仅仅是修改了代码，更是将开发过程的思考产物以标准化的方式永久固化到了项目历史中。

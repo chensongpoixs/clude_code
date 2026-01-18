@@ -46,7 +46,7 @@
 ### 5.1 本项目落地约定（可执行入口）
 - **依赖安装（开发态）**：`pip install -e ".[dev]"`
 - **格式化**：`ruff format .`
-- **Lint**：`ruff check .`
+- **Lint（代码静态检查）**：`ruff check .`
 - **类型检查**：`mypy src`
 - **pre-commit**：`pre-commit install`（提交前自动跑 ruff/mypy）
 - **CI**：`.github/workflows/ci.yml` 会在 PR/Push 自动执行 lint/format/type/test（如存在 tests/）
