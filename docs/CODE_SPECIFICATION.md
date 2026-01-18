@@ -29,6 +29,42 @@
 - **协议驱动**：所有 LLM 交互和工具调用必须符合定义好的 JSON Schema。
 - **状态机管理**：Agent 行为必须受显式状态机（AgentState）驱动，禁止隐式黑盒跳转。
 
+### 3.1 模块配置统一管理（Configuration Centralization）
+
+> **核心原则**：所有模块的可配置参数必须统一纳入全局配置体系（`src/clude_code/config.py`），禁止模块内硬编码或自行管理配置。
+
+| 规范项 | 说明 |
+|--------|------|
+| **配置集中化** | 新增模块的配置项必须在 `config.py` 中定义对应的 Pydantic `BaseModel` 子类，并挂载到 `CludeConfig`。 |
+| **配置优先级** | 统一遵循：`环境变量 > 配置文件 > 代码默认值`，确保部署灵活性与开发便利性兼顾。 |
+| **敏感信息脱敏** | API Key、Token 等敏感配置项禁止硬编码；必须通过环境变量或配置文件注入，且在日志中脱敏显示。 |
+| **配置注入时机** | 模块配置应在 `AgentLoop.__init__` 或模块初始化阶段统一注入，避免运行时动态读取环境变量。 |
+| **配置文档化** | 新增配置项必须在 `clude.example.yaml` 中补充示例，并在对应模块 README 或 `docs/` 中说明用途与取值范围。 |
+
+**标准配置类模板**：
+```python
+class XxxConfig(BaseModel):
+    """模块 Xxx 配置"""
+    enabled: bool = Field(default=True, description="是否启用该模块")
+    api_key: str = Field(default="", description="API Key（环境变量优先）")
+    timeout_s: int = Field(default=10, ge=1, le=60, description="请求超时时间")
+    # ... 其他配置项
+```
+
+**配置注入示例**：
+```python
+# 在 AgentLoop.__init__ 中
+from xxx_module import set_xxx_config
+set_xxx_config(cfg)  # cfg: CludeConfig
+```
+
+**实现检查清单**（新增模块配置时必须逐项确认）：
+- [ ] `config.py`：定义 `XxxConfig` 并添加到 `CludeConfig`
+- [ ] 模块内：提供 `set_xxx_config()` 或构造函数接收配置
+- [ ] `AgentLoop.__init__`：调用配置注入
+- [ ] `clude.example.yaml`：补充配置示例
+- [ ] 模块文档：说明配置项含义与取值
+
 ## 4. 日志与调试
 - **禁止 print**：使用系统 logger。
 - **控制台日志**：追求美观简洁（Rich 格式），只显示关键路径。

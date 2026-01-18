@@ -104,6 +104,39 @@ class RAGConfig(BaseModel):
     index_workers: int = Field(default=4, ge=1, le=16, description="并发索引线程数（1-16，推荐 4-8）。")
 
 
+class WeatherConfig(BaseModel):
+    """
+    天气 API 配置（OpenWeatherMap）
+    
+    获取免费 API Key: https://openweathermap.org/api
+    """
+    enabled: bool = Field(default=True, description="是否启用天气工具。")
+    api_key: str = Field(
+        default="1959a5732178d790d56e0d313d1fe2e6",
+        description="OpenWeatherMap API Key（必需）。也可通过环境变量 OPENWEATHERMAP_API_KEY 设置。"
+    )
+    default_units: str = Field(
+        default="metric",
+        description="默认温度单位：metric=摄氏度, imperial=华氏度, standard=开尔文。"
+    )
+    default_lang: str = Field(
+        default="zh_cn",
+        description="默认返回语言（zh_cn=中文, en=英文）。"
+    )
+    timeout_s: int = Field(
+        default=10,
+        ge=1,
+        le=60,
+        description="API 请求超时时间（秒）。"
+    )
+    cache_ttl_s: int = Field(
+        default=300,
+        ge=0,
+        le=3600,
+        description="天气数据缓存时间（秒，0=不缓存）。业界推荐 5-10 分钟避免频繁请求。"
+    )
+
+
 class CludeConfig(BaseSettings):
     """
     Config priority (high -> low):
@@ -121,5 +154,6 @@ class CludeConfig(BaseSettings):
     logging: LoggingConfig = LoggingConfig()
     orchestrator: OrchestratorConfig = OrchestratorConfig()
     rag: RAGConfig = RAGConfig()
+    weather: WeatherConfig = WeatherConfig()
 
 

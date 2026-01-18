@@ -936,6 +936,179 @@ def _spec_get_task_status() -> ToolSpec:
     )
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 天气工具（OpenWeatherMap API）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _h_get_weather(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：get_weather（获取实时天气）。"""
+    city = args.get("city")
+    lat = args.get("lat")
+    lon = args.get("lon")
+    units = args.get("units", "metric")
+    lang = args.get("lang", "zh_cn")
+    timeout = args.get("timeout", 10)
+
+    return loop.tools.get_weather(
+        city=city, lat=lat, lon=lon, units=units, lang=lang, timeout=timeout
+    )
+
+
+def _spec_get_weather() -> ToolSpec:
+    """
+    ToolSpec：get_weather（获取实时天气）
+    
+    使用 OpenWeatherMap API 获取全球任意城市的实时天气信息。
+    支持城市名查询和经纬度查询两种方式。
+    
+    环境变量配置：
+    - OPENWEATHERMAP_API_KEY: OpenWeatherMap API Key（必需）
+    
+    获取免费 API Key: https://openweathermap.org/api
+    """
+    return ToolSpec(
+        name="get_weather",
+        summary="获取实时天气信息（OpenWeatherMap）",
+        description="使用 OpenWeatherMap API 获取全球城市的实时天气，支持城市名或经纬度查询，返回温度、湿度、风速等详细信息。",
+        args_schema=_obj_schema(
+            properties={
+                "city": {
+                    "type": "string",
+                    "description": "城市名称（支持中文、英文），如 'Beijing', '北京', 'London'"
+                },
+                "lat": {
+                    "type": "number",
+                    "description": "纬度（-90 到 90），与 lon 配合使用",
+                    "minimum": -90,
+                    "maximum": 90
+                },
+                "lon": {
+                    "type": "number",
+                    "description": "经度（-180 到 180），与 lat 配合使用",
+                    "minimum": -180,
+                    "maximum": 180
+                },
+                "units": {
+                    "type": "string",
+                    "enum": ["metric", "imperial", "standard"],
+                    "default": "metric",
+                    "description": "温度单位：metric=摄氏度（默认），imperial=华氏度，standard=开尔文"
+                },
+                "lang": {
+                    "type": "string",
+                    "default": "zh_cn",
+                    "description": "返回语言（默认中文 zh_cn）"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 60,
+                    "description": "请求超时时间（秒）"
+                }
+            },
+            required=[],  # city 或 lat+lon 二选一
+        ),
+        example_args={"city": "Beijing", "units": "metric"},
+        side_effects={"network"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_get_weather,
+        category="external_api",
+        timeout_seconds=15,
+        version="1.0.0",
+    )
+
+
+def _h_get_weather_forecast(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    """处理器：get_weather_forecast（获取天气预报）。"""
+    city = args.get("city")
+    lat = args.get("lat")
+    lon = args.get("lon")
+    units = args.get("units", "metric")
+    lang = args.get("lang", "zh_cn")
+    days = args.get("days", 5)
+    timeout = args.get("timeout", 10)
+
+    return loop.tools.get_weather_forecast(
+        city=city, lat=lat, lon=lon, units=units, lang=lang, days=days, timeout=timeout
+    )
+
+
+def _spec_get_weather_forecast() -> ToolSpec:
+    """
+    ToolSpec：get_weather_forecast（获取天气预报）
+    
+    使用 OpenWeatherMap API 获取最多5天的天气预报。
+    每3小时提供一个数据点，包含温度、湿度、降水概率等信息。
+    """
+    return ToolSpec(
+        name="get_weather_forecast",
+        summary="获取天气预报（最多5天）",
+        description="使用 OpenWeatherMap API 获取未来5天的天气预报，每3小时一个数据点，包含温度、湿度、降水概率等。",
+        args_schema=_obj_schema(
+            properties={
+                "city": {
+                    "type": "string",
+                    "description": "城市名称（支持中文、英文）"
+                },
+                "lat": {
+                    "type": "number",
+                    "description": "纬度（-90 到 90）",
+                    "minimum": -90,
+                    "maximum": 90
+                },
+                "lon": {
+                    "type": "number",
+                    "description": "经度（-180 到 180）",
+                    "minimum": -180,
+                    "maximum": 180
+                },
+                "units": {
+                    "type": "string",
+                    "enum": ["metric", "imperial", "standard"],
+                    "default": "metric",
+                    "description": "温度单位"
+                },
+                "lang": {
+                    "type": "string",
+                    "default": "zh_cn",
+                    "description": "返回语言"
+                },
+                "days": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "预报天数（最多5天）"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 60,
+                    "description": "请求超时时间（秒）"
+                }
+            },
+            required=[],
+        ),
+        example_args={"city": "Shanghai", "days": 3},
+        side_effects={"network"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_get_weather_forecast,
+        category="external_api",
+        timeout_seconds=15,
+        version="1.0.0",
+    )
+
+
 def iter_tool_specs() -> Iterable[ToolSpec]:
     """
     返回所有工具规范（保持稳定顺序）。
@@ -961,6 +1134,8 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     yield _spec_codesearch()
     yield _spec_run_task()
     yield _spec_get_task_status()
+    yield _spec_get_weather()
+    yield _spec_get_weather_forecast()
 
 
 # 注册表驱动（业界版）：同一份注册表 = tool dispatch + tool prompt/help 的来源

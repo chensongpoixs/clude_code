@@ -17,6 +17,7 @@ from .tools.search import websearch as _websearch_impl, codesearch as _codesearc
 from .tools.skill import load_skill as _load_skill_impl, list_skills as _list_skills_impl
 from .tools.task_agent import run_task as _run_task_impl, get_task_status as _get_task_status_impl
 from .tools.todo_manager import todowrite as _todowrite_impl, todoread as _todoread_impl
+from .tools.weather import get_weather as _get_weather_impl, get_weather_forecast as _get_weather_forecast_impl
 from .tools.webfetch import fetch_web_content as _fetch_web_content_impl
 from .tools.write_file import write_file as _write_file_impl
 
@@ -110,6 +111,31 @@ class LocalTools:
 
     def get_task_status(self, task_id: str) -> ToolResult:
         return _get_task_status_impl(task_id=task_id)
+
+    def get_weather(
+        self,
+        city: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        units: str = "metric",
+        lang: str = "zh_cn",
+        timeout: int = 10,
+    ) -> ToolResult:
+        """获取实时天气信息"""
+        return _get_weather_impl(city=city, lat=lat, lon=lon, units=units, lang=lang, timeout=timeout)
+
+    def get_weather_forecast(
+        self,
+        city: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        units: str = "metric",
+        lang: str = "zh_cn",
+        days: int = 5,
+        timeout: int = 10,
+    ) -> ToolResult:
+        """获取天气预报（5天）"""
+        return _get_weather_forecast_impl(city=city, lat=lat, lon=lon, units=units, lang=lang, days=days, timeout=timeout)
 
 
 

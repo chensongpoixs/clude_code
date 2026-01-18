@@ -193,6 +193,92 @@
 ### 6.5 记忆类（可选）
 - `update_memory(action, title, knowledge_to_store, existing_knowledge_id)`
 
+### 6.6 外部 API 类（External API Tools）
+
+#### 6.6.1 `get_weather`（天气查询 / Weather Query）
+
+用途：使用 OpenWeatherMap API 获取全球任意城市的**实时天气信息**。
+
+**配置方式（二选一）**：
+
+```yaml
+# 方式 1：配置文件 clude.yaml（推荐）
+weather:
+  api_key: "your_api_key_here"
+  default_units: metric    # metric=摄氏度, imperial=华氏度
+  default_lang: zh_cn      # 默认中文
+```
+
+```bash
+# 方式 2：环境变量
+export OPENWEATHERMAP_API_KEY="your_api_key_here"
+```
+
+> 获取免费 API Key: https://openweathermap.org/api
+
+**args_schema**：
+```json
+{
+  "type": "object",
+  "properties": {
+    "city": { "type": "string", "description": "城市名称（支持中文、英文），如 'Beijing', '北京'" },
+    "lat": { "type": "number", "description": "纬度（-90 到 90）", "minimum": -90, "maximum": 90 },
+    "lon": { "type": "number", "description": "经度（-180 到 180）", "minimum": -180, "maximum": 180 },
+    "units": { "type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric", "description": "温度单位：metric=摄氏度，imperial=华氏度" },
+    "lang": { "type": "string", "default": "zh_cn", "description": "返回语言" }
+  },
+  "additionalProperties": false
+}
+```
+
+**示例**：
+```json
+// 按城市名查询
+{ "city": "Beijing", "units": "metric" }
+
+// 按经纬度查询
+{ "lat": 39.9042, "lon": 116.4074 }
+```
+
+**返回数据**：
+- `data.temperature`: 当前温度
+- `data.feels_like`: 体感温度
+- `data.humidity`: 湿度百分比
+- `data.wind_speed`: 风速
+- `data.weather_description`: 天气描述（中文）
+- `human_readable`: 人类可读的格式化天气描述
+
+#### 6.6.2 `get_weather_forecast`（天气预报 / Weather Forecast）
+
+用途：获取**未来5天**的天气预报，每3小时一个数据点。
+
+**args_schema**：
+```json
+{
+  "type": "object",
+  "properties": {
+    "city": { "type": "string", "description": "城市名称" },
+    "lat": { "type": "number", "description": "纬度" },
+    "lon": { "type": "number", "description": "经度" },
+    "days": { "type": "integer", "default": 5, "minimum": 1, "maximum": 5, "description": "预报天数" },
+    "units": { "type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric" }
+  },
+  "additionalProperties": false
+}
+```
+
+**示例**：
+```json
+{ "city": "Shanghai", "days": 3 }
+```
+
+**返回数据**：
+- `forecasts[]`: 预报数据数组，每个元素包含：
+  - `dt_txt`: 日期时间（如 "2024-01-20 12:00:00"）
+  - `temp`: 预报温度
+  - `weather`: 天气描述
+  - `pop`: 降水概率（0-1）
+
 ---
 
 ## 7. 审计日志（必做）(Audit Log)

@@ -147,6 +147,14 @@ class AgentLoop:
             max_file_read_bytes=cfg.limits.max_file_read_bytes,
             max_output_bytes=cfg.limits.max_output_bytes,
         )
+        
+        # 初始化天气工具配置（从全局配置注入）
+        try:
+            from clude_code.tooling.tools.weather import set_weather_config
+            set_weather_config(cfg)
+        except ImportError:
+            pass  # 天气模块可选
+        
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)
         self.usage = SessionUsage()
