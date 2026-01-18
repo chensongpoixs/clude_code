@@ -361,6 +361,19 @@ class EnhancedLiveDisplay:
             self._push_block("重规划生成", lines, color="magenta")
             return
 
+        if event_type == "plan_patch_applied":
+            meta = event_data.get("meta") or {}
+            replans_used = event_data.get("replans_used")
+            lines: list[str] = []
+            if isinstance(meta, dict):
+                lines.append(f"added={meta.get('added', 0)} updated={meta.get('updated', 0)} removed={meta.get('removed', 0)}")
+                if meta.get("truncated_add"):
+                    lines.append("[yellow]新增步骤被截断（受 max_plan_steps 限制）[/yellow]")
+            if replans_used is not None:
+                lines.append(f"replans_used={replans_used}")
+            self._push_block("计划补丁已应用", lines, color="magenta")
+            return
+
         # --- 对话/输出 ---
         if event_type == "user_message":
             txt = str(event_data.get("text", "")).strip()

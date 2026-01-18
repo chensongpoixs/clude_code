@@ -216,10 +216,36 @@ def handle_replanning(
     _set_state(AgentState.RECOVERING, {"reason": "step_failed", "step_id": step.id, "replans_used": replans_used})
     _set_state(AgentState.PLANNING, {"reason": "replan", "replans_used": replans_used})
 
+    # P0-3：优先局部重规划（PlanPatch），失败回退全量 Plan（兼容迁移期）
+    try:
+        from clude_code.orchestrator.planner import render_plan_markdown
+        cur_plan_md = render_plan_markdown(plan)
+    except Exception:
+        cur_plan_md = "(render_plan_markdown 失败，略)"
+
     replan_prompt = (
-        "出现阻塞/失败，需要重规划。请输出新的 Plan JSON（严格 JSON，不要解释，不要调用工具）。\n"
-        f"限制：steps 不超过 {loop.cfg.orchestrator.max_plan_steps}。\n"
-        "请结合当前对话中的错误与工具反馈，生成更可执行的步骤。"
+        "出现阻塞/失败，需要重规划。\n"
+        "优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：\n"
+        "{\n"
+        '  "title": "可选：新标题",\n'
+        '  "remove_steps": ["step_x"],\n'
+        '  "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],\n'
+        '  "add_steps": [{"id":"step_4","description":"...","dependencies":["step_3"],"tools_expected":["read_file"],"status":"pending"}],\n'
+        '  "reason": "可选：为什么这样 patch"\n'
+        "}\n"
+        "约束：\n"
+        f"- steps 总数不超过 {loop.cfg.orchestrator.max_plan_steps}\n"
+        "- 禁止删除/修改 status=done 的步骤\n"
+        "- 新增步骤的 status 会被强制设为 pending\n"
+        "\n"
+        "当前失败步骤：\n"
+        f"- step_id={step.id}\n"
+        f"- description={step.description}\n"
+        "\n"
+        "当前 Plan（含状态/依赖/建议工具）：\n"
+        f"{cur_plan_md}\n"
+        "\n"
+        "如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。"
     )
     loop.messages.append(ChatMessage(role="user", content=replan_prompt))
     loop._trim_history(max_messages=30)
@@ -229,9 +255,44 @@ def handle_replanning(
     loop._trim_history(max_messages=30)
 
     try:
-        from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown
+        from clude_code.orchestrator.planner import (
+            apply_plan_patch,
+            carry_over_done_status,
+            parse_plan_from_text,
+            parse_plan_patch_from_text,
+            render_plan_markdown,
+        )
 
+        # 1) 优先解析/应用 PlanPatch（P0-3）
+        try:
+            patch = parse_plan_patch_from_text(assistant_plan)
+            new_plan, meta = apply_plan_patch(
+                plan,
+                patch,
+                max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
+            )
+            # 防止误判：如果补丁是“空操作”，视为无效，回退 full Plan
+            title_changed = bool((patch.title or "").strip())
+            if (meta.get("added", 0) + meta.get("updated", 0) + meta.get("removed", 0)) == 0 and not title_changed:
+                raise ValueError("PlanPatch 是空操作（无新增/更新/删除/标题更新），拒绝应用并回退 full Plan")
+            loop.audit.write(
+                trace_id=trace_id,
+                event="plan_patch_applied",
+                data={"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used},
+            )
+            _ev(
+                "plan_patch_applied",
+                {"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used, "steps": len(new_plan.steps)},
+            )
+            loop.file_only_logger.info("计划补丁已应用:\n" + render_plan_markdown(new_plan))
+            return new_plan, replans_used
+        except Exception as e:
+            # patch 失败：回退全量 Plan（兼容迁移期）
+            loop.file_only_logger.warning(f"PlanPatch 解析/应用失败，回退 full Plan: {e}", exc_info=True)
+
+        # 2) 回退：解析 full Plan（旧协议）
         new_plan = parse_plan_from_text(assistant_plan)
+        new_plan = carry_over_done_status(plan, new_plan)
         if len(new_plan.steps) > loop.cfg.orchestrator.max_plan_steps:
             new_plan.steps = new_plan.steps[: loop.cfg.orchestrator.max_plan_steps]
         loop.audit.write(trace_id=trace_id, event="replan_generated", data={"title": new_plan.title, "steps": [s.model_dump() for s in new_plan.steps]})
@@ -304,6 +365,10 @@ def execute_plan_steps(
             break
 
         step = plan.steps[step_cursor]
+        # P0-3：局部重规划会保留 done 步骤，必须跳过，避免重复执行/状态被覆盖
+        if getattr(step, "status", None) == "done":
+            step_cursor += 1
+            continue
         unmet_deps = check_step_dependencies(loop, step, plan, trace_id, _ev)
         if unmet_deps:
             step_cursor += 1

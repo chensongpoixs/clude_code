@@ -13,19 +13,21 @@
 - [x] 贯穿 `AgentLoop` -> `_ev` -> `Audit` -> `UI`
 - [x] 修复 `/bug` 报告归因（trace_id 贯穿与展示）
 
-### 🔄 P0-2 控制协议结构化 (进行中)
-- [ ] 定义 `{"control": "step_done"}` Schema (控制协议 Schema)
-- [ ] 升级 `Execution` 解析逻辑（优先 JSON 解析，失败才回退文本匹配）
-- [ ] 更新 System Prompt 约束（明确要求输出结构化控制信号）
+### ✅ P0-2 控制协议结构化 (已完成)
+- [x] 定义 `{"control": "step_done"}` / `{"control":"replan"}` Schema（控制协议 Schema）
+- [x] 升级 `Execution` 解析逻辑（优先解析控制 JSON，失败才回退文本匹配，并记录兼容告警）
+- [x] 更新 System Prompt 约束（强制输出结构化控制信号，禁止 STEP_DONE/REPLAN 自由文本）
 
 **预期收益**: 消除模型幻觉导致的误触，提升协议鲁棒性。
 
-### ⏳ P0-3 局部重规划 (Plan Patching) (待开始)
-- [ ] 定义 `PlanPatch` 数据结构（增量变更描述）
-- [ ] 实现 `Planner.patch_plan()`（仅生成增量步骤）
-- [ ] 优化重规划 Prompt（强调保留已完成步骤）
+### ✅ P0-3 局部重规划 (Plan Patching) (已完成)
+- [x] 定义 `PlanPatch` 数据结构（增量变更描述）
+- [x] 实现 `Planner.patch_plan()`（仅生成增量步骤）
+- [x] 优化重规划 Prompt（优先输出 PlanPatch，失败回退 full Plan；并强调保留已完成步骤）
+- [x] 回归测试覆盖 (`tests/test_plan_patching.py`，10 用例，100% 通过)
 
-**预期收益**: 降低 Token 成本，避免上下文丢失。
+**预期收益**: 降低 Token 成本，避免上下文丢失。  
+**技术文档**: [`docs/22-plan-patching.md`](./22-plan-patching.md)
 
 ---
 
@@ -92,12 +94,12 @@
 ## 🎯 下一步行动建议 (Next Steps)
 
 ### 本周重点 (This Week)
-1. **完成 P0-2**: 控制协议结构化（预计 2-3 天）
-2. **启动 P0-3**: Plan Patching 数据结构设计（预计 1 天）
+1. **✅ P0 全部完成**: P0-1/P0-2/P0-3 均已闭环
+2. **启动 P1-1**: 异常处理规范化（扫描 + 修复）——先从高风险 `except: pass` 开始
 
 ### 本月目标 (This Month)
-1. **完成 P0 全部任务**: 基础设施加固闭环
-2. **启动 P1-1**: 异常处理规范化（扫描 + 修复）
+1. **完成 P1-1**: 异常处理规范化（扫描 + 修复）
+2. **启动 P1-2**: Tool Registry 去重审计
 
 ### 下季度目标 (Next Quarter)
 1. **完成 P2-1**: RAG 深度调优（Hybrid Search + 并发优化）
@@ -109,7 +111,7 @@
 
 | 里程碑 | 完成度 | 预计完成时间 |
 | :--- | :--- | :--- |
-| **M2: Robustness** | 🔄 33% (1/3 P0 任务完成) | Q1 2026 |
+| **M2: Robustness** | ✅ 100% (3/3 P0 任务完成) | Q1 2026 |
 | **M3: Intelligence** | 🔄 60% (RAG Chunking 完成，Rerank 调优中) | Q2 2026 |
 | **M4: Product（产品化）** | ⏳ 0% | Q3 2026 |
 

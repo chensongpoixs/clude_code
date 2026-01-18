@@ -44,9 +44,9 @@
 *   **Problem（问题）**: 全量重写 Plan（计划）成本高且丢失上下文。
 *   **Goal（目标）**: 实现 `PlanPatch`（计划补丁）增量修补。
 *   **Progress（进度）**:
-    *   [ ] 定义 `PlanPatch` 数据结构
-    *   [ ] 实现 `Planner.patch_plan()`
-    *   [ ] 优化重规划 Prompt
+    *   [x] 定义 `PlanPatch` 数据结构
+    *   [x] 实现 `Planner.patch_plan()`（优先 patch，失败回退 full Plan）
+    *   [x] 优化重规划 Prompt（强调保留已完成步骤、最小变更）
 
 ### 2.2 P1: 健壮性提升 (Robustness / Robustness=健壮性)
 

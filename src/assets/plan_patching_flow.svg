@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650">
+  <defs>
+    <style>
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+      }
+      @keyframes flowLine {
+        from { stroke-dashoffset: 20; }
+        to { stroke-dashoffset: 0; }
+      }
+      @keyframes glow {
+        0%, 100% { filter: drop-shadow(0 0 3px rgba(46, 204, 113, 0.5)); }
+        50% { filter: drop-shadow(0 0 8px rgba(46, 204, 113, 0.8)); }
+      }
+      .node { animation: fadeIn 0.5s ease-out forwards; }
+      .node-1 { animation-delay: 0.1s; opacity: 0; }
+      .node-2 { animation-delay: 0.25s; opacity: 0; }
+      .node-3 { animation-delay: 0.4s; opacity: 0; }
+      .node-4 { animation-delay: 0.55s; opacity: 0; }
+      .node-5 { animation-delay: 0.7s; opacity: 0; }
+      .node-6 { animation-delay: 0.85s; opacity: 0; }
+      .node-7 { animation-delay: 1.0s; opacity: 0; }
+      .flow-line { 
+        stroke-dasharray: 5,5; 
+        animation: flowLine 1s linear infinite;
+      }
+      .success-glow { animation: glow 2s ease-in-out infinite; }
+      .title { font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }
+      .label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; }
+      .label-cn { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 10px; fill: #888; }
+      .success { fill: #2ecc71; }
+      .warning { fill: #f39c12; }
+      .error { fill: #e74c3c; }
+      .primary { fill: #4a9eff; }
+      .purple { fill: #9b59b6; }
+      .dark { fill: #34495e; }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5c6370"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="900" height="650" fill="#1e2127"/>
+  
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" class="title" fill="#fff" font-size="18">
+    P0-3 Plan Patching Flow (计划补丁应用流程)
+  </text>
+  
+  <!-- Trigger: Step Failed -->
+  <g class="node node-1" filter="url(#shadow)">
+    <rect x="380" y="50" width="140" height="45" rx="8" class="error"/>
+    <text x="450" y="70" text-anchor="middle" fill="#fff" class="label">Step Failed</text>
+    <text x="450" y="85" text-anchor="middle" class="label-cn">(步骤失败)</text>
+  </g>
+  
+  <!-- Request PlanPatch -->
+  <g class="node node-2" filter="url(#shadow)">
+    <rect x="360" y="115" width="180" height="45" rx="8" class="primary"/>
+    <text x="450" y="135" text-anchor="middle" fill="#fff" class="label">Request PlanPatch JSON</text>
+    <text x="450" y="150" text-anchor="middle" class="label-cn">(请求增量补丁)</text>
+  </g>
+  
+  <!-- Decision: Parse Patch -->
+  <g class="node node-3" filter="url(#shadow)">
+    <polygon points="450,180 530,220 450,260 370,220" fill="#3498db"/>
+    <text x="450" y="215" text-anchor="middle" fill="#fff" class="label">Parse Patch?</text>
+    <text x="450" y="232" text-anchor="middle" class="label-cn">(解析补丁?)</text>
+  </g>
+  
+  <!-- Apply PlanPatch -->
+  <g class="node node-4" filter="url(#shadow)">
+    <rect x="180" y="280" width="160" height="45" rx="8" class="purple"/>
+    <text x="260" y="300" text-anchor="middle" fill="#fff" class="label">apply_plan_patch()</text>
+    <text x="260" y="315" text-anchor="middle" class="label-cn">(应用增量补丁)</text>
+  </g>
+  
+  <!-- Fallback: Parse Full Plan -->
+  <g class="node node-4" filter="url(#shadow)">
+    <rect x="560" y="280" width="180" height="45" rx="8" class="warning"/>
+    <text x="650" y="300" text-anchor="middle" fill="#fff" class="label">Fallback: Parse Full Plan</text>
+    <text x="650" y="315" text-anchor="middle" class="label-cn">(回退: 解析完整计划)</text>
+  </g>
+  
+  <!-- carry_over_done_status -->
+  <g class="node node-5" filter="url(#shadow)">
+    <rect x="560" y="345" width="180" height="45" rx="8" class="purple"/>
+    <text x="650" y="365" text-anchor="middle" fill="#fff" class="label">carry_over_done_status()</text>
+    <text x="650" y="380" text-anchor="middle" class="label-cn">(保留已完成状态)</text>
+  </g>
+  
+  <!-- Validation Box -->
+  <g class="node node-5">
+    <rect x="130" y="345" width="260" height="130" rx="8" fill="none" stroke="#5c6370" stroke-width="1" stroke-dasharray="4,4"/>
+    <text x="260" y="365" text-anchor="middle" class="label" fill="#888">Validation (校验)</text>
+  </g>
+  
+  <!-- Check: Unique IDs -->
+  <g class="node node-5" filter="url(#shadow)">
+    <polygon points="210,385 260,410 210,435 160,410" fill="#3498db" transform="scale(0.9) translate(25,45)"/>
+    <text x="210" y="415" text-anchor="middle" fill="#fff" class="label" font-size="10">ID唯一?</text>
+  </g>
+  
+  <!-- Check: Deps Exist -->
+  <g class="node node-6" filter="url(#shadow)">
+    <polygon points="310,385 360,410 310,435 260,410" fill="#3498db" transform="scale(0.9) translate(25,45)"/>
+    <text x="310" y="415" text-anchor="middle" fill="#fff" class="label" font-size="10">依赖?</text>
+  </g>
+  
+  <!-- Check: Max Steps -->
+  <g class="node node-6" filter="url(#shadow)">
+    <polygon points="260,430 310,455 260,480 210,455" fill="#3498db" transform="scale(0.9) translate(25,20)"/>
+    <text x="260" y="458" text-anchor="middle" fill="#fff" class="label" font-size="10">上限?</text>
+  </g>
+  
+  <!-- Result: New Plan Applied -->
+  <g class="node node-7 success-glow" filter="url(#shadow)">
+    <rect x="180" y="520" width="160" height="50" rx="8" class="success"/>
+    <text x="260" y="542" text-anchor="middle" fill="#fff" class="label">✅ New Plan Applied</text>
+    <text x="260" y="558" text-anchor="middle" class="label-cn">(新计划生效)</text>
+  </g>
+  
+  <!-- Result: Truncated -->
+  <g class="node node-7" filter="url(#shadow)">
+    <rect x="380" y="520" width="160" height="50" rx="8" class="warning"/>
+    <text x="460" y="542" text-anchor="middle" fill="#fff" class="label">⚠️ Steps Truncated</text>
+    <text x="460" y="558" text-anchor="middle" class="label-cn">(新增步骤被截断)</text>
+  </g>
+  
+  <!-- Result: Failed -->
+  <g class="node node-7" filter="url(#shadow)">
+    <rect x="580" y="520" width="160" height="50" rx="8" class="error"/>
+    <text x="660" y="542" text-anchor="middle" fill="#fff" class="label">❌ Replanning Failed</text>
+    <text x="660" y="558" text-anchor="middle" class="label-cn">(重规划失败)</text>
+  </g>
+  
+  <!-- Flow Lines -->
+  <g stroke="#5c6370" stroke-width="2" fill="none" marker-end="url(#arrowhead)">
+    <!-- Trigger to Request -->
+    <line x1="450" y1="95" x2="450" y2="115" class="flow-line"/>
+    
+    <!-- Request to Decision -->
+    <line x1="450" y1="160" x2="450" y2="180" class="flow-line"/>
+    
+    <!-- Decision Yes to Apply -->
+    <path d="M 370,220 L 260,220 L 260,280" class="flow-line"/>
+    <text x="300" y="210" class="label" fill="#2ecc71">Success</text>
+    
+    <!-- Decision No to Fallback -->
+    <path d="M 530,220 L 650,220 L 650,280" class="flow-line"/>
+    <text x="580" y="210" class="label" fill="#f39c12">Fail</text>
+    
+    <!-- Fallback to carry_over -->
+    <line x1="650" y1="325" x2="650" y2="345" class="flow-line"/>
+    
+    <!-- Apply to Validation -->
+    <line x1="260" y1="325" x2="260" y2="345" class="flow-line"/>
+    
+    <!-- carry_over to Validation -->
+    <path d="M 560,390 L 390,390" class="flow-line"/>
+    
+    <!-- Validation to Results -->
+    <path d="M 210,470 L 210,495 L 260,495 L 260,520" class="flow-line"/>
+    <text x="180" y="490" class="label" fill="#2ecc71" font-size="9">OK</text>
+    
+    <path d="M 310,470 L 310,495 L 460,495 L 460,520" class="flow-line"/>
+    <text x="355" y="490" class="label" fill="#f39c12" font-size="9">Truncate</text>
+    
+    <!-- Fallback fail to Failed -->
+    <path d="M 740,305 L 780,305 L 780,545 L 740,545" class="flow-line"/>
+    <text x="785" y="420" class="label" fill="#e74c3c" transform="rotate(90,785,420)" font-size="9">Parse Fail</text>
+    
+    <!-- Validation fail to Failed -->
+    <path d="M 390,410 L 430,410 L 430,485 L 660,485 L 660,520" class="flow-line"/>
+    <text x="500" y="478" class="label" fill="#e74c3c" font-size="9">Invalid</text>
+  </g>
+  
+  <!-- Legend -->
+  <g transform="translate(30, 550)">
+    <text x="0" y="0" class="label" fill="#888">Legend (图例):</text>
+    <rect x="0" y="10" width="12" height="12" rx="2" class="success"/>
+    <text x="18" y="20" class="label" fill="#888">Success</text>
+    <rect x="70" y="10" width="12" height="12" rx="2" class="warning"/>
+    <text x="88" y="20" class="label" fill="#888">Warning</text>
+    <rect x="0" y="28" width="12" height="12" rx="2" class="error"/>
+    <text x="18" y="38" class="label" fill="#888">Error</text>
+    <rect x="70" y="28" width="12" height="12" rx="2" class="purple"/>
+    <text x="88" y="38" class="label" fill="#888">Process</text>
+  </g>
+  
+  <!-- Key Benefits -->
+  <g transform="translate(30, 80)">
+    <text x="0" y="0" class="label" fill="#4a9eff" font-size="12">Key Benefits (核心收益):</text>
+    <text x="0" y="18" class="label" fill="#888">• Token Cost ↓ (成本降低)</text>
+    <text x="0" y="34" class="label" fill="#888">• Context Preserved (上下文保留)</text>
+    <text x="0" y="50" class="label" fill="#888">• Done Steps Protected (已完成步骤保护)</text>
+  </g>
+</svg>

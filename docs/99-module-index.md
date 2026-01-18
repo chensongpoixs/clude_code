@@ -39,6 +39,8 @@
 - [**19 | 贡献指南 (Contribution)**](./19-contribution-guide.md) - 开发者环境设置与规范。
 - [**20 | 开发计划清单**](./20-development-checklist.md) - 优先级任务清单与进度追踪。
 - [**21 | ReAct 卡住问题分析**](./21-react-hang-analysis.md) - ReAct 决策等待问题的根因分析与解决方案。
+- [**22 | P0-3 局部重规划 (Plan Patching)**](./22-plan-patching.md) - 增量计划补丁设计与实现。
+- [**23 | P0-2 控制协议结构化 (Control Protocol)**](./23-control-protocol.md) - JSON Envelope 控制信号协议。
 - [**文档深度审计报告**](./DOCUMENTATION_AUDIT_REPORT.md) - 思考流程、打分与业界对标。
 
 ## 5. 深度技术报告 (Deep Dives)

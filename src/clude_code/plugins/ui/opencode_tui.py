@@ -1111,6 +1111,7 @@ def run_opencode_tui(
                 "tool_result",
                 "plan_generated",
                 "replan_generated",
+                "plan_patch_applied",
                 "plan_parse_failed",
                 "policy_deny_tool",
                 "policy_deny_cmd",
@@ -1210,6 +1211,15 @@ def run_opencode_tui(
                     style = "green" if ok else "red"
                     summary = self._format_tool_result_summary(tool, ok, data)
                     self._push_chat_log(f"{icon} 工具执行{'成功' if ok else '失败'}: {tool} [结果] {summary}", style=style)
+                elif et == "plan_patch_applied":
+                    meta = data.get("meta") or {}
+                    if isinstance(meta, dict):
+                        a = meta.get("added", 0)
+                        u = meta.get("updated", 0)
+                        r = meta.get("removed", 0)
+                        t = meta.get("truncated_add")
+                        extra = "（新增被截断）" if t else ""
+                        self._push_chat_log(f"✓ 已应用计划补丁: added={a} updated={u} removed={r}{extra}", style="bold green")
                 elif et == "final_text":
                     if self._turn_final_printed:
                         return

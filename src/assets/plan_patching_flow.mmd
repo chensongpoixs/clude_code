@@ -1,0 +1,50 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d7dd2', 'lineColor': '#5c6370', 'secondaryColor': '#282c34', 'tertiaryColor': '#21252b'}}}%%
+flowchart TD
+    subgraph TRIGGER["触发 (Trigger)"]
+        A["步骤失败<br/>(Step Failed)"]
+    end
+    
+    subgraph REPLAN["重规划流程 (Replanning Flow)"]
+        B["请求 LLM 输出<br/>PlanPatch JSON"]
+        C{"解析 PlanPatch?<br/>(Parse Patch?)"}
+        D["应用 PlanPatch<br/>(apply_plan_patch)"]
+        E{"回退: 解析 Full Plan?<br/>(Fallback: Parse Full Plan?)"}
+        F["carry_over_done_status<br/>(保留 done 状态)"]
+    end
+    
+    subgraph VALIDATE["校验 (Validation)"]
+        G{"ID 唯一?<br/>(Unique IDs?)"}
+        H{"依赖存在?<br/>(Dependencies Exist?)"}
+        I{"步数上限?<br/>(Max Steps?)"}
+    end
+    
+    subgraph RESULT["结果 (Result)"]
+        J["✅ 新计划生效<br/>(New Plan Applied)"]
+        K["⚠️ 截断新增步骤<br/>(Truncate Added Steps)"]
+        L["❌ 重规划失败<br/>(Replanning Failed)"]
+    end
+
+    A --> B
+    B --> C
+    C -->|"Success (成功)"| D
+    C -->|"Fail (失败)"| E
+    D --> G
+    E -->|"Success (成功)"| F
+    E -->|"Fail (失败)"| L
+    F --> G
+    
+    G -->|"Yes (是)"| H
+    G -->|"No (否)"| L
+    H -->|"Yes (是)"| I
+    H -->|"No (否)"| L
+    I -->|"Within Limit<br/>(未超限)"| J
+    I -->|"Exceed Limit<br/>(超限)"| K
+    K --> J
+
+    style A fill:#e74c3c,stroke:#c0392b,color:#fff
+    style J fill:#2ecc71,stroke:#27ae60,color:#fff
+    style K fill:#f39c12,stroke:#d68910,color:#fff
+    style L fill:#e74c3c,stroke:#c0392b,color:#fff
+    style D fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style F fill:#9b59b6,stroke:#8e44ad,color:#fff
+

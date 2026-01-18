@@ -1,0 +1,42 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d7dd2', 'lineColor': '#5c6370', 'secondaryColor': '#282c34', 'tertiaryColor': '#21252b'}}}%%
+flowchart TD
+    subgraph INPUT["输入 (Input)"]
+        A["LLM 输出文本<br/>(LLM Output Text)"]
+    end
+    
+    subgraph PARSE["解析流程 (Parse Flow)"]
+        B{"是否以 { 开头<br/>} 结尾?<br/>(Starts with { ?<br/>Ends with } ?)"}
+        C["JSON 解析<br/>(json.loads)"]
+        D{"Pydantic 校验<br/>(ControlEnvelope.model_validate)"}
+    end
+    
+    subgraph RESULT["解析结果 (Result)"]
+        E["✅ 结构化控制信号<br/>(Structured Control)"]
+        F["⚠️ 回退字符串匹配<br/>(Fallback to String Match)"]
+    end
+    
+    subgraph ACTION["执行动作 (Action)"]
+        G["step_done → 标记完成<br/>(Mark Step Done)"]
+        H["replan → 触发重规划<br/>(Trigger Replanning)"]
+        I["STEP_DONE 字符串<br/>+ 记录告警<br/>(Log Warning)"]
+    end
+
+    A --> B
+    B -->|"Yes (是)"| C
+    B -->|"No (否)"| F
+    C -->|"Success (成功)"| D
+    C -->|"Fail (失败)"| F
+    D -->|"Valid (有效)"| E
+    D -->|"Invalid (无效)"| F
+    
+    E -->|"control=step_done"| G
+    E -->|"control=replan"| H
+    F --> I
+
+    style A fill:#4a9eff,stroke:#2d7dd2,color:#fff
+    style E fill:#2ecc71,stroke:#27ae60,color:#fff
+    style F fill:#f39c12,stroke:#d68910,color:#fff
+    style G fill:#2ecc71,stroke:#27ae60,color:#fff
+    style H fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style I fill:#f39c12,stroke:#d68910,color:#fff
+

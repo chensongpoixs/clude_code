@@ -12,7 +12,10 @@
 
 **结论**: 当前架构已具备闭环能力，但在**可追溯性 (Traceability)** 和 **协议稳定性 (Protocol Stability)** 方面存在结构性短板。这导致在复杂长程任务中容易出现“状态丢失”或“死循环”。
 
-> **Status Update (状态更新)**: `P0-1 Trace ID` 已按本报告建议落地（`hash()` ➜ `uuid4().hex`），文档与实现现已对齐。
+> **Status Update (状态更新)**:  
+> - `P0-1 Trace ID` 已落地（`hash()` ➜ `uuid4().hex`）。详见代码 `agent_loop.py`。
+> - `P0-2 Control Protocol` 已落地（字符串匹配 ➜ JSON Envelope）。详见 [23 | 控制协议结构化](./23-control-protocol.md)。
+> - `P0-3 Plan Patching` 已落地（全量重写 ➜ 增量补丁）。详见 [22 | 局部重规划](./22-plan-patching.md)。
 
 ### 核心发现 (Top Findings)
 
@@ -36,16 +39,19 @@
 
 **Recommendation**: 立即替换为 `uuid4`，并贯穿 `_ev` 事件流。
 
-### 2.2 步骤控制协议 (Control Protocol)
+### 2.2 步骤控制协议 (Control Protocol) ✅ 已完成
 
 | 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分变化 |
 | :--- | :--- | :--- | :--- |
 | **Method (方法)** | String Match (字符串匹配, `"STEP_DONE"`) | JSON Envelope (JSON 信封, `{"control": "step_done"}` / `{"control":"replan"}`) | `2/5` ➔ `4.5/5` |
 | **Robustness (鲁棒性)** | ❌ 易误触 (Hallucination/幻觉) | ✅ 结构化无歧义 | 🔺 High (高) |
 
-**Recommendation**: 定义严格的 Control Schema，优先尝试 JSON 解析。
+**Implementation (实现)**: 
+- 数据模型: `src/clude_code/orchestrator/agent_loop/control_protocol.py`
+- 解析集成: `src/clude_code/orchestrator/agent_loop/execution.py`
+- 详细文档: [23 | 控制协议结构化](./23-control-protocol.md)
 
-### 2.3 重规划策略 (Replanning)
+### 2.3 重规划策略 (Replanning) ✅ 已完成
 
 | 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分变化 |
 | :--- | :--- | :--- | :--- |
@@ -53,7 +59,11 @@
 | **Cost (成本)** | 💸 High Token Cost (高 Token 成本) | 💰 Low (Delta only / 仅增量) | 🔺 High (高) |
 | **Context (上下文)** | ❌ 易丢失历史 | ✅ 保留 Done Steps (已完成步骤) | - |
 
-**Recommendation**: 引入 `PlanPatch` 数据结构，仅生成增量变更。
+**Implementation (实现)**: 
+- 数据模型: `src/clude_code/orchestrator/planner.py` (`PlanPatch`/`PlanStepUpdate`)
+- 应用函数: `apply_plan_patch()` + `parse_plan_patch_from_text()`
+- 回归测试: `tests/test_plan_patching.py` (10 用例)
+- 详细文档: [22 | 局部重规划](./22-plan-patching.md)
 
 ---
 
