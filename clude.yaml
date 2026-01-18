@@ -32,7 +32,7 @@ limits:
 # 日志配置
 logging:
   log_to_console: true
-  level: INFO
+  level: DEBUG
   file_path: .clude/logs/clude.log
   max_bytes: 10485760
   backup_count: 5
@@ -52,7 +52,7 @@ rag:
   enabled: true
   device: cpu                           # cpu / cuda / mps
   embedding_model: BAAI/bge-small-zh-v1.5
-  model_cache_dir: null                 # null = 使用默认路径
+  model_cache_dir: "D:/LLM/llm/Embedding/"                 # null = 使用默认路径
   db_path: .clude/vector_db
   table_name: code_chunks_v2
   chunk_size: 500

@@ -154,9 +154,13 @@ def set_weather_config(cfg: Any) -> None:
             "cache_ttl_s": getattr(cfg.weather, "cache_ttl_s", 300),
         }
         _logger.info(
-            f"[Weather] 配置加载完成: enabled={cfg.weather.enabled}, "
-            f"units={cfg.weather.default_units}, lang={cfg.weather.default_lang}, "
-            f"timeout={cfg.weather.timeout_s}s, api_key={'已配置' if cfg.weather.api_key else '未配置'}"
+            f"[Weather] 配置加载完成:\n"
+            f"  - enabled: {cfg.weather.enabled}\n"
+            f"  - units: {cfg.weather.default_units}\n"
+            f"  - lang: {cfg.weather.default_lang}\n"
+            f"  - timeout: {cfg.weather.timeout_s}s\n"
+            f"  - cache_ttl: {getattr(cfg.weather, 'cache_ttl_s', 300)}s\n"
+            f"  - api_key: {'已配置 (******)' if cfg.weather.api_key else '未配置'}"
         )
     elif hasattr(cfg, "api_key"):
         # 传入的是 WeatherConfig
@@ -169,9 +173,13 @@ def set_weather_config(cfg: Any) -> None:
             "cache_ttl_s": getattr(cfg, "cache_ttl_s", 300),
         }
         _logger.info(
-            f"[Weather] 配置加载完成: enabled={cfg.enabled}, "
-            f"units={cfg.default_units}, lang={cfg.default_lang}, "
-            f"timeout={cfg.timeout_s}s, api_key={'已配置' if cfg.api_key else '未配置'}"
+            f"[Weather] 配置加载完成:\n"
+            f"  - enabled: {cfg.enabled}\n"
+            f"  - units: {cfg.default_units}\n"
+            f"  - lang: {cfg.default_lang}\n"
+            f"  - timeout: {cfg.timeout_s}s\n"
+            f"  - cache_ttl: {getattr(cfg, 'cache_ttl_s', 300)}s\n"
+            f"  - api_key: {'已配置 (******)' if cfg.api_key else '未配置'}"
         )
     else:
         _logger.warning(f"[Weather] 无法解析天气配置: {type(cfg)}, 将使用默认值")
@@ -329,8 +337,16 @@ def get_weather(
             ok=False,
             error={
                 "code": "E_CONFIG_MISSING",
-                "message": f"OpenWeatherMap API Key 未配置。请设置环境变量 {ENV_API_KEY}。\n"
-                           "获取免费 API Key: https://openweathermap.org/api",
+                "message": (
+                    "OpenWeatherMap API Key 未配置。获取方法：\n"
+                    "1. 访问 https://openweathermap.org/api 注册并获取免费 API Key。\n"
+                    "2. 配置方式（选其一）：\n"
+                    "   - 命令行设置环境变量：export OPENWEATHERMAP_API_KEY='你的KEY' (Linux/macOS) 或 set OPENWEATHERMAP_API_KEY='你的KEY' (Windows)\n"
+                    "   - 在 clude.yaml 中添加：\n"
+                    "     weather:\n"
+                    "       api_key: \"你的KEY\"\n"
+                    "   - 在交互式 TUI 中使用内置命令：/config set weather.api_key '你的KEY'"
+                ),
             },
         )
     
@@ -423,7 +439,12 @@ def get_weather(
                 ok=False,
                 error={
                     "code": "E_AUTH_FAILED",
-                    "message": "API Key 无效或已过期，请检查 OPENWEATHERMAP_API_KEY",
+                    "message": (
+                        "OpenWeatherMap API 认证失败。建议：\n"
+                        "1. 检查您的 API Key 是否填写正确（多余空格或字符）。\n"
+                        "2. 新申请的 Key 可能需要 1-2 小时才能生效，请稍后再试。\n"
+                        "3. 确认您的账号是否有权访问 'Current Weather Data' 接口（通常免费版即支持）。"
+                    ),
                 },
             )
         elif response.status_code == 404:
@@ -432,7 +453,13 @@ def get_weather(
                 ok=False,
                 error={
                     "code": "E_NOT_FOUND",
-                    "message": f"未找到城市: {city or f'({lat}, {lon})'}",
+                    "message": (
+                        f"未找到该城市的天气信息: {city or f'({lat}, {lon})'}。\n"
+                        "建议：\n"
+                        "1. 检查城市名拼写（支持中文，如'北京'，或英文，如'Beijing'）。\n"
+                        "2. 如果城市较偏，请尝试提供省份或国家，例如 '浦北,广西,CN'。\n"
+                        "3. 尝试使用经纬度坐标（lat, lon）进行查询。"
+                    ),
                 },
             )
         elif response.status_code == 429:
@@ -441,7 +468,7 @@ def get_weather(
                 ok=False,
                 error={
                     "code": "E_RATE_LIMIT",
-                    "message": "API 请求频率超限，请稍后再试",
+                    "message": "API 请求频率超限。OpenWeatherMap 免费版限制为 60次/分钟。请稍后再试或检查是否有循环调用的逻辑。",
                 },
             )
         
@@ -496,11 +523,18 @@ def get_weather(
         return result
         
     except requests.Timeout:
+        _logger.error(f"[Weather] 请求超时: {timeout}s")
         return ToolResult(
             ok=False,
             error={
                 "code": "E_TIMEOUT",
-                "message": f"请求超时（{timeout}秒），请检查网络或稍后重试",
+                "message": (
+                    f"获取天气请求超时（限制 {timeout} 秒）。\n"
+                    "可能原因：\n"
+                    "1. 您的网络连接不稳定。\n"
+                    "2. OpenWeatherMap 接口响应慢。\n"
+                    "建议：尝试增大超时时间，例如：get_weather(city='...', timeout=20)"
+                ),
             },
         )
     except requests.RequestException as e:
@@ -509,7 +543,13 @@ def get_weather(
             ok=False,
             error={
                 "code": "E_NETWORK",
-                "message": f"网络请求失败: {str(e)}",
+                "message": (
+                    f"网络请求失败: {str(e)}。\n"
+                    "建议：\n"
+                    "1. 检查您的互联网连接。\n"
+                    "2. 如果您在中国境内使用，请检查您的代理/VPN 是否开启并支持访问 api.openweathermap.org。\n"
+                    "3. 检查是否有防火墙拦截了请求。"
+                ),
             },
         )
     except Exception as e:

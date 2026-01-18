@@ -124,12 +124,21 @@ class AgentLoop:
             __name__,
             workspace_root=cfg.workspace_root,
             log_to_console=cfg.logging.log_to_console,
+            level=cfg.logging.level,
+            log_format=cfg.logging.log_format,
+            date_format=cfg.logging.date_format,
         )
         # 创建只写入文件的 logger（用于记录 LLM 请求/响应详情）
         self.file_only_logger = get_logger(
             f"{__name__}.llm_detail",
             workspace_root=cfg.workspace_root,
             log_to_console=False,  # 只写入文件，不输出到控制台
+            level=cfg.logging.level,
+            log_file=cfg.logging.file_path,
+            max_bytes=cfg.logging.max_bytes,
+            backup_count=cfg.logging.backup_count,
+            log_format=cfg.logging.log_format,
+            date_format=cfg.logging.date_format,
         )
         # 会话 ID：用于 trace/audit 关联。支持从 CLI 恢复会话时复用旧 session_id
         self.session_id = session_id or f"sess_{id(self)}"

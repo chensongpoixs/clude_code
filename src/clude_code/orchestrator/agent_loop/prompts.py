@@ -8,7 +8,8 @@
 from .tool_dispatch import render_tools_for_system_prompt
 
 
-_TOOLS_SECTION = render_tools_for_system_prompt(include_schema=False)
+# _TOOLS_SECTION = render_tools_for_system_prompt(include_schema=False)
+_TOOLS_SECTION = render_tools_for_system_prompt(include_schema=True)
 
 
 # _BASE_SYSTEM_PROMPT = """\

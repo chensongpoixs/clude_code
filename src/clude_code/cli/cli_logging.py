@@ -27,6 +27,9 @@ class CLILogger:
                 "cli.console",
                 workspace_root=self._cfg.workspace_root,
                 log_to_console=self._cfg.logging.log_to_console,
+                level=self._cfg.logging.level,
+                log_format=self._cfg.logging.log_format,
+                date_format=self._cfg.logging.date_format,
             )
 
         if self._file_logger is None:
@@ -34,6 +37,12 @@ class CLILogger:
                 "cli.flow",
                 workspace_root=self._cfg.workspace_root,
                 log_to_console=False,  # 文件日志不输出到控制台
+                level=self._cfg.logging.level,
+                log_file=self._cfg.logging.file_path,
+                max_bytes=self._cfg.logging.max_bytes,
+                backup_count=self._cfg.logging.backup_count,
+                log_format=self._cfg.logging.log_format,
+                date_format=self._cfg.logging.date_format,
             )
 
     @property

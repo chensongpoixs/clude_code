@@ -41,6 +41,32 @@ class LoggingConfig(BaseModel):
         default=True,
         description="是否将日志输出到控制台（默认 True，同时输出到控制台和文件）"
     )
+    level: str = Field(
+        default="INFO",
+        description="日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL。"
+    )
+    file_path: str = Field(
+        default=".clude/logs/app.log",
+        description="日志文件存储路径。"
+    )
+    max_bytes: int = Field(
+        default=10_485_760,  # 10MB
+        ge=1024,
+        description="单个日志文件的最大字节数，超过后自动滚动。"
+    )
+    backup_count: int = Field(
+        default=5,
+        ge=0,
+        description="保留的历史日志文件数量。"
+    )
+    log_format: str = Field(
+        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        description="日志消息格式。"
+    )
+    date_format: str = Field(
+        default="%Y-%m-%d %H:%M:%S",
+        description="日志时间格式。"
+    )
 
 class OrchestratorConfig(BaseModel):
     """编排层配置（阶段 3：规划-执行）。"""

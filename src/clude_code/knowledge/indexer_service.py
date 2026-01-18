@@ -21,6 +21,7 @@ class IndexerService:
     大文件治理说明：引入 mtime 校验与语义化分块。
     """
     def __init__(self, cfg: CludeConfig):
+        from clude_code.observability.logger import get_logger
         self.cfg = cfg
         self.workspace_root = Path(cfg.workspace_root)
         self.store = VectorStore(cfg)
@@ -28,7 +29,14 @@ class IndexerService:
         self.chunker = build_chunker(cfg)
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(
+            __name__,
+            workspace_root=cfg.workspace_root,
+            log_to_console=cfg.logging.log_to_console,
+            level=cfg.logging.level,
+            log_format=cfg.logging.log_format,
+            date_format=cfg.logging.date_format,
+        )
 
         # P2-1: 并发索引时的状态锁
         self._state_lock = threading.Lock()
