@@ -7,15 +7,15 @@
 
 ## 1. 模块全景图 (Module Panorama)
 
-| Module | Directory | Role | Completeness |
+| Module (模块) | Directory (目录) | Role (职责) | Completeness (完成度) |
 | :--- | :--- | :--- | :--- |
-| **🚀 CLI** | `src/clude_code/cli` | Entry Point, TUI, Interaction | █████████░ 95% |
-| **⚙️ Orchestrator** | `src/clude_code/orchestrator` | State Machine, Planning | █████████░ 90% |
-| **🛠️ Tooling** | `src/clude_code/tooling` | File IO, Shell, Patching | █████████░ 92% |
-| **🧠 Knowledge** | `src/clude_code/knowledge` | RAG, Vector Store, Indexing | ████████░░ 85% |
-| **📡 LLM** | `src/clude_code/llm` | Client, Tokenizer | ████████░░ 85% |
-| **🛡️ Policy** | `src/clude_code/policy` | Security, Permission | █████████░ 90% |
-| **🔌 Plugins** | `src/clude_code/plugins` | Extensions, UI Plugins | ████████░░ 88% |
+| **🚀 CLI** | `src/clude_code/cli` | Entry Point (入口点), TUI (终端界面), Interaction (交互) | █████████░ 95% |
+| **⚙️ Orchestrator** | `src/clude_code/orchestrator` | State Machine (状态机), Planning (规划) | █████████░ 90% |
+| **🛠️ Tooling** | `src/clude_code/tooling` | File IO (文件 IO), Shell (命令行), Patching (补丁) | █████████░ 92% |
+| **🧠 Knowledge** | `src/clude_code/knowledge` | RAG (检索增强), Vector Store (向量库), Indexing (索引) | ████████░░ 85% |
+| **📡 LLM** | `src/clude_code/llm` | Client (客户端), Tokenizer (分词器) | ████████░░ 85% |
+| **🛡️ Policy** | `src/clude_code/policy` | Security (安全), Permission (权限) | █████████░ 90% |
+| **🔌 Plugins** | `src/clude_code/plugins` | Extensions (扩展), UI Plugins (UI 插件) | ████████░░ 88% |
 
 ---
 
@@ -23,8 +23,8 @@
 
 我们鼓励开发者先阅读以下核心文档，理解设计哲学：
 
-*   **[Agent 决策链路审计报告](../docs/17-agent-decision-audit.md)**: 理解 Trace ID、Protocol 和 Re-planning 的设计权衡。
-*   **[业界 Code Agent 架构对比](../docs/technical-reports/industry-whitepaper.md)**: 为什么我们选择 Local-First 和 AST RAG。
+*   **[Agent 决策链路审计报告](../docs/17-agent-decision-audit.md)**: 理解 Trace ID (追踪 ID)、Protocol (协议) 和 Re-planning (重规划) 的设计权衡。
+*   **[业界 Code Agent 架构对比](../docs/technical-reports/industry-whitepaper.md)**: 为什么我们选择 Local-First (本地优先) 和 AST RAG (AST 检索增强)。
 *   **[RAG 深度调优指南](../docs/technical-reports/rag-tuning.md)**: 向量检索与混合搜索的实现细节。
 
 ---
@@ -43,9 +43,9 @@
 3.  **Generation (生成)**: 自动生成 System Prompt (系统提示词) 和 `clude tools` 文档。
 
 ### 3.3 可观测性 (Observability)
-*   **Trace ID**: 贯穿全链路的 UUID。
+*   **Trace ID (追踪 ID)**: 贯穿全链路的 UUID (通用唯一标识符)。
 *   **Audit Log (审计日志)**: `~/.clude/audit.jsonl` 记录每一次工具调用。
-*   **Live UI (实时界面)**: 通过 Event Stream (事件流) 实时驱动 TUI 更新。
+*   **Live UI (实时界面)**: 通过 Event Stream (事件流) 实时驱动 TUI (终端用户界面) 更新。
 
 ---
 
@@ -62,8 +62,8 @@ pytest src/clude_code/tests/
 ```
 
 ### 代码规范
-*   遵循 PEP 8。
-*   所有新功能必须有对应的 `ToolSpec` 和文档更新。
-*   关键路径（Orchestrator）必须有详细的 Logging。
+*   遵循 PEP 8 (Python 编码规范)。
+*   所有新功能必须有对应的 `ToolSpec` (工具契约) 和文档更新。
+*   关键路径（Orchestrator/编排器）必须有详细的 Logging (日志记录)。
 
 ---

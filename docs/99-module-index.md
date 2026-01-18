@@ -33,7 +33,13 @@
 - [**14 | 插件生态 (Plugins)**](./14-plugin-ecosystem.md) - 扩展机制。
 - [**15 | 安装与部署 (Deployment)**](./15-deployment.md) - 分发与配置。
 
-## 4. 深度技术报告 (Deep Dives)
+## 4. 社区与支持 (Support & Community)
+
+- [**18 | 故障排除与 FAQ**](./18-troubleshooting-faq.md) - 常见工程问题解决。
+- [**19 | 贡献指南 (Contribution)**](./19-contribution-guide.md) - 开发者环境设置与规范。
+- [**文档深度审计报告**](./DOCUMENTATION_AUDIT_REPORT.md) - 思考流程、打分与业界对标。
+
+## 5. 深度技术报告 (Deep Dives)
 
 - [**行业技术白皮书 (Whitepaper)**](./technical-reports/industry-whitepaper.md) - 与 Claude Code/Aider 的深度对比。
 - [**RAG 深度调优 (RAG Tuning)**](./technical-reports/rag-tuning.md) - 索引与检索优化细节。
