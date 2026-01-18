@@ -58,8 +58,13 @@ def run_opencode_tui(
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             kwargs.setdefault("wrap", True)
+            # P1-1: 禁用 markup 解析，确保 Text 对象的 style 属性被正确渲染
+            # 当 markup=True（默认）时，RichLog 会尝试将 Text 对象转为字符串再解析，导致样式丢失
+            kwargs.setdefault("markup", False)
+            # 启用 highlight 以支持自动语法高亮（仅对字符串生效，不影响 Text 对象）
+            kwargs.setdefault("highlight", True)
             super().__init__(*args, **kwargs)
-            # 默认跟随尾部（更像 OpenCode）；用户可按 f 切换“浏览历史/跟随输出”
+            # 默认跟随尾部（更像 OpenCode）；用户可按 f 切换"浏览历史/跟随输出"
             self.auto_scroll = True
 
     class OpencodeTUI(App):
@@ -1161,9 +1166,12 @@ def run_opencode_tui(
                     self._llm_round = 0
                     self._turn_tool_used = False
                     self._turn_final_printed = False
-                    self._push_chat_log(f"开始新的一轮对话 trace_id={trace_id}", style="bold cyan")
+                    short = self._short_trace(trace_id)
+                    self._push_chat_log(f"━━━ 新对话轮次 ({short}) ━━━", style="bold blue")
                 elif et == "user_message":
-                    self._push_chat_log(f"用户输入: {data.get('text')}", style="white")
+                    txt = str(data.get("text") or "").strip()
+                    if txt:
+                        self._push_chat_log(f"you: {txt}", style="bold white")
                     self._last_user_text = str(data.get("text") or "").strip() or self._last_user_text
                 elif et == "intent_classified":
                     cat = data.get("category")
@@ -1180,9 +1188,27 @@ def run_opencode_tui(
                     # 兜底：把 "IntentCategory.X" 变成 "X"
                     if isinstance(cat, str) and cat.startswith("IntentCategory."):
                         cat = cat.split(".", 1)[-1]
-                    self._push_chat_log(f"意图识别结果: {cat} (置信度: {conf})", style="dim")
+                    self._push_chat_log(f"🎯 意图: {cat} (置信度: {conf})", style="dim blue")
                 elif et == "planning_skipped":
                     self._push_chat_log("检测到能力询问或通用对话，跳过显式规划阶段。", style="dim")
+                elif et == "planning_llm_request":
+                    attempt = data.get("attempt", 1)
+                    self._push_chat_log(f"📋 进入规划阶段（attempt={attempt}）...", style="bold yellow")
+                elif et == "plan_generated":
+                    title = str(data.get("title") or "").strip()
+                    steps = data.get("steps", 0)
+                    preview = data.get("steps_preview") or []
+                    self._push_chat_log(f"✓ 计划已生成: {title}（{steps} 步）", style="bold green")
+                    # 显示步骤预览（最多 5 个）
+                    for i, p in enumerate(preview[:5], 1):
+                        self._push_chat_log(f"  {i}. {p}", style="dim green")
+                    if len(preview) > 5:
+                        self._push_chat_log(f"  ... 还有 {len(preview) - 5} 步", style="dim")
+                elif et == "plan_step_start":
+                    idx = data.get("idx", 0)
+                    total = data.get("total", 0)
+                    step_id = str(data.get("step_id") or "")
+                    self._push_chat_log(f"▶ 步骤 {idx}/{total}: {step_id}", style="bold yellow")
                 elif et == "user_content_built":
                     prev = str(data.get("preview") or "")
                     trunc = bool(data.get("truncated"))
@@ -1190,16 +1216,19 @@ def run_opencode_tui(
                         prev = prev + "…"
                     self._push_chat_log(f"user input LLM  user_content={prev}", style="dim")
                 elif et == "llm_request_params":
-                    # 以 params 事件作为“本轮请求”计数入口（包含 stage/messages）
+                    # 以 params 事件作为"本轮请求"计数入口（包含 stage/messages）
                     self._llm_round += 1
                     mc = data.get("messages_count")
-                    self._push_chat_log(f"→ 第 {self._llm_round} 轮：请求 LLM（消息数={mc}）", style="bold")
+                    stage = str(data.get("stage") or "").strip()
+                    # 使用更明显的颜色：bold cyan 比纯 bold 在深色终端更易辨认
+                    self._push_chat_log(f"→ 第 {self._llm_round} 轮：请求 LLM（消息数={mc}，阶段={stage}）", style="bold cyan")
                     self._push_chat_log(
-                        f"LLM 请求参数: model={data.get('model')} api_mode={data.get('api_mode')} messages={data.get('messages_count')}",
-                        style="dim",
+                        f"  model={data.get('model')} api_mode={data.get('api_mode')}",
+                        style="dim cyan",
                     )
                 elif et == "llm_response_data":
-                    self._push_chat_log(f"LLM 返回摘要: text_length={data.get('text_length')}", style="dim")
+                    text_len = data.get("text_length", 0)
+                    self._push_chat_log(f"← LLM 返回（长度={text_len}）", style="dim magenta")
                 elif et == "tool_call_parsed":
                     self._turn_tool_used = True
                     tool = str(data.get("tool") or "")
@@ -1240,11 +1269,16 @@ def run_opencode_tui(
                     truncated = bool(data.get("truncated"))
                     if txt:
                         short = self._short_trace(trace_id)
-                        self._push_chat_log(f"assistant ({short})", style="bold magenta")
+                        self._push_chat_log(f"🤖 assistant ({short})", style="bold magenta")
                         if truncated:
                             txt = txt + "…"
-                        for ln in txt.splitlines():
-                            self._push_chat_log(ln, style="white")
+                        # 限制显示行数，避免 JSON 输出刷屏
+                        lines = txt.splitlines()
+                        for ln in lines[:30]:
+                            self._push_chat_log(f"  {ln}", style="bright_white")
+                        if len(lines) > 30:
+                            omit = len(lines) - 30
+                            self._push_chat_log(f"  ... 省略 {omit} 行 (见事件窗格)", style="dim")
                         self._turn_final_printed = True
                 elif et in {"assistant_text", "assistant"}:
                     # 如果本轮已经通过 final_text 打印过最终回复，这里忽略，避免重复
@@ -1256,9 +1290,14 @@ def run_opencode_tui(
                         if not self._turn_tool_used:
                             self._push_chat_log("✓ LLM 返回最终回复（无工具调用）", style="bold green")
                         short = self._short_trace(trace_id)
-                        self._push_chat_log(f"assistant ({short})", style="bold magenta")
-                        for ln in txt.splitlines():
-                            self._push_chat_log(ln, style="white")
+                        self._push_chat_log(f"🤖 assistant ({short})", style="bold magenta")
+                        # 限制显示行数，避免 JSON 输出刷屏
+                        lines = txt.splitlines()
+                        for ln in lines[:30]:
+                            self._push_chat_log(f"  {ln}", style="bright_white")
+                        if len(lines) > 30:
+                            omit = len(lines) - 30
+                            self._push_chat_log(f"  ... 省略 {omit} 行 (见事件窗格)", style="dim")
                         self._turn_final_printed = True
                 elif et == "confirm_request":
                     # 交互确认提示（由后台线程发起）
