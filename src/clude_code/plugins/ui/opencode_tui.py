@@ -119,6 +119,10 @@ def run_opencode_tui(
             self._llm_round: int = 0
             self._last_trace_id: str | None = None
             self._last_user_text: str | None = None
+            # 本轮是否使用过工具：用于对齐 clude chat 的“无工具调用”收尾提示
+            self._turn_tool_used: bool = False
+            # 本轮最终回复是否已在“对话/输出”打印（避免 final_text + assistant_text 双触发导致重复输出）
+            self._turn_final_printed: bool = False
 
             # 交互确认（confirm）状态
             self._pending_confirm_id: int | None = None
@@ -1144,6 +1148,8 @@ def run_opencode_tui(
             if self._conversation_mode == "log":
                 if et == "turn_start":
                     self._llm_round = 0
+                    self._turn_tool_used = False
+                    self._turn_final_printed = False
                     self._push_chat_log(f"开始新的一轮对话 trace_id={trace_id}", style="bold cyan")
                 elif et == "user_message":
                     self._push_chat_log(f"用户输入: {data.get('text')}", style="white")
@@ -1154,6 +1160,15 @@ def run_opencode_tui(
                     # category 可能是 {value: "..."} 或字符串
                     if isinstance(cat, dict) and "value" in cat:
                         cat = cat.get("value")
+                    # category 可能是 Enum（例如 IntentCategory.GENERAL_CHAT）
+                    if hasattr(cat, "value"):
+                        try:
+                            cat = getattr(cat, "value")
+                        except Exception:
+                            pass
+                    # 兜底：把 "IntentCategory.X" 变成 "X"
+                    if isinstance(cat, str) and cat.startswith("IntentCategory."):
+                        cat = cat.split(".", 1)[-1]
                     self._push_chat_log(f"意图识别结果: {cat} (置信度: {conf})", style="dim")
                 elif et == "planning_skipped":
                     self._push_chat_log("检测到能力询问或通用对话，跳过显式规划阶段。", style="dim")
@@ -1175,6 +1190,7 @@ def run_opencode_tui(
                 elif et == "llm_response_data":
                     self._push_chat_log(f"LLM 返回摘要: text_length={data.get('text_length')}", style="dim")
                 elif et == "tool_call_parsed":
+                    self._turn_tool_used = True
                     tool = str(data.get("tool") or "")
                     args = data.get("args") or {}
                     self._push_chat_log(
@@ -1194,6 +1210,36 @@ def run_opencode_tui(
                     style = "green" if ok else "red"
                     summary = self._format_tool_result_summary(tool, ok, data)
                     self._push_chat_log(f"{icon} 工具执行{'成功' if ok else '失败'}: {tool} [结果] {summary}", style=style)
+                elif et == "final_text":
+                    if self._turn_final_printed:
+                        return
+                    # 对齐 react.py 的 logger 行：无工具调用时给出收尾提示
+                    if not self._turn_tool_used:
+                        self._push_chat_log("✓ LLM 返回最终回复（无工具调用）", style="bold green")
+                    txt = str(data.get("text") or "").rstrip()
+                    truncated = bool(data.get("truncated"))
+                    if txt:
+                        short = self._short_trace(trace_id)
+                        self._push_chat_log(f"assistant ({short})", style="bold magenta")
+                        if truncated:
+                            txt = txt + "…"
+                        for ln in txt.splitlines():
+                            self._push_chat_log(ln, style="white")
+                        self._turn_final_printed = True
+                elif et in {"assistant_text", "assistant"}:
+                    # 如果本轮已经通过 final_text 打印过最终回复，这里忽略，避免重复
+                    if self._turn_final_printed:
+                        return
+                    # 兜底：有些链路只发 assistant_text 而不发 final_text
+                    txt = str(data.get("text") or "").rstrip()
+                    if txt:
+                        if not self._turn_tool_used:
+                            self._push_chat_log("✓ LLM 返回最终回复（无工具调用）", style="bold green")
+                        short = self._short_trace(trace_id)
+                        self._push_chat_log(f"assistant ({short})", style="bold magenta")
+                        for ln in txt.splitlines():
+                            self._push_chat_log(ln, style="white")
+                        self._turn_final_printed = True
                 elif et == "confirm_request":
                     # 交互确认提示（由后台线程发起）
                     cid = data.get("id")
@@ -1316,15 +1362,16 @@ def run_opencode_tui(
             if et in {"intent_classified"}:
                 cat = data.get("category")
                 conf = data.get("confidence")
-                self._push_structured_block(
-                    title="意图识别",
-                    level="info",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"category={cat} confidence={conf}",
-                    decision="用于决定是否进入 planning 阶段，以及工具/验证策略的优先级。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="意图识别",
+                        level="info",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"category={cat} confidence={conf}",
+                        decision="用于决定是否进入 planning 阶段，以及工具/验证策略的优先级。",
+                    )
                 return
 
             if et in {"planning_llm_request"}:
@@ -1336,15 +1383,16 @@ def run_opencode_tui(
                 if self._active_llm_id is None:
                     self._llm_start(kind="planning", step_id=None, purpose="生成计划")
                     self._refresh_ops()
-                self._push_structured_block(
-                    title="进入规划阶段（生成 Plan）",
-                    level="progress",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"attempt={data.get('attempt')}",
-                    decision="将任务拆成可执行步骤，降低一次性长上下文失败概率，并提高可追溯性。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="进入规划阶段（生成 Plan）",
+                        level="progress",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"attempt={data.get('attempt')}",
+                        decision="将任务拆成可执行步骤，降低一次性长上下文失败概率，并提高可追溯性。",
+                    )
                 return
 
             if et in {"plan_generated"}:
@@ -1355,30 +1403,32 @@ def run_opencode_tui(
                 if isinstance(preview, list):
                     for p in preview[:8]:
                         evs.append(str(p))
-                self._push_structured_block(
-                    title="计划已生成（Plan）",
-                    level="success",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"title={title} steps={steps}",
-                    decision="接下来会按步骤执行：每步会触发 LLM→工具→回喂→（可选）验证的闭环。",
-                    evidence=evs,
-                    hint="更多结构化细节见“事件”窗格（plan_generated JSON）。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="计划已生成（Plan）",
+                        level="success",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"title={title} steps={steps}",
+                        decision="接下来会按步骤执行：每步会触发 LLM→工具→回喂→（可选）验证的闭环。",
+                        evidence=evs,
+                        hint="更多结构化细节见“事件”窗格（plan_generated JSON）。",
+                    )
                 return
 
             if et in {"plan_parse_failed"}:
-                self._push_structured_block(
-                    title="计划解析失败",
-                    level="error",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"attempt={data.get('attempt')} error={data.get('error')}",
-                    decision="将要求模型仅输出严格 JSON，触发重试（或降级到 ReAct）。",
-                    hint="建议缩小任务、提高结构化约束，或指定入口文件。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="计划解析失败",
+                        level="error",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"attempt={data.get('attempt')} error={data.get('error')}",
+                        decision="将要求模型仅输出严格 JSON，触发重试（或降级到 ReAct）。",
+                        hint="建议缩小任务、提高结构化约束，或指定入口文件。",
+                    )
                 return
 
             if et in {"assistant_text", "assistant"}:
@@ -1461,20 +1511,21 @@ def run_opencode_tui(
                 self._active_tasks = 1
                 self._refresh_header_panel()
                 self._refresh_ops()
-                self._push_structured_block(
-                    title="LLM 请求参数",
-                    level="info",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"model={data.get('model')} api={data.get('api_mode')} base_url={data.get('base_url')}",
-                    decision=f"temperature={data.get('temperature')} max_tokens={data.get('max_tokens')}",
-                    evidence=[
-                        f"prompt_tokens_est={data.get('prompt_tokens_est')}",
-                        f"messages_count={data.get('messages_count')}",
-                    ],
-                    hint="完整参数见“事件”窗格（llm_request_params JSON）。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="LLM 请求参数",
+                        level="info",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"model={data.get('model')} api={data.get('api_mode')} base_url={data.get('base_url')}",
+                        decision=f"temperature={data.get('temperature')} max_tokens={data.get('max_tokens')}",
+                        evidence=[
+                            f"prompt_tokens_est={data.get('prompt_tokens_est')}",
+                            f"messages_count={data.get('messages_count')}",
+                        ],
+                        hint="完整参数见“事件”窗格（llm_request_params JSON）。",
+                    )
                 return
 
             if et == "llm_usage":
@@ -1513,16 +1564,17 @@ def run_opencode_tui(
                 self._refresh_ops()
                 args = data.get("args", {}) or {}
                 evs = self._summarize_tool_args(tool, args if isinstance(args, dict) else {})
-                self._push_structured_block(
-                    title=f"工具调用: {tool}",
-                    level="progress",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary="模型已解析出工具调用，将进行策略校验并执行工具。",
-                    decision="对话区仅展示关键参数摘要；详情见“事件/操作面板”。",
-                    evidence=evs or [f"args={args_str}"],
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title=f"工具调用: {tool}",
+                        level="progress",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary="模型已解析出工具调用，将进行策略校验并执行工具。",
+                        decision="对话区仅展示关键参数摘要；详情见“事件/操作面板”。",
+                        evidence=evs or [f"args={args_str}"],
+                    )
                 return
 
             if et == "tool_result":
@@ -1551,29 +1603,31 @@ def run_opencode_tui(
                 code = ""
                 if isinstance(err_obj, dict):
                     code = str(err_obj.get("code") or "")
-                self._push_structured_block(
-                    title=f"工具结果: {tool}",
-                    level=level,
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=f"ok={ok}" + (f" code={code}" if code else "") + (f" err={err}" if err and not ok else ""),
-                    decision="工具结果已回喂给模型（作为后续推理依据）。",
-                    hint="更完整的 payload/原始错误见“事件/操作面板”。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title=f"工具结果: {tool}",
+                        level=level,
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=f"ok={ok}" + (f" code={code}" if code else "") + (f" err={err}" if err and not ok else ""),
+                        decision="工具结果已回喂给模型（作为后续推理依据）。",
+                        hint="更完整的 payload/原始错误见“事件/操作面板”。",
+                    )
                 return
 
             if et in {"policy_deny_tool", "policy_deny_cmd", "denied_by_user"}:
-                self._push_structured_block(
-                    title="策略/确认拦截",
-                    level="error",
-                    step=ev.get("step"),
-                    ev=et,
-                    trace_id=trace_id,
-                    summary=str(data),
-                    decision="为避免危险操作，本次调用被策略或用户确认拒绝。",
-                    hint="如需继续：调整 allowed_tools/disallowed_tools 或关闭 confirm_write/confirm_exec（不推荐在不可信项目中关闭）。",
-                )
+                if self._conversation_mode != "log":
+                    self._push_structured_block(
+                        title="策略/确认拦截",
+                        level="error",
+                        step=ev.get("step"),
+                        ev=et,
+                        trace_id=trace_id,
+                        summary=str(data),
+                        decision="为避免危险操作，本次调用被策略或用户确认拒绝。",
+                        hint="如需继续：调整 allowed_tools/disallowed_tools 或关闭 confirm_write/confirm_exec（不推荐在不可信项目中关闭）。",
+                    )
                 return
 
         def _drain_events(self) -> None:
@@ -1690,7 +1744,15 @@ def run_opencode_tui(
 
                 def _on_event(e: dict[str, Any]) -> None:
                     try:
-                        q.put_nowait({"event": e.get("event"), "data": e.get("data", {}) or {}, "step": e.get("step")})
+                        # 保留 trace_id：对齐 clude chat 默认输出 & 可观测性（避免出现 trace_id=None）
+                        q.put_nowait(
+                            {
+                                "event": e.get("event"),
+                                "data": e.get("data", {}) or {},
+                                "step": e.get("step"),
+                                "trace_id": e.get("trace_id"),
+                            }
+                        )
                     except Exception:
                         pass
 
