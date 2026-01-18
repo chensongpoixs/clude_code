@@ -1274,11 +1274,12 @@ def run_opencode_tui(
                             txt = txt + "…"
                         # 限制显示行数，避免 JSON 输出刷屏
                         lines = txt.splitlines()
-                        for ln in lines[:30]:
+                        # for ln in lines[:30]:
+                        for ln in lines:
                             self._push_chat_log(f"  {ln}", style="bright_white")
-                        if len(lines) > 30:
-                            omit = len(lines) - 30
-                            self._push_chat_log(f"  ... 省略 {omit} 行 (见事件窗格)", style="dim")
+                        # if len(lines) > 30:
+                        #     omit = len(lines) - 30
+                        #     self._push_chat_log(f"  ... 省略 {omit} 行 (见事件窗格)", style="dim")
                         self._turn_final_printed = True
                 elif et in {"assistant_text", "assistant"}:
                     # 如果本轮已经通过 final_text 打印过最终回复，这里忽略，避免重复
