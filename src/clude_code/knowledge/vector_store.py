@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, List, Optional
@@ -12,6 +13,9 @@ except ImportError:
     pa = None  # type: ignore
 
 from clude_code.config import CludeConfig
+
+# P1-1: 模块级 logger，用于调试 RAG 向量存储问题
+_logger = logging.getLogger(__name__)
 
 
 class VectorStore:
@@ -78,7 +82,9 @@ class VectorStore:
             dist = r.get("_distance")
             try:
                 d = float(dist) if dist is not None else None
-            except Exception:
+            except Exception as e:
+                # P1-1: distance 类型转换失败，DEBUG 级别（不影响结果召回）
+                _logger.debug(f"_distance 转换失败: {e} [value={dist}]")
                 d = None
             if d is not None:
                 r["score"] = 1.0 / (1.0 + max(0.0, d))

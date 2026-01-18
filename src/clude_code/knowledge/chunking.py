@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from clude_code.config import CludeConfig
+
+# P1-1: 模块级 logger，用于调试 RAG 索引问题（默认 DEBUG 级别）
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -114,11 +118,15 @@ class TreeSitterChunker:
     def _get_parser(self, language: str) -> Any | None:
         try:
             from tree_sitter_languages import get_parser  # type: ignore[import-not-found]
-        except Exception:
+        except Exception as e:
+            # P1-1: tree-sitter 未安装是可预期的，DEBUG 级别日志
+            _logger.debug(f"tree_sitter_languages 未安装: {e}")
             return None
         try:
             return get_parser(language)
-        except Exception:
+        except Exception as e:
+            # P1-1: 语言不支持是可预期的，DEBUG 级别日志
+            _logger.debug(f"tree-sitter 不支持语言 {language}: {e}")
             return None
 
     def chunk(self, *, text: str, path: str) -> list[CodeChunk]:
@@ -133,7 +141,9 @@ class TreeSitterChunker:
         src_bytes = (text or "").encode("utf-8", errors="replace")
         try:
             tree = parser.parse(src_bytes)
-        except Exception:
+        except Exception as e:
+            # P1-1: 解析失败可能是文件编码/语法问题，WARNING 级别日志
+            _logger.warning(f"tree-sitter 解析失败 [path={path}]: {e}")
             return []
 
         lines = (text or "").splitlines()
@@ -167,14 +177,17 @@ class TreeSitterChunker:
         def _node_text(node: Any) -> str:
             try:
                 return src_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-            except Exception:
+            except Exception as e:
+                # P1-1: 节点文本提取失败，DEBUG 级别（常见于边界节点）
+                _logger.debug(f"_node_text 失败: {e}")
                 return ""
 
         def _node_symbol(node: Any) -> str | None:
             # tree-sitter 通常在 field "name" 上挂 identifier
             try:
                 name_node = node.child_by_field_name("name")
-            except Exception:
+            except Exception as e:
+                _logger.debug(f"child_by_field_name('name') 失败: {e}")
                 name_node = None
             if name_node is not None:
                 s = _node_text(name_node).strip()
@@ -186,8 +199,9 @@ class TreeSitterChunker:
                         s = _node_text(ch).strip()
                         if s:
                             return s
-            except Exception:
-                pass
+            except Exception as e:
+                # P1-1: fallback 符号提取失败，DEBUG 级别
+                _logger.debug(f"_node_symbol fallback 失败: {e}")
             return None
 
         def _leading_context_start(start_line: int) -> int:
@@ -212,7 +226,9 @@ class TreeSitterChunker:
             node, scope = stack.pop()
             try:
                 ntype = str(getattr(node, "type", ""))
-            except Exception:
+            except Exception as e:
+                # P1-1: 节点类型获取失败，DEBUG 级别
+                _logger.debug(f"获取 node.type 失败: {e}")
                 ntype = ""
 
             sym = None
@@ -256,10 +272,12 @@ class TreeSitterChunker:
                             )
                         )
 
-            # 子节点压栈：保持“从上到下”的顺序，需要逆序压栈
+            # 子节点压栈：保持"从上到下"的顺序，需要逆序压栈
             try:
                 children = list(getattr(node, "named_children", []) or [])
-            except Exception:
+            except Exception as e:
+                # P1-1: 子节点获取失败，DEBUG 级别
+                _logger.debug(f"获取 named_children 失败: {e}")
                 children = []
             # 如果当前是一个定义节点，把 symbol 加到 scope（仅当 symbol 存在）
             next_scope = list(scope)

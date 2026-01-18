@@ -25,9 +25,13 @@ from __future__ import annotations
 """
 
 import json
+import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
+
+# P1-1: 模块级 logger，用于调试时追踪解析失败（默认 DEBUG 级别，不影响正常运行）
+_logger = logging.getLogger(__name__)
 
 
 ControlKind = Literal["step_done", "replan"]
@@ -95,17 +99,22 @@ def try_parse_control_envelope(text: str) -> ControlEnvelope | None:
     # 3. 尝试 JSON 解析
     try:
         obj = json.loads(s)
-    except Exception:
+    except Exception as e:
+        # P1-1: 快速失败设计，DEBUG 级别日志便于调试（不影响正常运行）
+        _logger.debug(f"ControlEnvelope JSON 解析失败: {e} [input={s[:50]}...]")
         return None
 
     # 4. 必须是 dict 类型
     if not isinstance(obj, dict):
+        _logger.debug(f"ControlEnvelope 非 dict 类型: {type(obj).__name__}")
         return None
 
     # 5. 尝试 Pydantic 校验
     try:
         return ControlEnvelope.model_validate(obj)
-    except ValidationError:
+    except ValidationError as e:
+        # P1-1: 快速失败设计，DEBUG 级别日志便于调试（不影响正常运行）
+        _logger.debug(f"ControlEnvelope Pydantic 校验失败: {e}")
         return None
 
 

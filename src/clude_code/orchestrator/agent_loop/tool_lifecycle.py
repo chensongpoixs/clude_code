@@ -104,8 +104,9 @@ def run_tool_lifecycle(
         if hasattr(loop, "usage"):
             loop.usage.record_tool(name=name, ok=bool(result.ok))
         _ev("tool_usage", {"tool": name, "ok": bool(result.ok), "totals": (loop.usage.summary() if hasattr(loop, "usage") else None)})
-    except Exception:
-        pass
+    except Exception as ex:
+        # P1-1: 用量统计失败不影响主流程，但写入 file-only 日志便于排查
+        loop.file_only_logger.warning(f"工具用量统计失败: {ex}", exc_info=True)
 
     # 4. 记录详细结果到文件
     loop.file_only_logger.info(

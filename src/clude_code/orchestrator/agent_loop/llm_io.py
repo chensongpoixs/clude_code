@@ -101,7 +101,9 @@ def llm_chat(
     prompt_tokens_est = 0
     try:
         prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
-    except Exception:
+    except Exception as ex:
+        # P1-1: 异常写入 file-only 日志，便于排查
+        loop.file_only_logger.warning(f"估算 prompt tokens 失败: {ex}", exc_info=True)
         prompt_tokens_est = 0
 
     # 1) 记录/打印请求参数（model 等）与请求数据摘要
@@ -126,9 +128,9 @@ def llm_chat(
         if _ev:
             _ev("llm_request_params", req_obj)
         loop.logger.info(f"[dim]LLM 请求参数: model={req_obj['model']} api_mode={req_obj['api_mode']} messages={req_obj['messages_count']}[/dim]")
-    except Exception:
-        # 打印失败不影响主流程
-        pass
+    except Exception as ex:
+        # P1-1: 打印失败不影响主流程，但写入 file-only 日志便于排查
+        loop.file_only_logger.warning(f"LLM 请求参数记录失败: {ex}", exc_info=True)
 
     # 2) 发起请求
     t0 = time.time()
@@ -172,8 +174,9 @@ def llm_chat(
                     "totals": (loop.usage.summary() if hasattr(loop, "usage") else None),
                 },
             )
-    except Exception:
-        pass
+    except Exception as ex:
+        # P1-1: 用量统计失败不影响主流程，但写入 file-only 日志便于排查
+        loop.file_only_logger.warning(f"LLM 用量统计失败: {ex}", exc_info=True)
 
     return assistant_text
 

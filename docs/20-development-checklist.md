@@ -31,12 +31,19 @@
 
 ---
 
-## 📋 P1: 健壮性提升 (Robustness Enhancement) - 待开始
+## 📋 P1: 健壮性提升 (Robustness Enhancement) - 进行中
 
-### P1-1 异常处理规范化
-- [ ] 全局扫描 `except: pass` 实例
-- [ ] 替换为 `file_only_logger.warning(..., exc_info=True)`
-- [ ] 添加异常分类（可恢复/不可恢复）
+### P1-1 异常处理规范化 ✅
+- [x] 全局扫描 `except: pass` 实例
+- [x] 替换为 `file_only_logger.warning(..., exc_info=True)` 或 `_logger.debug(...)`
+- [x] 添加异常分类（可恢复/不可恢复）
+
+**已修复文件**:
+- `control_protocol.py`: DEBUG 级别日志（快速失败设计）
+- `execution.py`: WARNING 级别日志（渲染失败）
+- `chunking.py`: DEBUG/WARNING 级别日志（tree-sitter 解析）
+- `vector_store.py`: DEBUG 级别日志（距离转换）
+- `opencode_tui.py`: DEBUG/WARNING 级别日志（业务逻辑异常）
 
 **预期收益**: 提升问题可观测性，避免静默失败。
 
@@ -95,10 +102,10 @@
 
 ### 本周重点 (This Week)
 1. **✅ P0 全部完成**: P0-1/P0-2/P0-3 均已闭环
-2. **启动 P1-1**: 异常处理规范化（扫描 + 修复）——先从高风险 `except: pass` 开始
+2. **✅ P1-1 完成**: 异常处理规范化（扫描 + 修复）——已修复 5 个关键模块
 
 ### 本月目标 (This Month)
-1. **完成 P1-1**: 异常处理规范化（扫描 + 修复）
+1. **✅ P1-1 完成**: 异常处理规范化（扫描 + 修复）
 2. **启动 P1-2**: Tool Registry 去重审计
 
 ### 下季度目标 (Next Quarter)
@@ -111,7 +118,7 @@
 
 | 里程碑 | 完成度 | 预计完成时间 |
 | :--- | :--- | :--- |
-| **M2: Robustness** | ✅ 100% (3/3 P0 任务完成) | Q1 2026 |
+| **M2: Robustness** | ✅ 100%+ (P0 全完成 + P1-1 完成) | Q1 2026 ✓ |
 | **M3: Intelligence** | 🔄 60% (RAG Chunking 完成，Rerank 调优中) | Q2 2026 |
 | **M4: Product（产品化）** | ⏳ 0% | Q3 2026 |
 

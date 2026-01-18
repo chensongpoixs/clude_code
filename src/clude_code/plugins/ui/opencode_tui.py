@@ -10,12 +10,16 @@ Textual-based TUI（对标 OpenCode）：
 
 from __future__ import annotations
 
+import logging
 from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Callable
 import json
 import time
 import threading
+
+# P1-1: 模块级 logger，用于调试 TUI 问题（默认 DEBUG 级别，不影响正常 UI）
+_logger = logging.getLogger(__name__)
 from rich.text import Text
 from rich.table import Table
 from rich.syntax import Syntax
@@ -382,8 +386,9 @@ def run_opencode_tui(
                     rec["model"] = data.get("model")
                 if isinstance(data.get("prompt_tokens_est"), int):
                     rec["prompt_tokens"] = data.get("prompt_tokens_est")
-            except Exception:
-                pass
+            except Exception as e:
+                # P1-1: LLM 参数附加失败不阻塞 UI，但记录 DEBUG 日志
+                _logger.debug(f"_llm_attach_params 失败: {e}")
 
         def _llm_finish(self, data: dict[str, Any]) -> None:
             if self._active_llm_id is None:
@@ -505,8 +510,9 @@ def run_opencode_tui(
                     name = getattr(c, "name", None)
                     if name:
                         out.append("/" + str(name).lstrip("/"))
-            except Exception:
-                pass
+            except Exception as e:
+                # P1-1: 自定义命令名提取失败不阻塞，记录 DEBUG 日志
+                _logger.debug(f"_load_command_names 失败: {e}")
             # 去重 + 排序
             return sorted(set([x for x in out if x.startswith("/")]))
 
@@ -708,7 +714,9 @@ def run_opencode_tui(
 
                 self._custom_commands = load_custom_commands(getattr(cfg, "workspace_root", "."))
                 expanded = expand_custom_command(commands=self._custom_commands, user_text=raw)
-            except Exception:
+            except Exception as e:
+                # P1-1: 自定义命令加载/解析失败，WARNING 级别（影响用户体验）
+                _logger.warning(f"自定义命令处理失败: {e}")
                 expanded = None
 
             if expanded is not None:
@@ -787,7 +795,9 @@ def run_opencode_tui(
         def _format_args_one_line(self, args: Any, *, limit: int = 220) -> str:
             try:
                 s = json.dumps(args, ensure_ascii=False, default=str)
-            except Exception:
+            except Exception as e:
+                # P1-1: JSON 序列化失败，fallback 到 str()，DEBUG 级别
+                _logger.debug(f"_format_args_one_line JSON 失败: {e}")
                 s = str(args)
             s = s.replace("\n", " ").strip()
             if len(s) > limit:
@@ -926,9 +936,9 @@ def run_opencode_tui(
                     conversation.write(Text("│ 原因：文件不存在/为空/读取失败", style="cyan"))
                     conversation.write(Text("└─", style="cyan"))
                 self._project_memory_shown = True
-            except Exception:
-                # 失败不阻塞 UI
-                pass
+            except Exception as e:
+                # P1-1: 项目记忆显示失败不阻塞 UI，但记录 WARNING
+                _logger.warning(f"项目记忆显示失败: {e}")
 
             self._refresh_header_panel()
             self._refresh_ops()

@@ -220,7 +220,9 @@ def handle_replanning(
     try:
         from clude_code.orchestrator.planner import render_plan_markdown
         cur_plan_md = render_plan_markdown(plan)
-    except Exception:
+    except Exception as e:
+        # P1-1: 渲染失败不阻塞主流程，但记录日志便于排查
+        loop.file_only_logger.warning(f"render_plan_markdown 失败: {e}", exc_info=True)
         cur_plan_md = "(render_plan_markdown 失败，略)"
 
     replan_prompt = (
