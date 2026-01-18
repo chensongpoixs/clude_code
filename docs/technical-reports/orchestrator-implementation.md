@@ -57,7 +57,7 @@
   - `agent_loop.py` 在 `enable_planning=True` 时：
     - 先生成 `Plan`
     - 逐 step 执行（每步有最大工具调用次数）
-    - 使用 `【STEP_DONE】` / `【REPLAN】` 作为严格控制信号
+    - 使用控制 JSON（JSON Envelope/JSON 信封）作为严格控制信号：`{"control":"step_done"}` / `{"control":"replan"}`
 
 - **重规划机制（有限次）**
   - 步骤失败时触发重规划（`max_replans`）

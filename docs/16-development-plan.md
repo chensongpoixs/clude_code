@@ -36,9 +36,9 @@
 *   **Problem（问题）**: `STEP_DONE` 字符串匹配易误触，协议脆弱。
 *   **Goal（目标）**: 升级为 Strict JSON Envelope（严格 JSON 信封协议）。
 *   **Progress（进度）**:
-    *   [ ] 定义 `{"control": "step_done"}` Schema
-    *   [ ] 升级 `Execution` 解析逻辑
-    *   [ ] 更新 System Prompt 约束
+    *   [x] 定义 `{"control": "step_done"}` / `{"control":"replan"}` Schema（控制信号 Schema）
+    *   [x] 升级 `Execution` 解析逻辑（优先 JSON，失败兼容旧字符串并告警）
+    *   [x] 更新 System Prompt 约束（强制控制 JSON，禁止 STEP_DONE/REPLAN 自由文本）
 
 #### P0-3 局部重规划 (Plan Patching)
 *   **Problem（问题）**: 全量重写 Plan（计划）成本高且丢失上下文。

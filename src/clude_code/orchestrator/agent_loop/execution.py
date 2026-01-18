@@ -7,6 +7,7 @@ from clude_code.llm.llama_cpp_http import ChatMessage
 from clude_code.tooling.local_tools import ToolResult
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.orchestrator.planner import Plan
+from .control_protocol import try_parse_control_envelope
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -95,8 +96,8 @@ def execute_single_step_iteration(
         "规则：\n"
         "0) 业界标准：步骤开始/关键进展时，优先调用 display 输出一条简短进度（level=progress/info）。\n"
         "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
-        "2) 如果本步骤已完成且不需要工具：只输出字符串【STEP_DONE】。\n"
-        "3) 如果本步骤失败且需要重规划：只输出字符串【REPLAN】。\n"
+        "2) 如果本步骤已完成且不需要工具：只输出控制 JSON：{\"control\":\"step_done\"}。\n"
+        "3) 如果本步骤失败且需要重规划：只输出控制 JSON：{\"control\":\"replan\"}。\n"
     )
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)
@@ -110,7 +111,36 @@ def execute_single_step_iteration(
         _ev("stuttering_detected", {"length": len(assistant), "step_id": step.id})
 
     a_strip = assistant.strip()
+
+    # P0-2：优先解析结构化控制协议（JSON Envelope / JSON 信封）
+    ctrl = try_parse_control_envelope(a_strip)
+    if ctrl is not None and ctrl.control == "step_done":
+        loop.messages.append(ChatMessage(role="assistant", content=assistant))
+        loop._trim_history(max_messages=30)
+        step.status = "done"
+        loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
+        _ev("plan_step_done", {"step_id": step.id})
+        loop.logger.info(f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description}")
+        _ev("control_signal", {"control": "step_done", "step_id": step.id})
+        return "STEP_DONE", False, False
+
+    if ctrl is not None and ctrl.control == "replan":
+        loop.messages.append(ChatMessage(role="assistant", content=assistant))
+        loop._trim_history(max_messages=30)
+        step.status = "failed"
+        loop.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
+        _ev("plan_step_replan_requested", {"step_id": step.id})
+        loop.logger.warning(f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description}")
+        _ev("control_signal", {"control": "replan", "step_id": step.id})
+        return "REPLAN", False, False
+
+    # 兼容旧协议（但必须告警）：字符串 STEP_DONE/REPLAN
     if "STEP_DONE" in a_strip or "【STEP_DONE】" in a_strip or a_strip.upper().startswith("STEP_DONE"):
+        loop.file_only_logger.warning(
+            "检测到旧控制协议输出（STEP_DONE），已兼容处理。建议升级为 {\"control\":\"step_done\"}。",
+            exc_info=False,
+        )
+        _ev("control_protocol_legacy", {"control": "step_done", "step_id": step.id})
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "done"
@@ -120,6 +150,11 @@ def execute_single_step_iteration(
         return "STEP_DONE", False, False
 
     if "REPLAN" in a_strip or "【REPLAN】" in a_strip or a_strip.upper().startswith("REPLAN"):
+        loop.file_only_logger.warning(
+            "检测到旧控制协议输出（REPLAN），已兼容处理。建议升级为 {\"control\":\"replan\"}。",
+            exc_info=False,
+        )
+        _ev("control_protocol_legacy", {"control": "replan", "step_id": step.id})
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "failed"
@@ -133,7 +168,12 @@ def execute_single_step_iteration(
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
-        loop.messages.append(ChatMessage(role="user", content="你的输出既不是工具调用 JSON，也不是【STEP_DONE】/【REPLAN】。请严格按规则输出。"))
+        loop.messages.append(
+            ChatMessage(
+                role="user",
+                content="你的输出既不是工具调用 JSON，也不是控制 JSON（{\"control\":\"step_done\"}/{\"control\":\"replan\"}）。请严格按规则输出。",
+            )
+        )
         loop._trim_history(max_messages=30)
         return None, False, False
 

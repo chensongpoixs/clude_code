@@ -40,7 +40,7 @@
 
 | 维度 | 当前实现 (As-Is) | 目标方案 (To-Be) | 评分变化 |
 | :--- | :--- | :--- | :--- |
-| **Method (方法)** | String Match (字符串匹配, `"STEP_DONE"`) | JSON Envelope (JSON 信封, `{"control": "done"}`) | `2/5` ➔ `4.5/5` |
+| **Method (方法)** | String Match (字符串匹配, `"STEP_DONE"`) | JSON Envelope (JSON 信封, `{"control": "step_done"}` / `{"control":"replan"}`) | `2/5` ➔ `4.5/5` |
 | **Robustness (鲁棒性)** | ❌ 易误触 (Hallucination/幻觉) | ✅ 结构化无歧义 | 🔺 High (高) |
 
 **Recommendation**: 定义严格的 Control Schema，优先尝试 JSON 解析。

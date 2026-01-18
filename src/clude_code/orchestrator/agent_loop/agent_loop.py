@@ -488,6 +488,7 @@ class AgentLoop:
                         "confidence": classification.confidence,
                     },
                 )
+                # 模式判定：聊天/规划
                 enable_planning = False
         # 业界兜底：短文本 + UNCERTAIN 往往是问候/寒暄/无任务输入，不应进入规划
         # if classification.category == IntentCategory.UNCERTAIN:
