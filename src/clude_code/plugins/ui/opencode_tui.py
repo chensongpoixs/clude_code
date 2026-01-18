@@ -1226,6 +1226,30 @@ def run_opencode_tui(
                         f"  model={data.get('model')} api_mode={data.get('api_mode')}",
                         style="dim cyan",
                     )
+                    # 显示完整的 messages 内容（系统提示词 + 用户提示词）
+                    messages = data.get("messages") or []
+                    for i, msg in enumerate(messages):
+                        role = str(msg.get("role") or "unknown")
+                        content = str(msg.get("content") or "")
+                        # 根据角色使用不同颜色
+                        if role == "system":
+                            role_style = "bold magenta"
+                            content_style = "magenta"
+                        elif role == "user":
+                            role_style = "bold green"
+                            content_style = "green"
+                        elif role == "assistant":
+                            role_style = "bold blue"
+                            content_style = "blue"
+                        else:
+                            role_style = "bold white"
+                            content_style = "white"
+                        # 打印角色标题
+                        self._push_chat_log(f"  ┌─ [{i+1}] {role.upper()} ─", style=role_style)
+                        # 打印内容（每行缩进）
+                        for ln in content.splitlines():
+                            self._push_chat_log(f"  │ {ln}", style=content_style)
+                        self._push_chat_log(f"  └─ (长度: {len(content)} 字符)", style="dim")
                 elif et == "llm_response_data":
                     text_len = data.get("text_length", 0)
                     self._push_chat_log(f"← LLM 返回（长度={text_len}）", style="dim magenta")

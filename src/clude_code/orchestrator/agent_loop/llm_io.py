@@ -108,6 +108,11 @@ def llm_chat(
 
     # 1) 记录/打印请求参数（model 等）与请求数据摘要
     try:
+        # 构建完整的 messages 列表（用于 TUI 显示系统/用户提示词）
+        messages_full = [
+            {"role": msg.role, "content": msg.content}
+            for msg in loop.messages
+        ]
         req_obj = {
             "stage": stage,
             "step_id": step_id,
@@ -121,6 +126,8 @@ def llm_chat(
             "messages_count": len(loop.messages),
             "last_role": loop.messages[-1].role if loop.messages else None,
             "last_content_preview": (loop.messages[-1].content) if (loop.messages and len(loop.messages[-1].content) > 200) else (loop.messages[-1].content if loop.messages else None),
+            # 完整 messages 列表（供 TUI 显示系统/用户提示词）
+            "messages": messages_full,
         }
         # 写入文件（详细）
         log_llm_request_params_to_file(loop)

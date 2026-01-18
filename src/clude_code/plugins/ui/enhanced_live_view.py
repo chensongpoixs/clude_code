@@ -405,11 +405,37 @@ class EnhancedLiveDisplay:
             model = str(self.last_llm_req.get("model", "auto"))
             api_mode = str(self.last_llm_req.get("api_mode", ""))
             msg_n = self.last_llm_req.get("messages_count")
-            # 优先从 llm_request_params 拿到 prompt_tokens_est（实现“请求发出就能看到 Context”）
+            stage = str(self.last_llm_req.get("stage", "")).strip()
+            # 优先从 llm_request_params 拿到 prompt_tokens_est（实现"请求发出就能看到 Context"）
             pt = event_data.get("prompt_tokens_est")
             if isinstance(pt, int) and pt >= 0:
                 self.llm_stats["current_prompt_tokens"] = pt
-            self._push_line(f"[dim]LLM params: model={model} api={api_mode} messages={msg_n}[/dim]")
+            self._push_line(f"[bold cyan]→ 请求 LLM（消息数={msg_n}，阶段={stage}）[/bold cyan]")
+            self._push_line(f"[dim cyan]  model={model} api={api_mode}[/dim cyan]")
+            # 显示完整的 messages 内容（系统提示词 + 用户提示词）
+            messages = event_data.get("messages") or []
+            for i, msg in enumerate(messages):
+                role = str(msg.get("role") or "unknown")
+                content = str(msg.get("content") or "")
+                # 根据角色使用不同颜色
+                if role == "system":
+                    role_style = "bold magenta"
+                    content_style = "magenta"
+                elif role == "user":
+                    role_style = "bold green"
+                    content_style = "green"
+                elif role == "assistant":
+                    role_style = "bold blue"
+                    content_style = "blue"
+                else:
+                    role_style = "bold white"
+                    content_style = "white"
+                # 打印角色标题
+                self._push_line(f"[{role_style}]  ┌─ [{i+1}] {role.upper()} ─[/{role_style}]")
+                # 打印内容（每行缩进）
+                for ln in content.splitlines():
+                    self._push_line(f"[{content_style}]  │ {ln}[/{content_style}]")
+                self._push_line(f"[dim]  └─ (长度: {len(content)} 字符)[/dim]")
             return
 
         if event_type == "llm_response":

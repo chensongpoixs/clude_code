@@ -71,16 +71,41 @@
 - **兼容性**：对 Python 版本、依赖版本要有明确约束（requirements/lock）。
 
 ## 9. UI 与可视化
+
+### 9.1 界面布局规范
 - **Live 界面**：固定 50 行布局，包含架构流向、状态机、思考滚动、操作信息。
 - **SVG 流程图**：重要逻辑模块必须有对应的带 CSS 动画的 SVG 流程图。
+
+### 9.2 多模式 UI 输出一致性（UI Output Consistency）
+
+> **核心原则**：无论用户选择哪种 UI 模式，其看到的核心信息内容必须保持语义一致，确保调试体验和信息透明度统一。
+
+| 规范项 | 说明 |
+|--------|------|
+| **输出内容同源** | `clude chat`（classic/enhanced）与 `opencode` TUI 的"对话/输出"窗口必须显示相同的核心事件信息（系统提示词、用户提示词、LLM 请求/响应、工具调用/结果等）。 |
+| **事件处理对齐** | 新增事件类型时，必须同时在 `live_view.py`（classic）、`enhanced_live_view.py`（enhanced）、`opencode_tui.py`（opencode）三处实现对应的显示逻辑。 |
+| **颜色语义统一** | 不同角色/状态使用统一的颜色语义：`system=magenta`、`user=green`、`assistant=blue`、`error=red`、`success=green`、`warning=yellow`。 |
+| **信息完整性** | LLM 请求时必须显示完整的 messages 内容（系统提示词 + 用户提示词），便于调试和问题定位。 |
+| **格式可读性** | 使用结构化格式展示复杂内容（如 JSON、多行文本），包含角色标识、内容长度、分隔线等视觉辅助元素。 |
+
+**实现检查清单**（新增事件时必须逐项确认）：
+- [ ] `llm_io.py` 或对应事件源：事件数据包含完整信息
+- [ ] `live_view.py`：classic 模式显示逻辑
+- [ ] `enhanced_live_view.py`：enhanced 模式显示逻辑
+- [ ] `opencode_tui.py`：opencode TUI 模式显示逻辑
+- [ ] 三种模式输出的核心信息语义一致
 
 ## 10. 文档质量门禁 (Documentation Quality)
 - **双语注释强制化**：所有文档中包含英文的技术名词或标题，必须紧随其后的括号中或以其他形式提供中文注释。
 - **自动化校验**：在提交文档前，必须通过 `python tools/check_docs_bilingual.py` 的校验（0 错误）。
 - **链接有效性**：必须通过 `python tools/check_doc_links.py` 校验，禁止出现死链或空链接。
 
-### 9.1 业界对比：当前规范的不足与补齐结论（摘要）
-- **你当前已有的强项**：行数硬限制、显式状态机、日志分层、审计追踪、HITL、SVG 可视化。
-- **业界常见但你原文缺失的关键点**：质量门禁（formatter/lint/type/test）、协作/版本规范策略、资源上限与截断策略、兼容性/依赖锁定。
-- **补齐方式**：已在本次文档中补充“质量门禁/协作版本/工程可维护性”等条款，后续建议进一步落地为 CI（GitHub Actions）与 pre-commit。
+## 11. 业界对比与规范演进（Industry Comparison）
+
+### 11.1 当前规范的优势
+- **已有强项**：行数硬限制、显式状态机、日志分层、审计追踪、HITL 确认机制、SVG 可视化、多模式 UI 一致性。
+
+### 11.2 持续补齐方向
+- **业界常见但需持续强化**：质量门禁自动化（formatter/lint/type/test）、协作/版本规范策略、资源上限与截断策略、依赖版本锁定。
+- **落地建议**：通过 CI（GitHub Actions）与 pre-commit 钩子自动化执行规范检查。
 

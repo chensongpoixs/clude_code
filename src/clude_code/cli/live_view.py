@@ -94,6 +94,27 @@ class LiveDisplay:
                 "stream": False,
             }
 
+        elif ev == "llm_request_params":
+            # 显示完整的 messages 内容（系统提示词 + 用户提示词）
+            self.active_component = "llm"
+            model = str(data.get("model") or "auto")
+            msg_n = data.get("messages_count", 0)
+            stage = str(data.get("stage") or "").strip()
+            self._set_row("llm", f"请求 LLM（消息数={msg_n}，阶段={stage}，model={model}）", style="cyan")
+            # 将 messages 内容推送到思考窗口
+            messages = data.get("messages") or []
+            for i, msg in enumerate(messages):
+                role = str(msg.get("role") or "unknown")
+                content = str(msg.get("content") or "")
+                # 打印角色标题
+                self._push_thought_block(f"[{i+1}] {role.upper()} (长度: {len(content)})")
+                # 打印内容摘要（每条最多显示 500 字符）
+                preview = content[:500] + ("..." if len(content) > 500 else "")
+                for ln in preview.splitlines()[:10]:
+                    self._push_thought_block(f"  {ln}")
+                if len(content.splitlines()) > 10:
+                    self._push_thought_block(f"  ... (更多内容省略)")
+
         elif ev == "llm_response":
             self.active_component = "llm"
             txt = self._clean_one_line(str(data.get("text", "")), 140)
