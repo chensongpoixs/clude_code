@@ -13,6 +13,11 @@ from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
 
 from clude_code.tooling.types import ToolResult, ToolError
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_task_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 class TaskStatus(Enum):
@@ -167,6 +172,12 @@ def run_task(
     Returns:
         ToolResult: 任务执行结果
     """
+    # 检查工具是否启用
+    config = get_task_config()
+    if not config.enabled:
+        _logger.warning("[TaskAgent] 任务代理工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "task tool is disabled"})
+
     try:
         manager = get_task_manager()
 
@@ -183,14 +194,18 @@ def run_task(
             )
 
         # 创建任务
+        _logger.debug(f"[TaskAgent] 开始创建任务: description={description[:50]}..., agent_type={agent_type.value}")
         task = manager.create_task(description, prompt, agent_type, session_id)
 
         # 在实际实现中，这里会异步启动任务
         # 现在同步执行模拟
         try:
             # 注意：这里是同步调用，实际应该异步
+            _logger.debug(f"[TaskAgent] 开始执行任务: task_id={task.task_id}")
             result = asyncio.run(manager.execute_task(task.task_id))
+            _logger.info(f"[TaskAgent] 任务执行成功: task_id={task.task_id}, status={task.status.value}")
         except Exception as e:
+            _logger.error(f"[TaskAgent] 任务执行失败: task_id={task.task_id}, error={e}", exc_info=True)
             return ToolResult(
                 ok=False,
                 error={
@@ -212,6 +227,7 @@ def run_task(
         )
 
     except Exception as e:
+        _logger.error(f"[TaskAgent] 任务运行失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={

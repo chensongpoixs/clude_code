@@ -10,6 +10,11 @@ from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from clude_code.tooling.types import ToolResult, ToolError
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_web_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 try:
     import requests  # type: ignore
@@ -34,7 +39,15 @@ def fetch_web_content(
     Returns:
         ToolResult: 包含网页内容的工具结果
     """
+    # 检查工具是否启用
+    config = get_web_config()
+    if not config.enabled:
+        _logger.warning("[WebFetch] 网页抓取工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "web tool is disabled"})
+
+    _logger.debug(f"[WebFetch] 开始获取网页: url={url}, format={format}, timeout={timeout}")
     if requests is None:
+        _logger.error("[WebFetch] requests 库未安装")
         return ToolResult(
             ok=False,
             error={
@@ -46,6 +59,7 @@ def fetch_web_content(
         # 验证URL
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
+            _logger.warning(f"[WebFetch] 无效的 URL 格式: {url}")
             raise ValueError("Invalid URL format")
 
         # 自动升级到HTTPS（如果适用）

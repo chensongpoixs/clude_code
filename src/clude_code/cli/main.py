@@ -1,7 +1,7 @@
 import logging
 import typer
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.observability.logger import get_logger
 
 app = typer.Typer(help="clude: a Clude Code-like local code agent CLI (Python).")

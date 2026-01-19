@@ -368,7 +368,7 @@ class EnhancedChatHandler:
                 break
             
             if user_text.strip().lower() == "config":
-                from clude_code.cli.config_wizard import run_config_wizard
+                from clude_code.config.config_wizard import run_config_wizard
                 try:
                     new_config = run_config_wizard(self.cfg.workspace_root)
                     # 更新当前配置

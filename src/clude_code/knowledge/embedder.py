@@ -8,7 +8,7 @@ try:
 except ImportError:
     TextEmbedding = None  # type: ignore
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 
 class CodeEmbedder:
     """

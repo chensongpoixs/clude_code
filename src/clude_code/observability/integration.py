@@ -8,7 +8,7 @@ import time
 import threading
 from typing import Any, Dict, List, Optional, Union
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.observability.logger import get_logger
 from clude_code.observability.metrics import get_metrics_collector, MetricType
 from clude_code.observability.metrics_storage import get_metrics_manager, StorageBackend, MetricsQuery

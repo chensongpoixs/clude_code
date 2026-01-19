@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.prompt import Confirm, Prompt
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.core.async_manager import AsyncTaskManager, get_async_manager
 from clude_code.llm.streaming_client import StreamingLLMClient, CachedStreamingLLMClient
 from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay, SimpleProgressDisplay, TaskType
@@ -376,7 +376,7 @@ class EnhancedChatHandler:
                 break
             
             if user_text.strip().lower() == "config":
-                from clude_code.cli.config_wizard import run_config_wizard
+                from clude_code.config.config_wizard import run_config_wizard
                 try:
                     new_config = run_config_wizard(self.cfg.workspace_root)
                     # 更新当前配置

@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Optional, Dict
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.knowledge.vector_store import VectorStore
 from clude_code.knowledge.embedder import CodeEmbedder
 from clude_code.knowledge.chunking import build_chunker, detect_language_from_path

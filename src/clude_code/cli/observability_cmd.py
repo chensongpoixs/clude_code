@@ -7,7 +7,7 @@ import typer
 import time
 from typing import Optional
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.cli.cli_logging import get_cli_logger
 
 # 创建observability子应用

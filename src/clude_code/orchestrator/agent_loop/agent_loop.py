@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
@@ -157,12 +157,15 @@ class AgentLoop:
             max_output_bytes=cfg.limits.max_output_bytes,
         )
         
-        # 初始化天气工具配置（从全局配置注入）
+        # 初始化工具配置（统一管理，从全局配置注入）
         try:
+            from clude_code.config import set_tool_configs
+            set_tool_configs(cfg)
+            # 初始化天气工具配置（向后兼容）
             from clude_code.tooling.tools.weather import set_weather_config
             set_weather_config(cfg)
         except ImportError:
-            pass  # 天气模块可选
+            pass  # 工具模块可选
         
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)

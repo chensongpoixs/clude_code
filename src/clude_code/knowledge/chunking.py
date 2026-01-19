@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 
 # P1-1: 模块级 logger，用于调试 RAG 索引问题（默认 DEBUG 级别）
 _logger = logging.getLogger(__name__)

@@ -4,9 +4,21 @@ from pathlib import Path
 
 from ..types import ToolResult
 from ..workspace import resolve_in_workspace
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_file_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 def write_file(*, workspace_root: Path, path: str, text: str, content_based: bool = False, insert_at_line: int | None = None) -> ToolResult:
+    # 检查工具是否启用
+    config = get_file_config()
+    if not config.enabled:
+        _logger.warning("[WriteFile] 文件写入工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "file tool is disabled"})
+
+    _logger.debug(f"[WriteFile] 开始写入文件: {path}, content_based={content_based}, insert_at_line={insert_at_line}")
     p = resolve_in_workspace(workspace_root, path)
     p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -60,10 +72,12 @@ def write_file(*, workspace_root: Path, path: str, text: str, content_based: boo
         final_content = text
         action = "wrote"
 
+    bytes_written = len(final_content.encode("utf-8"))
     p.write_text(final_content, encoding="utf-8")
+    _logger.info(f"[WriteFile] 写入成功: {path}, 操作: {action}, 大小: {bytes_written} bytes")
     return ToolResult(True, payload={
         "path": path,
-        "bytes_written": len(final_content.encode("utf-8")),
+        "bytes_written": bytes_written,
         "action": action
     })
 

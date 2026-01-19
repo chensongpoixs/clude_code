@@ -26,7 +26,7 @@
 
 **方式 1：配置文件（推荐）**
 ```yaml
-# clude.yaml
+# .clude/.clude.yaml
 weather:
   api_key: "your_api_key_here"
   default_units: metric    # 摄氏度

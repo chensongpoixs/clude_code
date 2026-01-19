@@ -1,0 +1,134 @@
+# Clude Code 配置文件示例
+# 复制此文件为 clude.yaml 并根据需要修改
+# 
+# 配置优先级（从高到低）：
+# 1. 环境变量（前缀 CLUDE_）
+# 2. 配置文件（clude.yaml / clude.toml）
+# 3. 默认值
+
+# LLM 配置
+llm:
+  provider: llama_cpp_http
+  base_url: http://127.0.0.1:8899
+  api_mode: openai_compat
+  model: gemma-3-12b-it-Q4_K_M
+  temperature: 0.2
+  max_tokens: 204800
+  timeout_s: 120
+
+# 策略配置
+policy:
+  allow_network: false
+  confirm_write: true
+  confirm_exec: true
+  allowed_tools: []      # 空=不限制；否则仅允许列出的工具
+  disallowed_tools: []   # 禁止的工具名单
+
+# 资源限制
+limits:
+  max_output_bytes: 1000000
+  max_file_read_bytes: 1000000
+
+# 日志配置
+logging:
+  log_to_console: true
+  level: INFO
+  file_path: .clude/logs/clude.log
+  max_bytes: 10485760
+  backup_count: 5
+  log_format: "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+# 编排器配置
+orchestrator:
+  enable_planning: true
+  max_plan_steps: 12
+  max_step_tool_calls: 100
+  max_replans: 2
+  planning_retry: 1
+
+# RAG 配置
+rag:
+  enabled: true
+  device: cpu                           # cpu / cuda / mps
+  embedding_model: BAAI/bge-small-zh-v1.5
+  model_cache_dir: D:/LLM/llm/Embedding/                 # null = 使用默认路径
+  db_path: .clude/vector_db
+  table_name: code_chunks_v2
+  chunk_size: 500
+  chunk_overlap: 50
+  chunker: heuristic                    # heuristic / tree_sitter
+
+# 工具模块配置
+# 天气 API 配置（OpenWeatherMap）
+# 获取免费 API Key: https://openweathermap.org/api
+weather:
+  enabled: true
+  api_key: "1959a5732178d790d56e0d313d1fe2e6"                            # 必填：你的 OpenWeatherMap API Key（建议用环境变量 OPENWEATHERMAP_API_KEY）
+  default_units: metric                 # metric=摄氏度 / imperial=华氏度 / standard=开尔文
+  default_lang: zh_cn                   # 默认返回中文
+  timeout_s: 10                         # 请求超时时间
+  cache_ttl_s: 300                      # 缓存时间（秒），避免频繁请求
+  log_to_file: true                     # 是否将天气模块日志写入文件（默认 true，写入 .clude/logs/app.log）
+
+# 文件操作工具配置（read_file, write_file）
+file:
+  enabled: true                         # 是否启用文件操作工具
+  log_to_file: true                     # 是否将文件操作日志写入文件
+
+# 目录操作工具配置（list_dir, glob_search）
+directory:
+  enabled: true                         # 是否启用目录操作工具
+  log_to_file: true                     # 是否将目录操作日志写入文件
+
+# 命令执行工具配置（run_cmd）
+command:
+  enabled: true                         # 是否启用命令执行工具
+  timeout_s: 30                         # 命令执行超时时间（秒）
+  log_to_file: true                     # 是否将命令执行日志写入文件
+
+# 搜索工具配置（grep, search）
+search:
+  enabled: true                         # 是否启用搜索工具
+  timeout_s: 30                         # 搜索超时时间（秒）
+  max_results: 1000                     # 搜索最大结果数量
+  log_to_file: true                     # 是否将搜索日志写入文件
+
+# 网络工具配置（webfetch, search）
+web:
+  enabled: true                         # 是否启用网络工具
+  timeout_s: 30                         # 网络请求超时时间（秒）
+  max_content_length: 50000             # 最大内容长度（字符）
+  log_to_file: true                     # 是否将网络工具日志写入文件
+
+# 补丁工具配置（patching）
+patch:
+  enabled: true                         # 是否启用补丁工具
+  log_to_file: true                     # 是否将补丁操作日志写入文件
+
+# 显示工具配置（display）
+display:
+  enabled: true                         # 是否启用显示工具
+  max_content_length: 10000             # 显示内容最大长度（字符）
+  log_to_file: true                     # 是否将显示日志写入文件
+
+# 提问工具配置（question）
+question:
+  enabled: true                         # 是否启用提问工具
+  log_to_file: true                     # 是否将提问日志写入文件
+
+# 仓库地图工具配置（repo_map）
+repo_map:
+  enabled: true                         # 是否启用仓库地图工具
+  log_to_file: true                     # 是否将仓库地图日志写入文件
+
+# 技能工具配置（skill）
+skill:
+  enabled: true                         # 是否启用技能工具
+  log_to_file: true                     # 是否将技能加载日志写入文件
+
+# 任务工具配置（task_agent, todo_manager）
+task:
+  enabled: true                         # 是否启用任务工具
+  log_to_file: true                     # 是否将任务操作日志写入文件
+

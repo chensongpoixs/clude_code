@@ -6,14 +6,14 @@ from rich.console import Console
 from rich.live import Live
 from rich.prompt import Confirm
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.orchestrator.agent_loop import AgentLoop
 from clude_code.cli.live_view import LiveDisplay
 from clude_code.cli.utils import select_model_interactively
 from clude_code.cli.theme import CLAUDE_THEME, create_welcome_text, create_status_bar, create_ready_message
 from clude_code.cli.animations import AnimatedWelcome, TypewriterEffect, FadeEffect
 from clude_code.cli.shortcuts import ShortcutHandler, ShortcutAction, PromptResult
-from clude_code.cli.config_manager import get_config_manager
+from clude_code.config import get_config_manager
 from clude_code.cli.cli_logging import get_cli_logger
 from clude_code.cli.slash_commands import SlashContext, handle_slash_command
 from clude_code.cli.session_store import save_session

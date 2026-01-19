@@ -7,6 +7,12 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Any
 
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_repo_map_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
+
 
 def generate_repo_map(*, workspace_root: Path) -> str:
     """
@@ -15,8 +21,16 @@ def generate_repo_map(*, workspace_root: Path) -> str:
     2. 深度树形结构。
     3. 自动排除非核心符号，防止上下文溢出。
     """
+    # 检查工具是否启用
+    config = get_repo_map_config()
+    if not config.enabled:
+        _logger.warning("[RepoMap] 仓库地图工具已被禁用")
+        return "Repo Map: tool is disabled."
+
+    _logger.debug("[RepoMap] 开始生成仓库图谱")
     ctags_exe = shutil.which("ctags")
     if not ctags_exe:
+        _logger.warning("[RepoMap] ctags 未找到，无法生成仓库图谱")
         return "Repo Map: ctags not found."
 
     # 1. 扫描符号 (增加更多的元数据字段)
@@ -35,8 +49,11 @@ def generate_repo_map(*, workspace_root: Path) -> str:
 
     abs_root = str(workspace_root.resolve())
     try:
+        _logger.debug(f"[RepoMap] 执行 ctags 命令: {' '.join(args[:5])}...")
         cp = subprocess.run(args, cwd=abs_root, capture_output=True, text=True, encoding="utf-8", shell=(platform.system() == "Windows"))
+        _logger.debug(f"[RepoMap] ctags 执行完成: 输出行数={len(cp.stdout.splitlines())}")
     except Exception as e:
+        _logger.error(f"[RepoMap] ctags 执行失败: {e}", exc_info=True)
         return f"Repo Map Error: {e}"
 
     # 2. 解析并计算文件权重
@@ -78,6 +95,7 @@ def generate_repo_map(*, workspace_root: Path) -> str:
         tree[d][f] = file_stats[p]["symbols"]
 
     # 5. 渲染 Markdown
+    _logger.debug(f"[RepoMap] 开始渲染图谱: 文件数={len(file_stats)}, 总符号数={sum(len(s['symbols']) for s in file_stats.values())}")
     lines = ["# 核心代码架构图谱 (Core Repo Map)", "提示：已优先展示项目核心逻辑文件及符号。", ""]
     
     for dir_path in sorted(tree.keys()):

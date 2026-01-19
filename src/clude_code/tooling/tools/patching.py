@@ -8,6 +8,11 @@ from pathlib import Path
 
 from ..types import ToolResult
 from ..workspace import resolve_in_workspace
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_patch_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 def _sha256_text(s: str) -> str:
@@ -29,8 +34,16 @@ def apply_patch(
     支持精确匹配、模糊匹配、上下文感知和编辑影响分析。
     返回 payload 包含 before/after hash 与 undo_id。
     """
+    # 检查工具是否启用
+    config = get_patch_config()
+    if not config.enabled:
+        _logger.warning("[Patch] 补丁工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "patch tool is disabled"})
+
+    _logger.debug(f"[Patch] 开始应用补丁: {path}, fuzzy={fuzzy}, expected_replacements={expected_replacements}")
     p = resolve_in_workspace(workspace_root, path)
     if not p.exists() or not p.is_file():
+        _logger.warning(f"[Patch] 文件不存在或不是文件: {path}")
         return ToolResult(False, error={"code": "E_NOT_FILE", "message": f"not a file: {path}"})
 
     before_text = p.read_text(encoding="utf-8", errors="replace")
@@ -43,6 +56,7 @@ def apply_patch(
     # 验证patch合理性
     is_valid, validation_msg = patch_engine.validate_patch(before_text, old, new)
     if not is_valid:
+        _logger.warning(f"[Patch] 补丁验证失败: {validation_msg}")
         return ToolResult(False, error={"code": "E_VALIDATION_FAILED", "message": validation_msg})
 
     # 首先尝试精确匹配
@@ -53,7 +67,9 @@ def apply_patch(
 
     if old in before_text:
         count = before_text.count(old)
+        _logger.debug(f"[Patch] 精确匹配成功: 找到 {count} 个匹配")
         if expected_replacements > 0 and count != expected_replacements:
+            _logger.warning(f"[Patch] 匹配次数不匹配: 找到 {count} 个，期望 {expected_replacements} 个")
             return ToolResult(
                 False,
                 error={"code": "E_NOT_UNIQUE", "message": f"old block occurrences={count}, expected={expected_replacements}"},
@@ -66,7 +82,9 @@ def apply_patch(
             updated_text = before_text.replace(old, new, expected_replacements)
     else:
         # 精确匹配失败，尝试增强的上下文感知匹配
+        _logger.debug("[Patch] 精确匹配失败，尝试模糊匹配")
         if not fuzzy:
+            _logger.warning("[Patch] 精确匹配失败且未启用模糊匹配")
             return ToolResult(False, error={"code": "E_NOT_FOUND", "message": "old block not found in file"})
 
         if expected_replacements != 1:

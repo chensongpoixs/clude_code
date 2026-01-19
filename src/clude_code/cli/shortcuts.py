@@ -301,7 +301,7 @@ class ShortcutHandler:
 
     def _show_config_panel(self) -> None:
         """显示配置面板"""
-        from .config_manager import get_config_manager
+        from clude_code.config import get_config_manager
 
         config_manager = get_config_manager()
         summary = config_manager.get_config_summary()

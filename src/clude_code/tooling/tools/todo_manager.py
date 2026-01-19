@@ -13,6 +13,11 @@ from typing import Dict, List, Optional
 from enum import Enum
 
 from clude_code.tooling.types import ToolResult, ToolError
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_task_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 class TodoStatus(Enum):
@@ -146,6 +151,12 @@ def todowrite(
     Returns:
         ToolResult: 任务创建结果
     """
+    # 检查工具是否启用
+    config = get_task_config()
+    if not config.enabled:
+        _logger.warning("[Todo] 任务管理工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "task tool is disabled"})
+
     try:
         manager = get_todo_manager()
 
@@ -213,11 +224,19 @@ def todoread(
         ToolResult: 任务列表
     """
     try:
+        # 检查工具是否启用
+        config = get_task_config()
+        if not config.enabled:
+            _logger.warning("[Todo] 任务管理工具已被禁用")
+            return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "task tool is disabled"})
+
+        _logger.debug(f"[Todo] 开始读取任务: status={status}, todo_id={todo_id}")
         manager = get_todo_manager()
 
         if todo_id:
             item = manager.get_todo(todo_id)
             if not item:
+                _logger.warning(f"[Todo] 任务未找到: todo_id={todo_id}")
                 return ToolResult(
                     ok=False,
                     error={
@@ -242,6 +261,7 @@ def todoread(
             for item in todos
         ]
 
+        _logger.info(f"[Todo] 任务读取成功: count={len(todo_list)}, filter={status}")
         return ToolResult(
             ok=True,
             payload={
@@ -252,6 +272,7 @@ def todoread(
         )
 
     except Exception as e:
+        _logger.error(f"[Todo] 任务读取失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={

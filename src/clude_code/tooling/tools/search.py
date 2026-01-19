@@ -9,6 +9,11 @@ import time
 from typing import List, Optional, Literal
 
 from clude_code.tooling.types import ToolResult, ToolError
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_search_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 try:
     import requests  # type: ignore
@@ -37,7 +42,15 @@ def websearch(
     Returns:
         ToolResult: 搜索结果
     """
+    # 检查工具是否启用
+    config = get_search_config()
+    if not config.enabled:
+        _logger.warning("[WebSearch] 网页搜索工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "search tool is disabled"})
+
+    _logger.debug(f"[WebSearch] 开始搜索: query={query}, num_results={num_results}, search_type={search_type}")
     if requests is None:
+        _logger.error("[WebSearch] requests 库未安装")
         return ToolResult(
             ok=False,
             error={
@@ -66,6 +79,7 @@ def websearch(
 
         # 限制结果数量
         results = mock_results[:num_results]
+        _logger.info(f"[WebSearch] 搜索完成: query={query}, 返回 {len(results)} 个结果")
 
         result_data = {
             "query": query,
@@ -82,6 +96,7 @@ def websearch(
         )
 
     except Exception as e:
+        _logger.error(f"[WebSearch] 搜索失败: query={query}, error={e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={

@@ -31,15 +31,16 @@
 
 ### 3.1 模块配置统一管理（Configuration Centralization）
 
-> **核心原则**：所有模块的可配置参数必须统一纳入全局配置体系（`src/clude_code/config.py`），禁止模块内硬编码或自行管理配置。
+> **核心原则**：所有模块的可配置参数必须统一纳入全局配置体系（`src/clude_code/config/`），禁止模块内硬编码或自行管理配置。
 
 | 规范项 | 说明 |
 |--------|------|
-| **配置集中化** | 新增模块的配置项必须在 `config.py` 中定义对应的 Pydantic `BaseModel` 子类，并挂载到 `CludeConfig`。 |
-| **配置优先级** | 统一遵循：`环境变量 > 配置文件 > 代码默认值`，确保部署灵活性与开发便利性兼顾。 |
+| **配置集中化** | 新增模块的配置项必须在 `src/clude_code/config/config.py` 中定义对应的 Pydantic `BaseModel` 子类，并挂载到 `CludeConfig`。工具类配置统一在 `src/clude_code/config/tools_config.py` 定义，并通过 `set_tool_configs(cfg)` 注入。 |
+| **配置优先级** | 统一遵循：`环境变量 > 配置文件 > 代码默认值`。实现必须使用 `pydantic-settings` 的 `settings_customise_sources`，禁止通过 `__init__` 人工合并导致优先级反转。 |
+| **嵌套环境变量** | 必须启用 `env_nested_delimiter="__"`，确保 `CLUDE_LLM__MAX_TOKENS`、`CLUDE_POLICY__ALLOW_NETWORK` 等嵌套配置可被正确解析。 |
 | **敏感信息脱敏** | API Key、Token 等敏感配置项禁止硬编码；必须通过环境变量或配置文件注入，且在日志中脱敏显示。 |
 | **配置注入时机** | 模块配置应在 `AgentLoop.__init__` 或模块初始化阶段统一注入，避免运行时动态读取环境变量。 |
-| **配置文档化** | 新增配置项必须在 `clude.example.yaml` 中补充示例，并在对应模块 README 或 `docs/` 中说明用途与取值范围。 |
+| **配置文档化** | 新增配置项必须在 `.clude/.clude.example.yaml` 中补充示例，并在对应模块 README 或 `docs/` 中说明用途与取值范围。 |
 
 **标准配置类模板**：
 ```python
@@ -62,8 +63,48 @@ set_xxx_config(cfg)  # cfg: CludeConfig
 - [ ] `config.py`：定义 `XxxConfig` 并添加到 `CludeConfig`
 - [ ] 模块内：提供 `set_xxx_config()` 或构造函数接收配置
 - [ ] `AgentLoop.__init__`：调用配置注入
-- [ ] `clude.example.yaml`：补充配置示例
+- [ ] `.clude/.clude.example.yaml`：补充配置示例
 - [ ] 模块文档：说明配置项含义与取值
+
+### 3.2 配置文件格式、位置与生成规则（YAML + Commented Template）
+
+> **目标**：让配置“可读、可迁移、可审计、可复现”，并确保配置在不同运行环境下行为一致。
+
+| 规范项 | 说明 |
+|--------|------|
+| **格式统一** | 配置文件统一使用 **YAML**，禁止新增 JSON 配置文件作为主配置来源（历史 JSON 仅允许读取兼容，不作为默认输出）。 |
+| **主配置位置** | 主配置文件固定为：`~/.clude/.clude.yaml`。该文件是“可编辑配置”的唯一落盘位置。 |
+| **兼容读取顺序** | 允许兼容读取：工作区 `./.clude/.clude.yaml`（用于旧项目/脚本兼容）、`./clude.yaml`（向后兼容）。但**生成/保存**必须写入 `~/.clude/.clude.yaml`。 |
+| **注释保留** | 生成/保存 YAML 时必须保留中文注释：以 `.clude/.clude.example.yaml` 作为模板进行“按路径替换值”，禁止直接 `yaml.safe_dump()` 导致注释丢失。 |
+| **顺序一致** | 生成/保存 YAML 的顶层 key 顺序必须与 `.clude/.clude.example.yaml` 一致（提高可读性、便于 diff）。 |
+| **默认值来源** | 当需要“生成默认配置”时，默认值必须来自 **代码默认配置**（Pydantic 字段默认值），不得被环境变量或已有配置文件污染。推荐使用 `model_construct()` 生成纯默认对象。 |
+| **敏感字段示例** | `.clude/.clude.example.yaml` 中禁止提交真实 API Key/Token；必须使用空字符串或占位符，并在注释中说明推荐使用环境变量。 |
+
+**实现检查清单**（配置生成/保存必须逐项确认）：
+- [ ] 保存目标路径为 `~/.clude/.clude.yaml`
+- [ ] 使用模板渲染（保留中文注释、顺序）
+- [ ] “生成默认配置”使用代码默认值（不受 env/file 影响）
+- [ ] env 覆盖 file：`env_nested_delimiter="__"` 生效且有验证用例
+
+### 3.3 工具配置与日志标准化（Tool Config + Tool Logger）
+
+> **目标**：每个工具都有明确的“开关/日志策略/参数边界”，出现问题能快速定位、可复现、可审计。
+
+| 规范项 | 说明 |
+|--------|------|
+| **工具独立配置** | 每个工具必须有独立配置条目（例如 `FileToolConfig`、`CommandToolConfig`、`WeatherToolConfig`），至少包含：`enabled`、`log_to_file`（如适用）。统一定义在 `src/clude_code/config/tools_config.py`。 |
+| **新增工具默认配置必备** | 每新增一个工具，必须在全局 `ToolConfigs` 中增加该工具的配置字段并提供默认值（即“开箱即用”的默认配置）。禁止出现“工具已注册但没有全局默认配置项”的情况。 |
+| **统一注入** | 工具配置必须通过 `set_tool_configs(cfg)` 注入，并由 `get_tool_configs()` 读取；禁止工具模块自行从文件/环境变量直接读配置。 |
+| **统一日志初始化** | 所有工具模块必须使用统一的工具日志助手（例如 `src/clude_code/tooling/logger_helper.py`），确保遵循全局 `LoggingConfig`（级别、滚动、格式）与工具自身 `log_to_file` 开关。 |
+| **错误反馈** | 工具错误必须提供可操作信息（配置缺失、鉴权失败、网络异常等），并保证敏感信息不出现在控制台/日志明文中。 |
+
+**实现检查清单**（新增工具时必须逐项确认）：
+- [ ] `ToolSpec`：工具的 `name/description/args_schema/example_args` 完整（工具注册表单一可信源）
+- [ ] `src/clude_code/config/tools_config.py`：新增 `XxxToolConfig`（至少 `enabled`、`log_to_file`）
+- [ ] `ToolConfigs`：新增字段 `xxx: XxxToolConfig = Field(default_factory=XxxToolConfig)` 或等价默认挂载
+- [ ] `.clude/.clude.example.yaml`：新增同名段落与中文注释（并确保模板渲染可替换该路径的值）
+- [ ] 工具实现：启动时读取 `get_tool_configs().xxx` 并尊重 `enabled/log_to_file`
+- [ ] `set_tool_configs(cfg)`：在 `AgentLoop` 初始化阶段完成注入，保证运行期配置一致
 
 ## 4. 日志与调试
 - **禁止 print**：使用系统 logger。

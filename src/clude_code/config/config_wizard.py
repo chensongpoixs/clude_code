@@ -17,8 +17,8 @@ from rich.panel import Panel
 from rich.text import Text
 from rich import print as rprint
 
-from clude_code.config import CludeConfig, LLMConfig, RAGConfig, LimitsConfig
-from clude_code.observability.logger import get_logger
+from ..config import CludeConfig, LLMConfig, RAGConfig, LimitsConfig
+from ..observability.logger import get_logger
 
 console = Console()
 
@@ -28,8 +28,9 @@ class ConfigWizard:
     
     def __init__(self, workspace_root: str = "."):
         self.workspace_root = workspace_root
-        self.logger = get_logger(__name__, workspace_root=workspace_root)
-        self.config = CludeConfig()
+        # 配置向导属于交互式流程：默认只输出到控制台，避免占用文件句柄影响临时目录清理
+        self.logger = get_logger(__name__, log_to_console=True, workspace_root=None)
+        self.config = self._load_user_config()
         self.detected_env = {}
         self.presets = {
             "本地开发": {
@@ -80,6 +81,30 @@ class ConfigWizard:
                 }
             }
         }
+
+    def _get_user_config_file(self) -> Path:
+        """主配置文件位置：~/.clude/.clude.yaml"""
+        return Path.home() / ".clude" / ".clude.yaml"
+
+    def _load_user_config(self) -> CludeConfig:
+        """从用户目录 ~/.clude/.clude.yaml 加载配置；不存在则返回默认配置。"""
+        cfg_file = self._get_user_config_file()
+        if cfg_file.exists():
+            try:
+                import yaml
+
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                # 确保工作区根目录一致（用户级配置也允许保存 workspace_root）
+                if isinstance(data, dict) and self.workspace_root:
+                    data.setdefault("workspace_root", str(Path(self.workspace_root)))
+                return CludeConfig(**(data if isinstance(data, dict) else {}))
+            except Exception as e:
+                self.logger.warning("加载用户配置失败，将使用默认配置: %s", e, exc_info=True)
+                return CludeConfig(workspace_root=self.workspace_root)
+
+        # 纯代码默认值，不受 env / file 影响
+        return CludeConfig.model_construct(workspace_root=self.workspace_root)
     
     def run_wizard(self) -> CludeConfig:
         """运行配置向导"""
@@ -630,26 +655,32 @@ class ConfigWizard:
         if not errors and not warnings:
             console.print("[green]配置验证通过![/green]")
     
-    def _save_config(self) -> None:
-        """保存配置"""
+    def _save_config(self, generate_shell_config: bool = True) -> None:
+        """保存配置
+
+        Args:
+            generate_shell_config: 是否生成shell配置脚本（用于自动化时设为False）
+        """
         console.print("\n[bold]保存配置...[/bold]")
-        
-        # 创建配置目录
+
+        # 创建配置目录（用户目录）
         config_dir = Path.home() / ".clude"
-        config_dir.mkdir(exist_ok=True)
-        
+        config_dir.mkdir(parents=True, exist_ok=True)
+
         # 保存配置文件
-        config_file = config_dir / "config.json"
-        
+        config_file = config_dir / ".clude.yaml"
+
         # 转换为字典并保存
+        from .config import _render_commented_yaml
         config_dict = self.config.model_dump()
-        
-        import json
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(config_dict, f, indent=2, ensure_ascii=False)
-        
+
+        # 统一 YAML 保存（项目规范：不再使用 JSON 配置）
+        import yaml
+
+        # 保留中文注释：使用模板渲染输出
+        config_file.write_text(_render_commented_yaml(config_dict), encoding="utf-8")
         console.print(f"[green]配置已保存到: {config_file}[/green]")
-        
+
         # 显示环境变量设置提示
         console.print("\n[bold]环境变量设置:[/bold]")
         console.print("您也可以通过以下环境变量覆盖配置:")
@@ -660,10 +691,15 @@ class ConfigWizard:
         console.print("- CLUDE_POLICY__ALLOW_NETWORK: 允许网络访问")
         console.print("- CLUDE_RAG__ENABLED: 启用 RAG")
         console.print("- CLUDE_RAG__DEVICE: RAG 设备")
-        
-        # 生成 shell 配置
-        if Confirm.ask("生成 shell 配置脚本?", default=True):
-            self._generate_shell_config(config_dir)
+
+        # 生成 shell 配置（如果启用且是交互式环境）
+        if generate_shell_config:
+            try:
+                if Confirm.ask("生成 shell 配置脚本?", default=True):
+                    self._generate_shell_config(config_dir)
+            except EOFError:
+                # 非交互式环境，跳过shell配置生成
+                console.print("[dim]跳过shell配置生成（非交互式环境）[/dim]")
     
     def _generate_shell_config(self, config_dir: Path) -> None:
         """生成 shell 配置脚本"""

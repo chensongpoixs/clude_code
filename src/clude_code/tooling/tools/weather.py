@@ -21,7 +21,9 @@ from enum import Enum
 
 from clude_code.tooling.types import ToolResult, ToolError
 
-# P1-1: 模块级 logger（延迟初始化，在 set_weather_config() 中配置）
+# P1-1: 模块级 logger（使用统一的工具日志辅助函数）
+from clude_code.tooling.logger_helper import get_tool_logger
+
 _logger: logging.Logger | None = None
 
 # 可选依赖：requests
@@ -133,86 +135,6 @@ ENV_API_KEY = "OPENWEATHERMAP_API_KEY"
 _config_cache: dict[str, Any] = {}
 
 
-def _ensure_logger_initialized(cfg: Any | None = None) -> logging.Logger:
-    """
-    确保 logger 已初始化（延迟初始化）。
-    
-    如果 logger 未初始化，则使用统一日志系统创建并配置 logger。
-    优先使用传入的配置，如果没有配置则使用默认值。
-    
-    Args:
-        cfg: CludeConfig 或 WeatherConfig 对象（可选）
-    
-    Returns:
-        已配置的 Logger 实例
-    """
-    global _logger
-    
-    if _logger is None:
-        from clude_code.observability.logger import get_logger
-        
-        # 确定 workspace_root
-        workspace_root = "."
-        if cfg is not None:
-            if hasattr(cfg, "workspace_root"):
-                workspace_root = cfg.workspace_root
-            elif hasattr(cfg, "weather") and hasattr(cfg.weather, "workspace_root"):
-                # 从 CludeConfig 获取
-                workspace_root = cfg.workspace_root
-        
-        # 确定日志配置
-        if cfg is not None:
-            if hasattr(cfg, "logging"):
-                # 从 CludeConfig 获取日志配置
-                logging_cfg = cfg.logging
-            elif hasattr(cfg, "weather"):
-                # 从 CludeConfig 获取（通过 weather 属性判断）
-                from clude_code.config import CludeConfig
-                if isinstance(cfg, CludeConfig):
-                    logging_cfg = cfg.logging
-                else:
-                    from clude_code.config import LoggingConfig
-                    logging_cfg = LoggingConfig()
-            else:
-                from clude_code.config import LoggingConfig
-                logging_cfg = LoggingConfig()
-        else:
-            # 使用默认配置
-            from clude_code.config import LoggingConfig
-            logging_cfg = LoggingConfig()
-        
-        # 确定是否写入文件（从天气配置获取，如果未配置则默认 True）
-        log_to_file = True
-        if cfg is not None:
-            if hasattr(cfg, "weather") and hasattr(cfg.weather, "log_to_file"):
-                log_to_file = cfg.weather.log_to_file
-            elif hasattr(cfg, "log_to_file"):
-                log_to_file = cfg.log_to_file
-        # 也可以从已缓存的配置中获取（如果已调用过 set_weather_config）
-        if _config_cache and "log_to_file" in _config_cache:
-            log_to_file = _config_cache.get("log_to_file", True)
-        
-        # 创建并配置 logger
-        # 如果 log_to_file=False，则不传入 workspace_root，这样就不会创建文件 handler
-        # get_logger() 的逻辑：如果 log_file 为 None 且 workspace_root 为 None，则不会创建文件 handler
-        logger_workspace_root = workspace_root if log_to_file else None
-        logger_file_path = None
-        if log_to_file and hasattr(logging_cfg, "file_path") and logging_cfg.file_path:
-            logger_file_path = logging_cfg.file_path
-        
-        _logger = get_logger(
-            __name__,
-            workspace_root=logger_workspace_root,
-            log_file=logger_file_path,
-            log_to_console=logging_cfg.log_to_console,
-            level=logging_cfg.level,
-            log_format=logging_cfg.log_format,
-            date_format=logging_cfg.date_format,
-        )
-    
-    return _logger
-
-
 def _get_logger() -> logging.Logger:
     """
     获取 logger（如果未初始化则使用默认配置初始化）。
@@ -225,8 +147,8 @@ def _get_logger() -> logging.Logger:
     """
     global _logger
     if _logger is None:
-        # 使用默认配置初始化（向后兼容）
-        return _ensure_logger_initialized(None)
+        # 使用统一的日志辅助函数初始化（向后兼容）
+        _logger = get_tool_logger(__name__)
     return _logger
 
 
@@ -235,60 +157,46 @@ def set_weather_config(cfg: Any) -> None:
     设置天气配置（由 AgentLoop 在初始化时调用）
     
     此函数会初始化 logger（如果尚未初始化），确保日志能够写入文件。
+    现在使用统一的工具配置系统。
     
     Args:
-        cfg: CludeConfig 对象或其 weather 属性
+        cfg: CludeConfig 对象
     """
-    global _config_cache
+    global _config_cache, _logger
     
-    # 确保 logger 已初始化（使用传入的配置）
-    logger = _ensure_logger_initialized(cfg)
-    logger.debug(f"[Weather] 开始加载天气配置, 配置类型: {type(cfg).__name__}")
+    # 使用统一的工具配置系统
+    from clude_code.config.tools_config import set_tool_configs, get_weather_config
+    set_tool_configs(cfg)
+
+    # 初始化 logger（使用新的日志辅助函数）
+    from clude_code.tooling.logger_helper import init_tool_logger_from_config
+    _logger = init_tool_logger_from_config(__name__, cfg)
     
-    if hasattr(cfg, "weather"):
-        # 传入的是 CludeConfig
-        _config_cache = {
-            "api_key": cfg.weather.api_key,
-            "default_units": cfg.weather.default_units,
-            "default_lang": cfg.weather.default_lang,
-            "timeout_s": cfg.weather.timeout_s,
-            "enabled": cfg.weather.enabled,
-            "cache_ttl_s": getattr(cfg.weather, "cache_ttl_s", 300),
-            "log_to_file": getattr(cfg.weather, "log_to_file", True),
-        }
-        logger.info(
-            f"[Weather] 配置加载完成:\n"
-            f"  - enabled: {cfg.weather.enabled}\n"
-            f"  - units: {cfg.weather.default_units}\n"
-            f"  - lang: {cfg.weather.default_lang}\n"
-            f"  - timeout: {cfg.weather.timeout_s}s\n"
-            f"  - cache_ttl: {getattr(cfg.weather, 'cache_ttl_s', 300)}s\n"
-            f"  - log_to_file: {getattr(cfg.weather, 'log_to_file', True)}\n"
-            f"  - api_key: {'已配置 (******)' if cfg.weather.api_key else '未配置'}"
-        )
-    elif hasattr(cfg, "api_key"):
-        # 传入的是 WeatherConfig
-        _config_cache = {
-            "api_key": cfg.api_key,
-            "default_units": cfg.default_units,
-            "default_lang": cfg.default_lang,
-            "timeout_s": cfg.timeout_s,
-            "enabled": cfg.enabled,
-            "cache_ttl_s": getattr(cfg, "cache_ttl_s", 300),
-            "log_to_file": getattr(cfg, "log_to_file", True),
-        }
-        logger.info(
-            f"[Weather] 配置加载完成:\n"
-            f"  - enabled: {cfg.enabled}\n"
-            f"  - units: {cfg.default_units}\n"
-            f"  - lang: {cfg.default_lang}\n"
-            f"  - timeout: {cfg.timeout_s}s\n"
-            f"  - cache_ttl: {getattr(cfg, 'cache_ttl_s', 300)}s\n"
-            f"  - log_to_file: {getattr(cfg, 'log_to_file', True)}\n"
-            f"  - api_key: {'已配置 (******)' if cfg.api_key else '未配置'}"
-        )
-    else:
-        logger.warning(f"[Weather] 无法解析天气配置: {type(cfg)}, 将使用默认值")
+    # 从工具配置获取天气配置
+    weather_cfg = get_weather_config()
+    
+    # 更新本地配置缓存（向后兼容）
+    _config_cache = {
+        "api_key": weather_cfg.api_key,
+        "default_units": weather_cfg.default_units,
+        "default_lang": weather_cfg.default_lang,
+        "timeout_s": weather_cfg.timeout_s,
+        "enabled": weather_cfg.enabled,
+        "cache_ttl_s": weather_cfg.cache_ttl_s,
+        "log_to_file": weather_cfg.log_to_file,
+    }
+    
+    _logger.debug(f"[Weather] 开始加载天气配置, 配置类型: {type(cfg).__name__}")
+    _logger.info(
+        f"[Weather] 配置加载完成:\n"
+        f"  - enabled: {weather_cfg.enabled}\n"
+        f"  - units: {weather_cfg.default_units}\n"
+        f"  - lang: {weather_cfg.default_lang}\n"
+        f"  - timeout: {weather_cfg.timeout_s}s\n"
+        f"  - cache_ttl: {weather_cfg.cache_ttl_s}s\n"
+        f"  - log_to_file: {weather_cfg.log_to_file}\n"
+        f"  - api_key: {'已配置 (******)' if weather_cfg.api_key else '未配置'}"
+    )
 
 
 def _get_api_key() -> str | None:
@@ -297,7 +205,7 @@ def _get_api_key() -> str | None:
     
     优先级（从高到低）：
     1. 环境变量 OPENWEATHERMAP_API_KEY
-    2. 配置文件 (clude.toml 或 clude.yaml 中的 weather.api_key)
+    2. 配置文件 (.clude/.clude.yaml 中的 weather.api_key)
     """
     # 优先使用环境变量
     env_key = os.environ.get(ENV_API_KEY)
@@ -448,7 +356,7 @@ def get_weather(
                     "1. 访问 https://openweathermap.org/api 注册并获取免费 API Key。\n"
                     "2. 配置方式（选其一）：\n"
                     "   - 命令行设置环境变量：export OPENWEATHERMAP_API_KEY='你的KEY' (Linux/macOS) 或 set OPENWEATHERMAP_API_KEY='你的KEY' (Windows)\n"
-                    "   - 在 clude.yaml 中添加：\n"
+                    "   - 在 .clude/.clude.yaml 中添加：\n"
                     "     weather:\n"
                     "       api_key: \"你的KEY\"\n"
                     "   - 在交互式 TUI 中使用内置命令：/config set weather.api_key '你的KEY'"

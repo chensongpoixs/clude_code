@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.prompt import Confirm
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
 from clude_code.cli.utils import select_model_interactively

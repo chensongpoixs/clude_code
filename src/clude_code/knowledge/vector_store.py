@@ -12,7 +12,7 @@ except ImportError:
     lancedb = None  # type: ignore
     pa = None  # type: ignore
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 
 # P1-1: 模块级 logger，用于调试 RAG 向量存储问题
 _logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ CLI 日志管理模块
 import logging
 from typing import Optional
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.observability.logger import get_logger
 
 

@@ -19,7 +19,7 @@ from typing import Any
 
 from rich.console import Console
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.cli.custom_commands import load_custom_commands
 
 

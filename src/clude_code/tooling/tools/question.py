@@ -9,6 +9,11 @@ import json
 from typing import Any, Dict, List, Optional
 
 from clude_code.tooling.types import ToolResult, ToolError
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_question_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 def ask_question(
@@ -30,6 +35,13 @@ def ask_question(
         ToolResult: 包含用户回答的工具结果
     """
     try:
+        # 检查工具是否启用
+        config = get_question_config()
+        if not config.enabled:
+            _logger.warning("[Question] 提问工具已被禁用")
+            return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "question tool is disabled"})
+
+        _logger.debug(f"[Question] 开始提问: question={question[:50]}..., options={len(options) if options else 0}, multiple={multiple}")
         # 构建问题结构
         question_data = {
             "question": question,
@@ -47,12 +59,14 @@ def ask_question(
             "status": "pending"  # 等待用户回答
         }
 
+        _logger.info(f"[Question] 问题已创建: status=pending, options={len(options) if options else 0}")
         return ToolResult(
             ok=True,
             payload=result_data
         )
 
     except Exception as e:
+        _logger.error(f"[Question] 提问失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={
