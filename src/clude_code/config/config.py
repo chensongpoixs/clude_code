@@ -1,6 +1,27 @@
 from __future__ import annotations
 
+"""
+/**
+ * @author chensong（chensong）
+ * @date 2026-01-19
+ * @brief 全局配置系统（Global Configuration System）
+ *
+ * 背景与目的（Background & Purpose）：
+ * - 统一管理 clude-code 的所有可配置参数（LLM/Policy/RAG/Tooling/Logging）。
+ * - 配置优先级遵循：环境变量（Environment Variables） > 配置文件（YAML Config File） > 代码默认值（Code Defaults）。
+ *
+ * 关键约束（Key Constraints）：
+ * - 禁止在模块内硬编码敏感信息（Sensitive Info），例如 API Key/Token。
+ * - 禁止使用 print 进行日志输出，必须使用 logger（Logger）。
+ *
+ * 配置文件位置（Config Location）：
+ * - 主配置：~/.clude/.clude.yaml
+ * - 兼容读取：./.clude/.clude.yaml、./clude.yaml
+ */
+"""
+
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,11 +38,20 @@ except ImportError:
     YAML_AVAILABLE = False
 
 
+_logger = logging.getLogger(__name__)
+
+"""
+大模型配置（LLM Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 大模型配置（LLM Configuration）
+"""
 class LLMConfig(BaseModel):
     provider: str = Field(default="llama_cpp_http")
     base_url: str = Field(default="http://127.0.0.1:8899")
-    api_mode: str = Field(default="openai_compat")  # openai_compat | completion |ggml-org/gemma-3-12b-it-GGUF
-	#aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
+    api_mode: str = Field(default="openai_compat")  # openai_compat | completion
+    # Aider（代码助手）对接 llama.cpp OpenAI 兼容接口（OpenAI Compatible API）示例：
+    # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
     model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
@@ -38,7 +68,12 @@ class LLMConfig(BaseModel):
     )
     timeout_s: int = Field(default=120, ge=1)
 
-
+"""
+策略配置（Policy Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 策略配置（Policy Configuration）
+"""
 class PolicyConfig(BaseModel):
     allow_network: bool = False
     confirm_write: bool = True
@@ -52,14 +87,23 @@ class PolicyConfig(BaseModel):
         description="禁止的工具名单。对标 Claude Code 的 disallowedTools。",
     )
 
-
+"""
+资源限制配置（Limits Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 资源限制配置（Limits Configuration）
+"""
 class LimitsConfig(BaseModel):
     max_output_bytes: int = Field(default=1_000_000, ge=1024)
     max_file_read_bytes: int = Field(default=1_000_000, ge=1024)
 
-
+"""
+日志系统配置（Logging Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 日志系统配置（Logging Configuration）
+"""
 class LoggingConfig(BaseModel):
-    """日志系统配置。"""
     log_to_console: bool = Field(
         default=True,
         description="是否将日志输出到控制台（默认 True，同时输出到控制台和文件）"
@@ -91,8 +135,14 @@ class LoggingConfig(BaseModel):
         description="日志时间格式。"
     )
 
+"""
+编排层配置（Orchestrator Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 编排层配置（Orchestrator Configuration）
+"""
 class OrchestratorConfig(BaseModel):
-    """编排层配置（阶段 3：规划-执行）。"""
+
     enable_planning: bool = Field(
         default=True,
         description="是否启用显式规划（Plan -> Execute）。默认开启。",
@@ -105,9 +155,13 @@ class OrchestratorConfig(BaseModel):
     max_replans: int = Field(default=2, ge=0, le=10, description="最大重规划次数（验证失败/卡住时）。")
     planning_retry: int = Field(default=1, ge=0, le=5, description="计划解析失败的重试次数。")
 
-
+"""
+RAG 配置（Retrieval-Augmented Generation Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief RAG 配置（Retrieval-Augmented Generation Configuration）
+"""
 class RAGConfig(BaseModel):
-    """RAG (Retrieval-Augmented Generation) 配置。"""
     enabled: bool = Field(default=True, description="是否启用向量检索。")
     device: str = Field(
         default="cpu",
@@ -172,9 +226,14 @@ from clude_code.config.tools_config import (
 # 向后兼容：保留 WeatherConfig 作为别名
 WeatherConfig = WeatherToolConfig
 
-
+"""
+UI 用户偏好配置（UI Preferences）
+@author chensong（chensong）
+@date 2026-01-19
+@brief UI 用户偏好配置（UI Preferences）
+"""
 class UIConfig(BaseModel):
-    """UI 用户偏好配置"""
+
     theme: str = Field(default="default", description="主题：default, dark, light")
     color_scheme: str = Field(default="vibrant", description="配色方案：vibrant, minimal, high_contrast")
     refresh_rate: int = Field(default=12, ge=1, le=60, description="Live 界面刷新率（Hz）")
@@ -186,31 +245,38 @@ class UIConfig(BaseModel):
     # 快捷键配置（键: 功能名）
     shortcuts: Dict[str, str] = Field(default_factory=dict, description="自定义快捷键映射")
 
-
+"""
+编辑器相关配置（Editor Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 编辑器相关配置（Editor Configuration）
+"""
 class EditorConfig(BaseModel):
-    """编辑器相关配置"""
     preferred_editor: str = Field(default="auto", description="首选编辑器：auto, vim, nano, vscode")
     line_numbers: bool = Field(default=True, description="是否显示行号")
     syntax_highlighting: bool = Field(default=True, description="是否启用语法高亮")
     auto_save: bool = Field(default=True, description="是否自动保存")
     tab_size: int = Field(default=4, ge=2, le=8, description="制表符大小")
 
-
+"""
+历史记录配置（History Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 历史记录配置（History Configuration）
+"""
 class HistoryConfig(BaseModel):
-    """历史记录配置"""
     max_history_size: int = Field(default=1000, ge=100, le=10000, description="最大历史记录数")
     history_file: str = Field(default="~/.clude/history.json", description="历史记录文件路径")
     save_history: bool = Field(default=True, description="是否保存历史记录")
     search_enabled: bool = Field(default=True, description="是否启用历史搜索")
 
-
+"""
+全局配置（Clude Global Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 全局配置（Clude Global Configuration）
+"""
 class CludeConfig(BaseSettings):
-    """
-    Config priority (high -> low):
-    - environment variables (prefix CLUDE_)
-    - config file (auto-loaded from .clude/.clude.yaml)
-    - defaults
-    """
 
     model_config = SettingsConfigDict(
         env_prefix="CLUDE_",
@@ -232,7 +298,7 @@ class CludeConfig(BaseSettings):
         - init_settings（代码显式传参）
         - env_settings（环境变量 CLUDE_）
         - dotenv_settings（.env 等）
-        - config file（.clude/.clude.yaml）
+        - config file（~/.clude/.clude.yaml，兼容读取工作区/旧文件名）
         - file_secret_settings
         - defaults（字段默认值）
 
@@ -244,7 +310,11 @@ class CludeConfig(BaseSettings):
             try:
                 return _load_config_from_file()
             except Exception as e:
-                print(f"警告：读取 YAML 配置失败，将使用默认/环境变量配置: {e}")
+                _logger.warning(
+                    "读取 YAML 配置失败，将使用默认/环境变量配置: %s",
+                    e,
+                    exc_info=True,
+                )
                 return {}
 
         # 目标优先级：init > env > dotenv > file > secrets > defaults
@@ -278,37 +348,53 @@ class CludeConfig(BaseSettings):
     skill: SkillToolConfig = SkillToolConfig()
     task: TaskToolConfig = TaskToolConfig()
 
-
+"""
+扩展配置（Extended Configuration）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 扩展配置（Extended Configuration）
+"""
 class ExtendedCludeConfig(CludeConfig):
-    """扩展的配置类，包含UI和其他用户偏好"""
 
     # 新增配置
     ui: UIConfig = Field(default_factory=UIConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
-
+"""
+配置管理器（Config Manager）
+@author chensong（chensong）
+@date 2026-01-19
+@brief 配置管理器（Config Manager）
+"""
 class ConfigManager:
-    """配置管理器，负责配置的加载、保存和运行时更新"""
 
+    # 约定：Python 禁止类体 Docstring；本行用于避免后续“声明前注释块”被解释为 class __doc__
+    _NO_CLASS_DOCSTRING: bool = True
+
+    """
+    初始化配置管理器（Init Config Manager）
+    @brief 负责配置的加载、保存、导入导出与运行时更新（Config Load/Save/Update）
+    """
     def __init__(self, config_path: Optional[str] = None):
-        """初始化配置管理器
-
-        Args:
-            config_path: 配置文件路径，如果为None则使用默认路径
-        """
         self.config_path = Path(config_path) if config_path else self._get_default_config_path()
         self.config = self._load_config()
 
+    """
+    获取默认配置文件路径（Get Default Config Path）
+    @brief 主配置文件固定为用户目录 ~/.clude/.clude.yaml
+    """
     def _get_default_config_path(self) -> Path:
-        """获取默认配置文件路径"""
         # 主配置文件位置固定为用户目录：~/.clude/.clude.yaml
         # 说明：工作区 .clude/.clude.yaml 仅作为 CludeConfig 的兼容读取来源，
         # ConfigManager 的“可编辑配置”统一落在用户目录，避免多份配置导致困惑。
         return Path.home() / ".clude" / ".clude.yaml"
 
+    """
+    加载配置文件（Load Config）
+    @brief 支持 YAML 为主，JSON 为历史兼容；失败时回退到代码默认值
+    """
     def _load_config(self) -> ExtendedCludeConfig:
-        """加载配置文件"""
         try:
             if self.config_path.exists():
                 suffix = self.config_path.suffix.lower()
@@ -344,12 +430,15 @@ class ConfigManager:
                     pass  # 保存失败时不影响程序运行
                 return config
         except Exception as e:
-            print(f"警告：加载配置文件失败，使用默认配置: {e}")
+            _logger.warning("加载配置文件失败，使用默认配置: %s", e, exc_info=True)
             # 纯代码默认值，不受 env / file 影响
             return ExtendedCludeConfig.model_construct()
 
+    """
+    保存配置到文件（Save Config）
+    @brief 默认写 YAML，并通过模板渲染保留中文注释；仅显式 .json 才写 JSON
+    """
     def _save_config(self, config: ExtendedCludeConfig) -> None:
-        """保存配置到文件"""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             data = config.model_dump()
@@ -369,27 +458,32 @@ class ConfigManager:
                 text = _render_commented_yaml(data)
                 self.config_path.write_text(text, encoding="utf-8")
         except Exception as e:
-            print(f"警告：保存配置文件失败: {e}")
+            _logger.warning("保存配置文件失败: %s", e, exc_info=True)
 
+    """
+    保存当前配置（Save Current Config）
+    """
     def save_config(self) -> None:
-        """保存当前配置"""
         self._save_config(self.config)
 
+    """
+    重新加载配置（Reload Config）
+    """
     def reload_config(self) -> None:
-        """重新加载配置"""
         self.config = self._load_config()
 
+    """
+    获取当前配置（Get Current Config）
+    """
     def get_config(self) -> ExtendedCludeConfig:
-        """获取当前配置"""
         return self.config
 
+    """
+    更新配置项（Update Config Value）
+    @param key_path 配置路径（如 ui.theme / llm.model）
+    @param value 新值（New Value）
+    """
     def update_config(self, key_path: str, value: Any) -> None:
-        """更新配置项（支持嵌套路径）
-
-        Args:
-            key_path: 配置路径，如 "ui.theme" 或 "llm.model"
-            value: 新值
-        """
         try:
             keys = key_path.split('.')
             obj = self.config
@@ -411,15 +505,12 @@ class ConfigManager:
         except Exception as e:
             raise ValueError(f"更新配置失败: {e}")
 
+    """
+    获取配置值（Get Config Value）
+    @param key_path 配置路径（如 ui.theme / llm.model）
+    @return 配置值（Config Value）
+    """
     def get_config_value(self, key_path: str) -> Any:
-        """获取配置值（支持嵌套路径）
-
-        Args:
-            key_path: 配置路径，如 "ui.theme" 或 "llm.model"
-
-        Returns:
-            配置值
-        """
         try:
             keys = key_path.split('.')
             obj = self.config
@@ -435,20 +526,20 @@ class ConfigManager:
         except Exception as e:
             raise ValueError(f"获取配置失败: {e}")
 
+    """
+    重置为默认配置（Reset To Defaults）
+    @brief 纯代码默认值：不受 env/file 影响（符合规范 3.2 默认值来源）
+    """
     def reset_to_defaults(self) -> None:
-        """重置为默认配置"""
-        self.config = ExtendedCludeConfig()
+        # 纯代码默认值：不受 env / file 影响（符合规范 3.2 “默认值来源”）
+        self.config = ExtendedCludeConfig.model_construct()
         self.save_config()
 
+    """
+    导出配置（Export Config）
+    @param export_path 导出路径；为空则返回字符串（YAML 文本）
+    """
     def export_config(self, export_path: Optional[str] = None) -> str:
-        """导出配置到文件
-
-        Args:
-            export_path: 导出路径，如果为None则返回字符串
-
-        Returns:
-            如果export_path为None，返回配置字符串，否则返回文件路径
-        """
         data = self.config.model_dump()
 
         if export_path:
@@ -468,12 +559,11 @@ class ConfigManager:
             else:
                 return json.dumps(data, indent=2, ensure_ascii=False, default=str)
 
+    """
+    导入配置（Import Config）
+    @param import_path 导入文件路径（YAML/JSON）
+    """
     def import_config(self, import_path: str) -> None:
-        """从文件导入配置
-
-        Args:
-            import_path: 导入文件路径
-        """
         import_file = Path(import_path)
         if not import_file.exists():
             raise FileNotFoundError(f"配置文件不存在: {import_path}")
@@ -501,12 +591,11 @@ class ConfigManager:
         except Exception as e:
             raise ValueError(f"导入配置失败，配置格式错误: {e}")
 
+    """
+    验证配置有效性（Validate Config）
+    @return 是否有效（True/False）
+    """
     def validate_config(self) -> bool:
-        """验证当前配置是否有效
-
-        Returns:
-            True if valid, False otherwise
-        """
         try:
             # 尝试创建配置对象来验证
             ExtendedCludeConfig(**self.config.model_dump())
@@ -514,8 +603,11 @@ class ConfigManager:
         except Exception:
             return False
 
+    """
+    获取配置摘要（Get Config Summary）
+    @return 摘要字典（Summary Dict）
+    """
     def get_config_summary(self) -> Dict[str, Any]:
-        """获取配置摘要"""
         return {
             "config_file": str(self.config_path),
             "config_valid": self.validate_config(),
@@ -531,35 +623,30 @@ class ConfigManager:
 _config_manager: Optional[ConfigManager] = None
 
 
+"""
+获取全局配置管理器实例（Get Global Config Manager）
+"""
 def get_config_manager() -> ConfigManager:
-    """获取全局配置管理器实例"""
     global _config_manager
     if _config_manager is None:
         _config_manager = ConfigManager()
     return _config_manager
 
 
+"""
+初始化全局配置管理器（Init Global Config Manager）
+"""
 def init_config_manager(config_path: Optional[str] = None) -> ConfigManager:
-    """初始化配置管理器"""
     global _config_manager
     _config_manager = ConfigManager(config_path)
     return _config_manager
 
 
+"""
+查找配置文件（Find Config File）
+@brief 搜索顺序：~/.clude/.clude.yaml → ~/.clude/.clude.yml → ./.clude/.clude.yaml → ./.clude/.clude.yml → ./clude.yaml → ./clude.yml
+"""
 def _find_config_file() -> Optional[Path]:
-    """查找配置文件（按优先级顺序）
-
-    搜索顺序：
-    1. ~/.clude/.clude.yaml   （主配置位置）
-    2. ~/.clude/.clude.yml
-    3. ./.clude/.clude.yaml   （工作区级覆盖/兼容）
-    4. ./.clude/.clude.yml
-    5. ./clude.yaml (向后兼容)
-    6. ./clude.yml (向后兼容)
-
-    Returns:
-        配置文件路径，如果找到的话
-    """
     home = Path.home()
     search_paths = [
         home / ".clude" / ".clude.yaml",
@@ -577,44 +664,39 @@ def _find_config_file() -> Optional[Path]:
     return None
 
 
+"""
+从 YAML 文件加载配置（Load YAML Config）
+"""
 def _load_yaml_config(config_path: Path) -> Dict[str, Any]:
-    """从YAML文件加载配置
-
-    Args:
-        config_path: 配置文件路径
-
-    Returns:
-        配置字典
-    """
     if not YAML_AVAILABLE:
         raise ImportError("PyYAML is not installed. Install with: pip install PyYAML")
 
     with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f) or {}
 
+"""从文件加载配置（如果存在的话）
 
+Returns:
+    从文件加载的配置字典
+"""
 def _load_config_from_file() -> Dict[str, Any]:
-    """从文件加载配置（如果存在的话）
 
-    Returns:
-        从文件加载的配置字典
-    """
     config_file = _find_config_file()
     if config_file:
         try:
             return _load_yaml_config(config_file)
         except Exception as e:
             # 如果加载失败，返回空字典，使用默认配置；同时给出可观测的告警
-            print(f"警告：加载配置文件失败（{config_file}），将使用默认配置: {e}")
+            _logger.warning("加载配置文件失败（%s），将使用默认配置: %s", config_file, e, exc_info=True)
 
     return {}
 
 
+"""
+生成 YAML 顶层 key 顺序（Order Top-level YAML Keys）
+@brief 按 .clude/.clude.example.yaml 的顺序输出，保证可读性与一致性
+"""
 def _order_top_level_keys_for_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    将顶层 key 按 .clude/.clude.example.yaml 的顺序输出，保证配置文件可读性与一致性。
-    未在顺序表里的 key 会按原有顺序追加到末尾。
-    """
     preferred_order = [
         # 额外字段：如果存在，放到最前（示例文件未包含，但项目配置包含）
         "workspace_root",
@@ -653,8 +735,11 @@ def _order_top_level_keys_for_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     return dict(ordered)
 
 
+"""
+定位仓库根目录（Find Repo Root）
+@brief 用于读取 .clude/.clude.example.yaml 注释模板
+"""
 def _get_repo_root() -> Optional[Path]:
-    """尽量定位仓库根目录（用于读取 .clude/.clude.example.yaml 模板）。"""
     try:
         # .../src/clude_code/config/config.py -> parents: config, clude_code, src, repo_root
         return Path(__file__).resolve().parents[3]
@@ -662,8 +747,10 @@ def _get_repo_root() -> Optional[Path]:
         return None
 
 
+"""
+渲染单行 YAML 标量（Render YAML Scalar）
+"""
 def _yaml_inline_scalar(value: Any) -> str:
-    """将 Python 值渲染为单行 YAML scalar/flow 值。"""
     if not YAML_AVAILABLE:
         return str(value)
     dumped = yaml.safe_dump(
@@ -685,22 +772,22 @@ def _get_by_path(data: Dict[str, Any], path: list[str]) -> Any:
     return cur
 
 
+"""
+拆分值与行尾注释（Split Value & Comment）
+@brief 处理 `: xxx  # comment` 形式（适用于模板渲染）
+"""
 def _split_value_and_comment(rest: str) -> tuple[str, str]:
-    """
-    将 `: xxx  # comment` 分成 value 与 comment（保留 # 及其后内容）。
-    简化实现：以第一个 `#` 作为注释起点（适用于我们的示例模板）。
-    """
     if "#" not in rest:
         return rest.rstrip(), ""
     idx = rest.find("#")
     return rest[:idx].rstrip(), rest[idx:].rstrip()
 
 
+"""
+生成带中文注释的 YAML 文本（Render Commented YAML）
+@brief 以 `.clude/.clude.example.yaml` 为模板按路径替换值，保留注释与顺序
+"""
 def _render_commented_yaml(data: Dict[str, Any]) -> str:
-    """
-    生成带中文注释的 YAML 配置文本。
-    策略：以 `.clude/.clude.example.yaml` 为模板，按 key 路径替换值，保留原注释与顺序。
-    """
     ordered_data = _order_top_level_keys_for_yaml(data)
 
     repo_root = _get_repo_root()

@@ -49,7 +49,8 @@ class ConfigWizard:
             "高性能": {
                 "description": "适合高性能环境，最大化处理能力",
                 "config": {
-                    "llm.max_tokens": 819200,
+                    # 与 LLMConfig.max_tokens 上限保持一致，避免触发配置校验失败
+                    "llm.max_tokens": 409600,
                     "rag.device": "cuda" if platform.system() != "Darwin" else "mps",
                     "rag.embed_batch_size": 128,
                     "limits.max_file_read_bytes": 2_000_000,
