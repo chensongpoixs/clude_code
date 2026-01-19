@@ -254,6 +254,9 @@ class AgentLoop:
 
         # 阶段 C: 清空本轮修改追踪
         self._turn_modified_paths.clear()
+        # LLM 请求/返回日志：本轮只打印“本轮新增 user + 本次返回”，不输出历史轮次
+        # 说明：llm_io.py 会用这个 cursor 计算“本次请求新增消息”的切片范围
+        self._llm_log_cursor = len(self.messages)
 
         keywords = self._extract_keywords(user_text)
 

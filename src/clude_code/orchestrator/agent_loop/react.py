@@ -32,8 +32,6 @@ def execute_react_fallback_loop(
         loop.logger.info(f"[bold yellow]→ 第 {iteration + 1} 轮：请求 LLM（消息数={len(loop.messages)}）[/bold yellow]")
         _ev("llm_request", {"messages": len(loop.messages)})
 
-        loop._log_llm_request_params_to_file()
-
         try:
             assistant = _llm_chat("react_fallback", None)
         except RuntimeError as e:
@@ -68,7 +66,6 @@ def execute_react_fallback_loop(
         loop.logger.debug(f"[dim]LLM 响应长度: {len(assistant)} 字符[/dim]")
 
         tool_call = _try_parse_tool_call(assistant)
-        loop._log_llm_response_data_to_file(assistant, tool_call)
 
         if tool_call is None:
             loop.logger.info("[bold green]✓ LLM 返回最终回复（无工具调用）[/bold green]")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import time
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -96,6 +97,12 @@ def llm_chat(
     - 避免在多个调用点各自打印造成遗漏或输出不一致。
     """
     normalize_messages_for_llama(loop, stage, step_id=step_id, _ev=_ev)
+    # 记录本次 stage/step_id，供后续 request/response 日志使用（避免把历史轮次 messages 打出来）
+    try:
+        loop._last_llm_stage = stage
+        loop._last_llm_step_id = step_id
+    except Exception:
+        pass
 
     # 0) 估算 prompt tokens（轻量，不依赖服务端 usage）
     prompt_tokens_est = 0
@@ -129,7 +136,7 @@ def llm_chat(
             # 完整 messages 列表（供 TUI 显示系统/用户提示词）
             "messages": messages_full,
         }
-        # 写入文件（详细）
+        # 写入文件（详细）：只打印本次请求新增的 user，不打印历史轮次 messages
         log_llm_request_params_to_file(loop)
         # 控制台/trace（摘要）
         if _ev:
@@ -152,6 +159,7 @@ def llm_chat(
             "text_length": len(assistant_text),
             "text_preview": assistant_text,
         }
+        # 返回日志：只打印本次返回 assistant_text（不打印历史轮次）
         log_llm_response_data_to_file(loop, assistant_text, tool_call=None)
         if _ev:
             _ev("llm_response_data", resp_obj)
@@ -189,35 +197,129 @@ def llm_chat(
 
 
 def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
-    """把本次 LLM 请求参数（含 messages 摘要）写入 file_only_logger。"""
-    request_params = {
-        "model": loop.llm.model,
-        "temperature": loop.llm.temperature,
-        "max_tokens": loop.llm.max_tokens,
-        "api_mode": loop.llm.api_mode,
-        "base_url": loop.llm.base_url,
-        "messages_count": len(loop.messages),
-        "messages": [
-            {
-                "role": msg.role,
-                "content_preview": msg.content,
-                "content_length": len(msg.content),
-            }
-            for msg in loop.messages
-        ],
-    }
-    loop.file_only_logger.info(f"请求大模型参数: {json.dumps(request_params, ensure_ascii=False, indent=2)}")
+    """纯文本：只打印“本次请求新增的 user 文本”，不打印历史轮次 messages。"""
+    llm_cfg = getattr(getattr(loop, "cfg", None), "llm_detail_logging", None)
+    enabled = bool(getattr(llm_cfg, "enabled", True)) if llm_cfg is not None else True
+    log_to_file = bool(getattr(llm_cfg, "log_to_file", True)) if llm_cfg is not None else True
+    log_to_console = bool(getattr(llm_cfg, "log_to_console", False)) if llm_cfg is not None else False
+    include_params = bool(getattr(llm_cfg, "include_params", True)) if llm_cfg is not None else True
+    include_caller = bool(getattr(llm_cfg, "include_caller", False)) if llm_cfg is not None else False
+    max_user_chars = int(getattr(llm_cfg, "max_user_chars", 20000) or 0) if llm_cfg is not None else 0
+
+    if not enabled:
+        return
+
+    # 计算“本次请求新增消息”：使用 run_turn 初始化的 cursor + llm_chat 每次发送后推进 cursor
+    base = 0
+    try:
+        base = int(getattr(loop, "_llm_log_cursor", 0) or 0)
+    except Exception:
+        base = 0
+    if base < 0:
+        base = 0
+    if base > len(loop.messages):
+        base = len(loop.messages)
+
+    new_msgs = loop.messages[base:]
+    new_users = [m for m in new_msgs if getattr(m, "role", None) == "user"]
+
+    # 推进 cursor：确保下一次只打印新增部分
+    try:
+        loop._llm_log_cursor = len(loop.messages)
+    except Exception:
+        pass
+
+    caller = None
+    if include_caller:
+        # 轻量取外层调用点：跳过 llm_io 自身帧
+        frame = None
+        try:
+            frame = inspect.currentframe()
+            cur = frame.f_back if frame else None
+            while cur is not None:
+                fn = cur.f_code.co_filename or ""
+                mod = cur.f_globals.get("__name__", "") or ""
+                func = cur.f_code.co_name or "<unknown>"
+                if not fn.endswith("llm_io.py"):
+                    caller = f"{mod}.{func} ({fn}:{getattr(cur, 'f_lineno', 0)})"
+                    break
+                cur = cur.f_back
+        except Exception:
+            caller = None
+        finally:
+            try:
+                del frame
+            except Exception:
+                pass
+
+    # 按模板输出纯文本块（符合你要求：不是 JSON，直接打印发送了什么）
+    lines: list[str] = []
+    if caller:
+        lines.append(f"[caller] {caller}")
+    lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")
+    if include_params:
+        try:
+            lines.append(
+                f"model={loop.llm.model} api_mode={loop.llm.api_mode} max_tokens={loop.llm.max_tokens} "
+                f"temperature={loop.llm.temperature} base_url={loop.llm.base_url} "
+                f"stage={getattr(loop, '_last_llm_stage', None)} step_id={getattr(loop, '_last_llm_step_id', None)}"
+            )
+        except Exception:
+            pass
+
+    for i, m in enumerate(new_users, start=1):
+        content = m.content or ""
+        out = content
+        truncated = False
+        if max_user_chars > 0 and len(out) > max_user_chars:
+            out = out[:max_user_chars]
+            truncated = True
+        lines.append(f"--- user[{i}] ---")
+        if truncated:
+            lines.append(f"[truncated] original_len={len(content)} max_user_chars={max_user_chars}")
+        lines.append(out)
+
+    text = "\n".join(lines)
+    if log_to_file:
+        loop.file_only_logger.info(text)
+    if log_to_console:
+        loop.logger.info(text)
 
 
 def log_llm_response_data_to_file(loop: "AgentLoop", assistant_text: str, tool_call: dict[str, Any] | None) -> None:
-    """把本次 LLM 返回数据摘要写入 file_only_logger。"""
-    response_data = {
-        "text_length": len(assistant_text),
-        "text_preview":   assistant_text,
-        "truncated": len(assistant_text) > 500,
-        "has_tool_call": tool_call is not None,
-        "tool_call": tool_call if tool_call else None,
-    }
-    loop.file_only_logger.info(f"大模型返回数据: {json.dumps(response_data, ensure_ascii=False, indent=2)}")
+    """纯文本：只打印“本次返回 assistant_text”，不打印历史轮次 messages。"""
+    llm_cfg = getattr(getattr(loop, "cfg", None), "llm_detail_logging", None)
+    enabled = bool(getattr(llm_cfg, "enabled", True)) if llm_cfg is not None else True
+    log_to_file = bool(getattr(llm_cfg, "log_to_file", True)) if llm_cfg is not None else True
+    log_to_console = bool(getattr(llm_cfg, "log_to_console", False)) if llm_cfg is not None else False
+    include_tool_call = bool(getattr(llm_cfg, "include_tool_call", True)) if llm_cfg is not None else True
+    max_response_chars = int(getattr(llm_cfg, "max_response_chars", 20000) or 0) if llm_cfg is not None else 0
+
+    if not enabled:
+        return
+
+    out = assistant_text or ""
+    truncated = False
+    if max_response_chars > 0 and len(out) > max_response_chars:
+        out = out[:max_response_chars]
+        truncated = True
+
+    lines: list[str] = []
+    lines.append("===== 本轮 LLM 返回文本 =====")
+    lines.append("--- assistant_text ---")
+    if truncated:
+        lines.append(f"[truncated] original_len={len(assistant_text or '')} max_response_chars={max_response_chars}")
+    lines.append(out)
+    if include_tool_call and tool_call is not None:
+        lines.append("--- tool_call (parsed) ---")
+        try:
+            lines.append(json.dumps(tool_call, ensure_ascii=False, indent=2))
+        except Exception:
+            lines.append("<unserializable>")
+    text = "\n".join(lines)
+    if log_to_file:
+        loop.file_only_logger.info(text)
+    if log_to_console:
+        loop.logger.info(text)
 
 

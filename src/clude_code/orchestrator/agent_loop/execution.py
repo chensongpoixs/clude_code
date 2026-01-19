@@ -87,8 +87,6 @@ def execute_single_step_iteration(
     )
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
 
-    loop._log_llm_request_params_to_file()
-
     step_prompt = (
         f"现在执行计划步骤：{step.id}\n"
         f"步骤描述：{step.description}\n"
@@ -164,7 +162,6 @@ def execute_single_step_iteration(
         return "REPLAN", False, False
 
     tool_call = _try_parse_tool_call(assistant)
-    loop._log_llm_response_data_to_file(assistant, tool_call)
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)

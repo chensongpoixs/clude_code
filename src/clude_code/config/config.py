@@ -136,6 +136,28 @@ class LoggingConfig(BaseModel):
     )
 
 """
+LLM 详细日志配置（LLM Detail Logging）
+@author chensong（chensong）
+@date 2026-01-19
+@brief LLM 请求/返回日志：仅打印本次新增 user 与本次返回（避免历史轮次刷屏）
+"""
+class LLMDetailLoggingConfig(BaseModel):
+    enabled: bool = Field(default=True, description="是否启用 LLM 请求/返回日志。")
+    scope: str = Field(
+        default="per_request",
+        description="打印范围：per_request=每次请求仅打印本次新增 user；per_turn=整轮累计打印。",
+    )
+    log_to_file: bool = Field(default=True, description="是否写入 file_only_logger。")
+    log_to_console: bool = Field(default=True, description="是否输出到控制台 logger。")
+    include_params: bool = Field(default=True, description="请求日志是否包含 model/api_mode/max_tokens/base_url 摘要。")
+    include_tool_call: bool = Field(default=True, description="返回日志是否包含 tool_call（如存在）。")
+    max_user_chars: int = Field(default=20000, ge=0, description="单条 user 最大打印字符数（0=不截断）。")
+    max_response_chars: int = Field(default=20000, ge=0, description="assistant_text 最大打印字符数（0=不截断）。")
+    include_caller: bool = Field(default=True, description="是否打印调用方（module.func + file:line）。")
+    call_flow_enabled: bool = Field(default=True, description="是否实时打印 LLM 调用流程（CALL_START/CALL_END）。")
+    call_flow_summary: bool = Field(default=False, description="turn 结束时是否打印调用流程汇总（默认关闭）。")
+
+"""
 编排层配置（Orchestrator Configuration）
 @author chensong（chensong）
 @date 2026-01-19
@@ -331,6 +353,7 @@ class CludeConfig(BaseSettings):
     policy: PolicyConfig = PolicyConfig()
     limits: LimitsConfig = LimitsConfig()
     logging: LoggingConfig = LoggingConfig()
+    llm_detail_logging: LLMDetailLoggingConfig = LLMDetailLoggingConfig()
     orchestrator: OrchestratorConfig = OrchestratorConfig()
     rag: RAGConfig = RAGConfig()
 
@@ -705,6 +728,7 @@ def _order_top_level_keys_for_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
         "policy",
         "limits",
         "logging",
+        "llm_detail_logging",
         "orchestrator",
         "rag",
         # 工具模块配置（与示例一致）
