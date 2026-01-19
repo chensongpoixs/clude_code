@@ -9,7 +9,10 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="http://127.0.0.1:8899")
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion |ggml-org/gemma-3-12b-it-GGUF
 	#aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
-    model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
+    #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
+    model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
+    #model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-4b-it-qat-GGUF")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=409600, ge=1, le=8192, description="LLM 输出 token 限制（非上下文窗口大小，通常 512-2048 足够）") 
@@ -42,7 +45,7 @@ class LoggingConfig(BaseModel):
         description="是否将日志输出到控制台（默认 True，同时输出到控制台和文件）"
     )
     level: str = Field(
-        default="INFO",
+        default="DEBUG",
         description="日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL。"
     )
     file_path: str = Field(
@@ -160,6 +163,10 @@ class WeatherConfig(BaseModel):
         ge=0,
         le=3600,
         description="天气数据缓存时间（秒，0=不缓存）。业界推荐 5-10 分钟避免频繁请求。"
+    )
+    log_to_file: bool = Field(
+        default=True,
+        description="是否将天气模块的日志写入文件。默认 True，写入 .clude/logs/app.log。"
     )
 
 

@@ -20,3 +20,5 @@
 /src/clude_code/core/__pycache__
 /src/clude_code/plugins/ui/__pycache__
 /tests/__pycache__
+/config/config.json
+/config/test_config.json

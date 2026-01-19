@@ -68,4 +68,5 @@ weather:
   default_lang: zh_cn                   # 默认返回中文
   timeout_s: 10                         # 请求超时时间
   cache_ttl_s: 300                      # 缓存时间（秒），避免频繁请求
+  log_to_file: true                     # 是否将天气模块日志写入文件（默认 true，写入 .clude/logs/app.log）
 

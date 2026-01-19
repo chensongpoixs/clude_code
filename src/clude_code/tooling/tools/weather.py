@@ -21,8 +21,8 @@ from enum import Enum
 
 from clude_code.tooling.types import ToolResult, ToolError
 
-# P1-1: 模块级 logger
-_logger = logging.getLogger(__name__)
+# P1-1: 模块级 logger（延迟初始化，在 set_weather_config() 中配置）
+_logger: logging.Logger | None = None
 
 # 可选依赖：requests
 try:
@@ -133,15 +133,117 @@ ENV_API_KEY = "OPENWEATHERMAP_API_KEY"
 _config_cache: dict[str, Any] = {}
 
 
+def _ensure_logger_initialized(cfg: Any | None = None) -> logging.Logger:
+    """
+    确保 logger 已初始化（延迟初始化）。
+    
+    如果 logger 未初始化，则使用统一日志系统创建并配置 logger。
+    优先使用传入的配置，如果没有配置则使用默认值。
+    
+    Args:
+        cfg: CludeConfig 或 WeatherConfig 对象（可选）
+    
+    Returns:
+        已配置的 Logger 实例
+    """
+    global _logger
+    
+    if _logger is None:
+        from clude_code.observability.logger import get_logger
+        
+        # 确定 workspace_root
+        workspace_root = "."
+        if cfg is not None:
+            if hasattr(cfg, "workspace_root"):
+                workspace_root = cfg.workspace_root
+            elif hasattr(cfg, "weather") and hasattr(cfg.weather, "workspace_root"):
+                # 从 CludeConfig 获取
+                workspace_root = cfg.workspace_root
+        
+        # 确定日志配置
+        if cfg is not None:
+            if hasattr(cfg, "logging"):
+                # 从 CludeConfig 获取日志配置
+                logging_cfg = cfg.logging
+            elif hasattr(cfg, "weather"):
+                # 从 CludeConfig 获取（通过 weather 属性判断）
+                from clude_code.config import CludeConfig
+                if isinstance(cfg, CludeConfig):
+                    logging_cfg = cfg.logging
+                else:
+                    from clude_code.config import LoggingConfig
+                    logging_cfg = LoggingConfig()
+            else:
+                from clude_code.config import LoggingConfig
+                logging_cfg = LoggingConfig()
+        else:
+            # 使用默认配置
+            from clude_code.config import LoggingConfig
+            logging_cfg = LoggingConfig()
+        
+        # 确定是否写入文件（从天气配置获取，如果未配置则默认 True）
+        log_to_file = True
+        if cfg is not None:
+            if hasattr(cfg, "weather") and hasattr(cfg.weather, "log_to_file"):
+                log_to_file = cfg.weather.log_to_file
+            elif hasattr(cfg, "log_to_file"):
+                log_to_file = cfg.log_to_file
+        # 也可以从已缓存的配置中获取（如果已调用过 set_weather_config）
+        if _config_cache and "log_to_file" in _config_cache:
+            log_to_file = _config_cache.get("log_to_file", True)
+        
+        # 创建并配置 logger
+        # 如果 log_to_file=False，则不传入 workspace_root，这样就不会创建文件 handler
+        # get_logger() 的逻辑：如果 log_file 为 None 且 workspace_root 为 None，则不会创建文件 handler
+        logger_workspace_root = workspace_root if log_to_file else None
+        logger_file_path = None
+        if log_to_file and hasattr(logging_cfg, "file_path") and logging_cfg.file_path:
+            logger_file_path = logging_cfg.file_path
+        
+        _logger = get_logger(
+            __name__,
+            workspace_root=logger_workspace_root,
+            log_file=logger_file_path,
+            log_to_console=logging_cfg.log_to_console,
+            level=logging_cfg.level,
+            log_format=logging_cfg.log_format,
+            date_format=logging_cfg.date_format,
+        )
+    
+    return _logger
+
+
+def _get_logger() -> logging.Logger:
+    """
+    获取 logger（如果未初始化则使用默认配置初始化）。
+    
+    这是一个包装函数，确保在使用 logger 前已初始化。
+    如果 set_weather_config() 还未调用，则使用默认配置初始化。
+    
+    Returns:
+        Logger 实例
+    """
+    global _logger
+    if _logger is None:
+        # 使用默认配置初始化（向后兼容）
+        return _ensure_logger_initialized(None)
+    return _logger
+
+
 def set_weather_config(cfg: Any) -> None:
     """
     设置天气配置（由 AgentLoop 在初始化时调用）
+    
+    此函数会初始化 logger（如果尚未初始化），确保日志能够写入文件。
     
     Args:
         cfg: CludeConfig 对象或其 weather 属性
     """
     global _config_cache
-    _logger.debug(f"[Weather] 开始加载天气配置, 配置类型: {type(cfg).__name__}")
+    
+    # 确保 logger 已初始化（使用传入的配置）
+    logger = _ensure_logger_initialized(cfg)
+    logger.debug(f"[Weather] 开始加载天气配置, 配置类型: {type(cfg).__name__}")
     
     if hasattr(cfg, "weather"):
         # 传入的是 CludeConfig
@@ -152,14 +254,16 @@ def set_weather_config(cfg: Any) -> None:
             "timeout_s": cfg.weather.timeout_s,
             "enabled": cfg.weather.enabled,
             "cache_ttl_s": getattr(cfg.weather, "cache_ttl_s", 300),
+            "log_to_file": getattr(cfg.weather, "log_to_file", True),
         }
-        _logger.info(
+        logger.info(
             f"[Weather] 配置加载完成:\n"
             f"  - enabled: {cfg.weather.enabled}\n"
             f"  - units: {cfg.weather.default_units}\n"
             f"  - lang: {cfg.weather.default_lang}\n"
             f"  - timeout: {cfg.weather.timeout_s}s\n"
             f"  - cache_ttl: {getattr(cfg.weather, 'cache_ttl_s', 300)}s\n"
+            f"  - log_to_file: {getattr(cfg.weather, 'log_to_file', True)}\n"
             f"  - api_key: {'已配置 (******)' if cfg.weather.api_key else '未配置'}"
         )
     elif hasattr(cfg, "api_key"):
@@ -171,18 +275,20 @@ def set_weather_config(cfg: Any) -> None:
             "timeout_s": cfg.timeout_s,
             "enabled": cfg.enabled,
             "cache_ttl_s": getattr(cfg, "cache_ttl_s", 300),
+            "log_to_file": getattr(cfg, "log_to_file", True),
         }
-        _logger.info(
+        logger.info(
             f"[Weather] 配置加载完成:\n"
             f"  - enabled: {cfg.enabled}\n"
             f"  - units: {cfg.default_units}\n"
             f"  - lang: {cfg.default_lang}\n"
             f"  - timeout: {cfg.timeout_s}s\n"
             f"  - cache_ttl: {getattr(cfg, 'cache_ttl_s', 300)}s\n"
+            f"  - log_to_file: {getattr(cfg, 'log_to_file', True)}\n"
             f"  - api_key: {'已配置 (******)' if cfg.api_key else '未配置'}"
         )
     else:
-        _logger.warning(f"[Weather] 无法解析天气配置: {type(cfg)}, 将使用默认值")
+        logger.warning(f"[Weather] 无法解析天气配置: {type(cfg)}, 将使用默认值")
 
 
 def _get_api_key() -> str | None:
@@ -196,15 +302,15 @@ def _get_api_key() -> str | None:
     # 优先使用环境变量
     env_key = os.environ.get(ENV_API_KEY)
     if env_key:
-        _logger.debug(f"[Weather] API Key 来源: 环境变量 {ENV_API_KEY}")
+        _get_logger().debug(f"[Weather] API Key 来源: 环境变量 {ENV_API_KEY}")
         return env_key
     
     # 其次使用配置文件
     if _config_cache.get("api_key"):
-        _logger.debug("[Weather] API Key 来源: 配置文件")
+        _get_logger().debug("[Weather] API Key 来源: 配置文件")
         return _config_cache["api_key"]
     
-    _logger.debug("[Weather] API Key 未配置")
+    _get_logger().debug("[Weather] API Key 未配置")
     return None
 
 
@@ -279,12 +385,12 @@ def get_weather(
     """
     # 记录请求开始
     query_desc = city if city else f"({lat}, {lon})"
-    _logger.info(f"[Weather] 开始获取天气: {query_desc}")
-    _logger.debug(f"[Weather] 请求参数: city={city}, lat={lat}, lon={lon}, units={units}, lang={lang}, timeout={timeout}")
+    _get_logger().info(f"[Weather] 开始获取天气: {query_desc}")
+    _get_logger().debug(f"[Weather] 请求参数: city={city}, lat={lat}, lon={lon}, units={units}, lang={lang}, timeout={timeout}")
     
     # 启用检查
     if not _is_enabled():
-        _logger.warning("[Weather] 天气工具已禁用，拒绝请求")
+        _get_logger().warning("[Weather] 天气工具已禁用，拒绝请求")
         return ToolResult(
             ok=False,
             error={
@@ -296,13 +402,13 @@ def get_weather(
     # 使用配置默认值（如果未指定）
     if units is None:
         units = _get_default_units()
-        _logger.debug(f"[Weather] 使用默认温度单位: {units}")
+        _get_logger().debug(f"[Weather] 使用默认温度单位: {units}")
     if lang is None:
         lang = _get_default_lang()
-        _logger.debug(f"[Weather] 使用默认语言: {lang}")
+        _get_logger().debug(f"[Weather] 使用默认语言: {lang}")
     if timeout is None:
         timeout = _get_default_timeout()
-        _logger.debug(f"[Weather] 使用默认超时: {timeout}s")
+        _get_logger().debug(f"[Weather] 使用默认超时: {timeout}s")
     
     # 缓存检查
     cache_key = _get_cache_key(city, lat, lon, units)
@@ -311,16 +417,16 @@ def get_weather(
         cached_time, cached_result = _weather_cache[cache_key]
         cache_age = time.time() - cached_time
         if cache_age < cache_ttl:
-            _logger.info(f"[Weather] 缓存命中: {cache_key}, 缓存年龄: {cache_age:.1f}s / TTL: {cache_ttl}s")
+            _get_logger().info(f"[Weather] 缓存命中: {cache_key}, 缓存年龄: {cache_age:.1f}s / TTL: {cache_ttl}s")
             return cached_result
         else:
-            _logger.debug(f"[Weather] 缓存过期: {cache_key}, 缓存年龄: {cache_age:.1f}s > TTL: {cache_ttl}s")
+            _get_logger().debug(f"[Weather] 缓存过期: {cache_key}, 缓存年龄: {cache_age:.1f}s > TTL: {cache_ttl}s")
     else:
-        _logger.debug(f"[Weather] 缓存未命中: {cache_key}")
+        _get_logger().debug(f"[Weather] 缓存未命中: {cache_key}")
     
     # 依赖检查
     if requests is None:
-        _logger.error("[Weather] requests 库未安装，无法发起 HTTP 请求")
+        _get_logger().error("[Weather] requests 库未安装，无法发起 HTTP 请求")
         return ToolResult(
             ok=False,
             error={
@@ -332,7 +438,7 @@ def get_weather(
     # API Key 检查
     api_key = _get_api_key()
     if not api_key:
-        _logger.error(f"[Weather] API Key 未配置，请设置环境变量 {ENV_API_KEY} 或配置文件")
+        _get_logger().error(f"[Weather] API Key 未配置，请设置环境变量 {ENV_API_KEY} 或配置文件")
         return ToolResult(
             ok=False,
             error={
@@ -352,7 +458,7 @@ def get_weather(
     
     # 参数验证
     if city is None and (lat is None or lon is None):
-        _logger.warning("[Weather] 参数不完整: 必须提供 city 或 lat+lon")
+        _get_logger().warning("[Weather] 参数不完整: 必须提供 city 或 lat+lon")
         return ToolResult(
             ok=False,
             error={
@@ -363,7 +469,7 @@ def get_weather(
     
     # 验证经纬度范围
     if lat is not None and (lat < -90 or lat > 90):
-        _logger.warning(f"[Weather] 纬度超出范围: {lat}")
+        _get_logger().warning(f"[Weather] 纬度超出范围: {lat}")
         return ToolResult(
             ok=False,
             error={
@@ -372,7 +478,7 @@ def get_weather(
             },
         )
     if lon is not None and (lon < -180 or lon > 180):
-        _logger.warning(f"[Weather] 经度超出范围: {lon}")
+        _get_logger().warning(f"[Weather] 经度超出范围: {lon}")
         return ToolResult(
             ok=False,
             error={
@@ -384,7 +490,7 @@ def get_weather(
     # 验证单位
     valid_units = ["metric", "imperial", "standard"]
     if units not in valid_units:
-        _logger.warning(f"[Weather] 无效的温度单位: {units}")
+        _get_logger().warning(f"[Weather] 无效的温度单位: {units}")
         return ToolResult(
             ok=False,
             error={
@@ -404,37 +510,37 @@ def get_weather(
         # 根据查询方式设置参数
         if city:
             # 先通过 Geocoding API 获取城市坐标（更准确）
-            _logger.debug(f"[Weather] 开始地理编码: {city}")
+            _get_logger().debug(f"[Weather] 开始地理编码: {city}")
             geo_result = _geocode_city(city, api_key, timeout)
             if not geo_result["ok"]:
-                _logger.warning(f"[Weather] 地理编码失败: {geo_result.get('error', {}).get('message', '未知错误')}")
+                _get_logger().warning(f"[Weather] 地理编码失败: {geo_result.get('error', {}).get('message', '未知错误')}")
                 return ToolResult(ok=False, error=geo_result["error"])
             params["lat"] = geo_result["lat"]
             params["lon"] = geo_result["lon"]
             resolved_city = geo_result.get("name", city)
             resolved_country = geo_result.get("country", "")
-            _logger.debug(f"[Weather] 地理编码成功: {city} -> ({params['lat']}, {params['lon']}), 解析名称: {resolved_city}")
+            _get_logger().debug(f"[Weather] 地理编码成功: {city} -> ({params['lat']}, {params['lon']}), 解析名称: {resolved_city}")
         else:
             params["lat"] = lat
             params["lon"] = lon
             resolved_city = f"{lat},{lon}"
             resolved_country = ""
-            _logger.debug(f"[Weather] 使用直接坐标: ({lat}, {lon})")
+            _get_logger().debug(f"[Weather] 使用直接坐标: ({lat}, {lon})")
         
         # 请求天气数据
         url = f"{OPENWEATHERMAP_BASE_URL}/weather"
         start_time = time.time()
-        _logger.debug(f"[Weather] 发起 API 请求: {url}")
-        _logger.debug(f"[Weather] 请求参数: lat={params['lat']}, lon={params['lon']}, units={units}, lang={lang}")
+        _get_logger().info(f"[Weather] 发起 API 请求: {url}")
+        _get_logger().info(f"[Weather] 请求参数: lat={params['lat']}, lon={params['lon']}, units={units}, lang={lang}")
         
         response = requests.get(url, params=params, timeout=timeout)
         elapsed_ms = (time.time() - start_time) * 1000
         
-        _logger.debug(f"[Weather] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
+        _get_logger().debug(f"[Weather] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
         
         # 处理 API 错误
         if response.status_code == 401:
-            _logger.error("[Weather] API 认证失败: API Key 无效或已过期")
+            _get_logger().error("[Weather] API 认证失败: API Key 无效或已过期")
             return ToolResult(
                 ok=False,
                 error={
@@ -448,7 +554,7 @@ def get_weather(
                 },
             )
         elif response.status_code == 404:
-            _logger.warning(f"[Weather] 未找到位置: {city or f'({lat}, {lon})'}")
+            _get_logger().warning(f"[Weather] 未找到位置: {city or f'({lat}, {lon})'}")
             return ToolResult(
                 ok=False,
                 error={
@@ -463,7 +569,7 @@ def get_weather(
                 },
             )
         elif response.status_code == 429:
-            _logger.error("[Weather] API 请求频率超限")
+            _get_logger().error("[Weather] API 请求频率超限")
             return ToolResult(
                 ok=False,
                 error={
@@ -474,7 +580,7 @@ def get_weather(
         
         response.raise_for_status()
         data = response.json()
-        _logger.debug(f"[Weather] 响应数据大小: {len(response.content)} bytes")
+        _get_logger().debug(f"[Weather] 响应数据大小: {len(response.content)} bytes")
         
         # 解析天气数据
         weather_data = WeatherData(
@@ -513,9 +619,9 @@ def get_weather(
         
         # 写入缓存
         _weather_cache[cache_key] = (time.time(), result)
-        _logger.debug(f"[Weather] 已写入缓存: {cache_key}, TTL={cache_ttl}s")
+        _get_logger().debug(f"[Weather] 已写入缓存: {cache_key}, TTL={cache_ttl}s")
         
-        _logger.info(
+        _get_logger().info(
             f"[Weather] 获取成功: {weather_data.city}, {weather_data.country} | "
             f"温度={weather_data.temperature}°, 天气={weather_data.weather_description}"
         )
@@ -523,7 +629,7 @@ def get_weather(
         return result
         
     except requests.Timeout:
-        _logger.error(f"[Weather] 请求超时: {timeout}s")
+        _get_logger().error(f"[Weather] 请求超时: {timeout}s")
         return ToolResult(
             ok=False,
             error={
@@ -538,7 +644,7 @@ def get_weather(
             },
         )
     except requests.RequestException as e:
-        _logger.warning(f"天气 API 请求失败: {e}", exc_info=True)
+        _get_logger().warning(f"天气 API 请求失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={
@@ -553,7 +659,7 @@ def get_weather(
             },
         )
     except Exception as e:
-        _logger.warning(f"获取天气时发生异常: {e}", exc_info=True)
+        _get_logger().warning(f"获取天气时发生异常: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={
@@ -583,19 +689,19 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
         "appid": api_key,
     }
     
-    _logger.debug(f"[Geocoding] 开始查询: {city}")
+    _get_logger().debug(f"[Geocoding] 开始查询: {city}")
     start_time = time.time()
     
     try:
         response = requests.get(url, params=params, timeout=timeout)
         elapsed_ms = (time.time() - start_time) * 1000
-        _logger.debug(f"[Geocoding] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
+        _get_logger().debug(f"[Geocoding] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
         
         response.raise_for_status()
         data = response.json()
         
         if not data:
-            _logger.warning(f"[Geocoding] 未找到城市: {city}")
+            _get_logger().warning(f"[Geocoding] 未找到城市: {city}")
             return {
                 "ok": False,
                 "error": {
@@ -607,7 +713,7 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
         location = data[0]
         local_name = location.get("local_names", {}).get("zh", location.get("name", city))
         country = location.get("country", "")
-        _logger.debug(f"[Geocoding] 解析成功: {city} -> {local_name}, {country} ({location['lat']}, {location['lon']})")
+        _get_logger().debug(f"[Geocoding] 解析成功: {city} -> {local_name}, {country} ({location['lat']}, {location['lon']})")
         
         return {
             "ok": True,
@@ -626,7 +732,7 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
             },
         }
     except requests.RequestException as e:
-        _logger.warning(f"Geocoding API 请求失败: {e}", exc_info=True)
+        _get_logger().warning(f"Geocoding API 请求失败: {e}", exc_info=True)
         return {
             "ok": False,
             "error": {
@@ -635,7 +741,7 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
             },
         }
     except (KeyError, IndexError, TypeError) as e:
-        _logger.warning(f"Geocoding API 响应解析失败: {e}", exc_info=True)
+        _get_logger().warning(f"Geocoding API 响应解析失败: {e}", exc_info=True)
         return {
             "ok": False,
             "error": {
@@ -644,7 +750,7 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
             },
         }
     except Exception as e:
-        _logger.warning(f"Geocoding 未知异常: {e}", exc_info=True)
+        _get_logger().warning(f"Geocoding 未知异常: {e}", exc_info=True)
         return {
             "ok": False,
             "error": {
@@ -679,11 +785,11 @@ def get_weather_forecast(
         ToolResult: 包含天气预报数据的工具结果
     """
     query_desc = city if city else f"({lat}, {lon})"
-    _logger.info(f"[Forecast] 开始获取天气预报: {query_desc}, days={days}")
+    _get_logger().info(f"[Forecast] 开始获取天气预报: {query_desc}, days={days}")
     
     # 启用检查
     if not _is_enabled():
-        _logger.warning("[Forecast] 天气工具已禁用，拒绝请求")
+        _get_logger().warning("[Forecast] 天气工具已禁用，拒绝请求")
         return ToolResult(
             ok=False,
             error={
@@ -700,11 +806,11 @@ def get_weather_forecast(
     if timeout is None:
         timeout = _get_default_timeout()
     
-    _logger.debug(f"[Forecast] 参数: units={units}, lang={lang}, timeout={timeout}s, days={days}")
+    _get_logger().debug(f"[Forecast] 参数: units={units}, lang={lang}, timeout={timeout}s, days={days}")
     
     # 依赖检查
     if requests is None:
-        _logger.error("[Forecast] requests 库未安装")
+        _get_logger().error("[Forecast] requests 库未安装")
         return ToolResult(
             ok=False,
             error={
@@ -716,7 +822,7 @@ def get_weather_forecast(
     # API Key 检查
     api_key = _get_api_key()
     if not api_key:
-        _logger.error("[Forecast] API Key 未配置")
+        _get_logger().error("[Forecast] API Key 未配置")
         return ToolResult(
             ok=False,
             error={
@@ -727,7 +833,7 @@ def get_weather_forecast(
     
     # 参数验证
     if city is None and (lat is None or lon is None):
-        _logger.warning("[Forecast] 参数不完整")
+        _get_logger().warning("[Forecast] 参数不完整")
         return ToolResult(
             ok=False,
             error={
@@ -744,28 +850,28 @@ def get_weather_forecast(
             "lang": lang,
             "cnt": cnt,
         }
-        _logger.debug(f"[Forecast] 数据点数量: {cnt} (days={days})")
+        _get_logger().debug(f"[Forecast] 数据点数量: {cnt} (days={days})")
         
         if city:
-            _logger.debug(f"[Forecast] 开始地理编码: {city}")
+            _get_logger().debug(f"[Forecast] 开始地理编码: {city}")
             geo_result = _geocode_city(city, api_key, timeout)
             if not geo_result["ok"]:
-                _logger.warning(f"[Forecast] 地理编码失败: {geo_result.get('error', {}).get('message')}")
+                _get_logger().warning(f"[Forecast] 地理编码失败: {geo_result.get('error', {}).get('message')}")
                 return ToolResult(ok=False, error=geo_result["error"])
             params["lat"] = geo_result["lat"]
             params["lon"] = geo_result["lon"]
-            _logger.debug(f"[Forecast] 地理编码成功: ({params['lat']}, {params['lon']})")
+            _get_logger().debug(f"[Forecast] 地理编码成功: ({params['lat']}, {params['lon']})")
         else:
             params["lat"] = lat
             params["lon"] = lon
         
         url = f"{OPENWEATHERMAP_BASE_URL}/forecast"
         start_time = time.time()
-        _logger.debug(f"[Forecast] 发起 API 请求: {url}")
+        _get_logger().debug(f"[Forecast] 发起 API 请求: {url}")
         
         response = requests.get(url, params=params, timeout=timeout)
         elapsed_ms = (time.time() - start_time) * 1000
-        _logger.debug(f"[Forecast] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
+        _get_logger().debug(f"[Forecast] API 响应: status={response.status_code}, 耗时={elapsed_ms:.1f}ms")
         
         response.raise_for_status()
         data = response.json()
@@ -786,7 +892,7 @@ def get_weather_forecast(
         
         city_name = data.get("city", {}).get("name", city or f"{lat},{lon}")
         country = data.get("city", {}).get("country", "")
-        _logger.info(f"[Forecast] 获取成功: {city_name}, {country} | 预报数据点: {len(forecasts)}")
+        _get_logger().info(f"[Forecast] 获取成功: {city_name}, {country} | 预报数据点: {len(forecasts)}")
         
         return ToolResult(
             ok=True,
@@ -800,7 +906,7 @@ def get_weather_forecast(
         )
         
     except requests.Timeout:
-        _logger.error(f"[Forecast] 请求超时: {timeout}s")
+        _get_logger().error(f"[Forecast] 请求超时: {timeout}s")
         return ToolResult(
             ok=False,
             error={
@@ -809,7 +915,7 @@ def get_weather_forecast(
             },
         )
     except requests.RequestException as e:
-        _logger.warning(f"[Forecast] 网络请求失败: {e}", exc_info=True)
+        _get_logger().warning(f"[Forecast] 网络请求失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={
@@ -818,7 +924,7 @@ def get_weather_forecast(
             },
         )
     except Exception as e:
-        _logger.warning(f"[Forecast] 获取天气预报失败: {e}", exc_info=True)
+        _get_logger().warning(f"[Forecast] 获取天气预报失败: {e}", exc_info=True)
         return ToolResult(
             ok=False,
             error={

@@ -207,6 +207,7 @@ weather:
   api_key: "your_api_key_here"
   default_units: metric    # metric=摄氏度, imperial=华氏度
   default_lang: zh_cn      # 默认中文
+  log_to_file: true         # 是否将天气模块日志写入文件（默认 true，写入 .clude/logs/app.log）
 ```
 
 ```bash
