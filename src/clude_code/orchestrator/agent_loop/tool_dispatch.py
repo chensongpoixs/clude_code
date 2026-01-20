@@ -185,8 +185,10 @@ def _h_grep(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
     return loop.tools.grep(
         pattern=args["pattern"],
         path=args.get("path", "."),
+        language=args.get("language", "all"),
+        include_glob=args.get("include_glob"),
         ignore_case=bool(args.get("ignore_case", False)),
-        max_hits=int(args.get("max_hits", 200)),
+        max_hits=int(args.get("max_hits", 100)),
     )
 
 
@@ -230,16 +232,16 @@ def _h_search_semantic(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
     # 语义检索属于 AgentLoop 的能力（依赖 embedder/vector_store），不直接放在 LocalTools
     return loop._semantic_search(query=args["query"])
 
+"""
+向用户输出信息（进度、分析结果、说明等）。
 
+实现原理：
+1. 从 AgentLoop 获取当前的 _ev 回调和 trace_id
+2. 调用 tooling/tools/display.py 中的 display 函数
+3. 通过事件机制广播到 UI（--live 模式）
+"""
 def _h_display(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    """
-    向用户输出信息（进度、分析结果、说明等）。
 
-    实现原理：
-    1. 从 AgentLoop 获取当前的 _ev 回调和 trace_id
-    2. 调用 tooling/tools/display.py 中的 display 函数
-    3. 通过事件机制广播到 UI（--live 模式）
-    """
     from clude_code.tooling.tools.display import display
 
     # 兼容旧字段：message -> content
@@ -361,26 +363,43 @@ def _spec_glob_file_search() -> ToolSpec:
     )
 
 
+"""
+ToolSpec：grep（只读；优先 rg）。
+"""
 def _spec_grep() -> ToolSpec:
-    """ToolSpec：grep（只读；优先 rg）。"""
     return ToolSpec(
         name="grep",
-        summary="代码搜索（优先 rg，fallback Python）。",
-        description=(
-            "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。\n"
-            "- 适合：定位函数名/类名/错误字符串/配置键。\n"
-            "- 建议：pattern 尽量具体；返回太多时用 path 限定目录或降低 max_hits。"
+        summary="全能跨语言代码搜索器。",
+        #summary="代码搜索（优先 rg，fallback Python）。",
+        # description=(
+        #     "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。\n"
+        #     "- 适合：定位函数名/类名/错误字符串/配置键。\n"
+        #     "- 建议：pattern 尽量具体；返回太多时用 path 限定目录或降低 max_hits。"
+        # ),
+        description=( 
+            "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。支持 C/C++/Java 等多种语言的自动后缀匹配。\n"
+            "如果你在寻找特定语言的定义（如 C++ 类或 Java 方法），指定 'language' 参数将极大提高准确率。"
         ),
         args_schema=_obj_schema(
             properties={
+                # "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
+                # "path": {"type": "string", "default": ".", "description": "搜索路径（相对工作区）"},
+                # "ignore_case": {"type": "boolean", "default": False, "description": "是否忽略大小写"},
+                # "max_hits": {"type": "integer", "default": 200, "minimum": 1, "description": "最多返回条数"},
                 "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
                 "path": {"type": "string", "default": ".", "description": "搜索路径（相对工作区）"},
-                "ignore_case": {"type": "boolean", "default": False, "description": "是否忽略大小写"},
-                "max_hits": {"type": "integer", "default": 200, "minimum": 1, "description": "最多返回条数"},
+                "language": {
+                    "type": "string", 
+                    "enum": ["all", "c", "cpp", "java", "python", "js", "go", "rust"],
+                    "description": "编程语言类型，会自动过滤相关的源码和头文件"
+                },
+                "include_glob": {"type": "string", "description": "文件名通配符过滤，如 'test_*.cpp'"},
+                "ignore_case": {"type": "boolean", "default": False},
+                "max_hits": {"type": "integer", "default": 100}
             },
             required=["pattern"],
         ),
-        example_args={"pattern": "class\\s+(?i)", "path": "src", "ignore_case": False, "max_hits": 200},
+        example_args={"pattern": "class\\s+(?i)", "path": ".", "language": "cpp",  "include_glob": "*.cpp", "ignore_case": False, "max_hits": 100},
         side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional={"rg"},

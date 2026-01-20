@@ -1,3 +1,21 @@
+"""
+Docstring for clude_code.tooling.tools.grep
+
+["rg", "--json"]与 ["rg", "--vimgrep", "--no-heading"]有什么区别呢
+这两种格式代表了不同的交互哲学：--json 是给程序（代码）读的，而 --vimgrep 是给人（或模拟人的 LLM）读的
+
+
+关键         区别                           总结
+特性	     --vimgrep	                   --json
+主要受众	LLM / 开发者（肉眼）	自动化脚本 / IDE 插件
+数据密度	极高（仅包含核心信息）	低（包含大量冗余元数据）
+Token 消耗	非常省	非常费
+解析难度	简单（字符串切割）	中等（需加载 JSON 库）
+匹配细节	仅行号和内容	包含字符精确位移（Offset）
+
+"""
+
+
 from __future__ import annotations
 
 import json
@@ -16,43 +34,120 @@ from ...config.tools_config import get_search_config
 _logger = get_tool_logger(__name__)
 
 
+LANG_EXTENSIONS = {
+    "c": [".c", ".h"],
+    "cpp": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh"],
+    "java": [".java"],
+    "python": [".py"],
+    "js": [".js", ".jsx", ".ts", ".tsx"],
+    "go": [".go"],
+    "rust": [".rs"]
+}
+
 _NOISE_DIRS = {".git", ".clude", "node_modules", ".venv", "dist", "build"}
 
+"""
+优先使用 ripgrep（rg）以获得更稳定性能和结构化输出；无 rg 时回退到 Python 扫描。
+大文件治理说明：
+- ripgrep 天然高效，且支持排除目录（.git、.clude 等），推荐优先使用。
+- Python 扫描时跳过大于 2MB 的  
+文件以避免卡顿。
+参数说明：
+- workspace_root: 工作区根目录
+- pattern: 正则表达式模式
+- path: 搜索路径
+- language: 指定语言类型（如 "c++", "java"），用于自动匹配文件后缀
+- include_glob: 额外的包含文件 glob 模式（如 "*.cpp"）
+- ignore_case: 是否忽略大小写
+- max_hits: 最大返回命中数
+返回： ToolResult，包含匹配结果列表
+"""
+def grep(*, workspace_root: Path, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
 
-def grep(*, workspace_root: Path, pattern: str, path: str = ".", ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
-    """
-    优先使用 ripgrep（rg）以获得更稳定性能和结构化输出；无 rg 时回退到 Python 扫描。
-    """
     # 检查工具是否启用
     config = get_search_config()
     if not config.enabled:
         _logger.warning("[Grep] 搜索工具已被禁用")
         return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "search tool is disabled"})
 
-    _logger.debug(f"[Grep] 开始搜索: pattern={pattern}, path={path}, ignore_case={ignore_case}, max_hits={max_hits}")
+    _logger.debug(f"[Grep] 开始搜索: pattern={pattern}, path={path}, language={language}, include_glob={include_glob}, ignore_case={ignore_case}, max_hits={max_hits}")
     if shutil.which("rg"):
         _logger.debug("[Grep] 使用 ripgrep (rg)")
-        tr = _rg_grep(workspace_root=workspace_root, pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
+        tr = _rg_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
         if tr.ok:
             _logger.info(f"[Grep] ripgrep 搜索成功: 找到 {len(tr.payload.get('matches', [])) if tr.payload else 0} 个匹配")
             return tr
         _logger.warning("[Grep] ripgrep 搜索失败，回退到 Python 扫描")
     else:
         _logger.debug("[Grep] ripgrep 不可用，使用 Python 扫描")
-    return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
+    return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
 
 
-def _rg_grep(*, workspace_root: Path, pattern: str, path: str, ignore_case: bool, max_hits: int) -> ToolResult:
+def _rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
     root = resolve_in_workspace(workspace_root, path)
     if not root.exists():
         return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
 
+ 
+
+    # 确定要搜索的后缀名集合
+    target_exts = set(LANG_EXTENSIONS.get(language, [])) if language != "all" else None
+
+
+
+    # try:
+    #     cmd = ["rg", "--vimgrep", "--no-heading"]
+    #     if ignore_case: cmd.append("-i")
+    #     # 默认忽略：降低噪音（尤其是 agent 自己的日志目录）
+    #     cmd.extend(["-g", "!.clude/*", "-g", "!.git/*", "-g", "!node_modules/*", "-g", "!.venv/*"])
+    #     if target_exts:
+    #         for ext in target_exts:
+    #             cmd.extend(["-g", f"*{ext}"])
+
+    #     if include_glob:
+    #         cmd.extend(["-g", include_glob])
+        
+    #     cmd.extend([pattern, str(root)]);
+        
+    #     # 限制返回量，防止进程过载
+    #     result = subprocess.run(cmd, 
+    #                             capture_output=True, 
+    #                             text=True, 
+    #                             encoding='utf-8'
+    #                             )
+    #     if result.stdout:
+    #         lines = result.stdout.splitlines()[:max_hits]
+    #         return "\n".join(lines)
+    # except Exception as e:
+    #     return ToolResult(False, error={"code": "E_RG_EXEC", "message": str(e)})
+
+
+    # 构建 rg 命令行参数
     args = ["rg", "--json"]
     if ignore_case:
         args.append("-i")
-
     # 默认忽略：降低噪音（尤其是 agent 自己的日志目录）
     args.extend(["-g", "!.clude/*", "-g", "!.git/*", "-g", "!node_modules/*", "-g", "!.venv/*"])
+
+    # 语言特定的文件后缀匹配
+    # if language != "all":
+    #     lang_suffixes = {
+    #         "c++": "*.cpp",
+    #         "java": "*.java",
+    #         "python": "*.py",
+    #         "javascript": "*.js",
+    #         "typescript": "*.ts"
+    #     }
+    #     suffix = lang_suffixes.get(language)
+    #     if suffix:
+    #         args.extend(["-g", f"{suffix}"])
+    if target_exts:
+        for ext in target_exts:
+            args.extend(["-g", f"*{ext}"])
+
+    # 额外的 glob 模式
+    if include_glob:
+        args.extend(["-g", include_glob])
     args.append(pattern)
     args.append(path)
 
@@ -95,7 +190,7 @@ def _rg_grep(*, workspace_root: Path, pattern: str, path: str, ignore_case: bool
     return ToolResult(True, payload={"pattern": pattern, "engine": "rg", "hits": hits, "truncated": truncated})
 
 
-def _python_grep(*, workspace_root: Path, pattern: str, path: str, ignore_case: bool, max_hits: int) -> ToolResult:
+def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
     root = resolve_in_workspace(workspace_root, path)
     if not root.exists():
         return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})

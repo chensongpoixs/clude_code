@@ -77,7 +77,7 @@ _BASE_SYSTEM_PROMPT = """\
 
 该过程用于确保任务可审计、可回放、可验证。
 
-6. 控制协议（P0-2｜强制）
+6. 控制协议（强制）
 当你需要表达“步骤完成”或“需要重规划”时，严禁输出自由文本或 STEP_DONE/REPLAN 字符串。
 必须且只能输出一个控制 JSON 对象（JSON Envelope/JSON 信封）：
 - 步骤完成：{"control":"step_done"}

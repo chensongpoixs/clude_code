@@ -86,16 +86,38 @@ def execute_single_step_iteration(
         f"[描述] {step.description} [建议工具] {tools_hint}"
     )
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
-
+    # @date:2026-01-20 改进步骤执行提示词，
+    # 原因是大模型返回时常出现理解偏差，导致输出不符合预期（如输出多余文字、未按要求输出 JSON 等）
+    # ===== 本轮 LLM 返回文本 =====
+    #--- assistant_text ---
+    #```json
+    #{
+    #"control": "step_done"
+    #}
+    #```
+    #########################################
+    # step_prompt = (
+    #     f"现在执行计划步骤：{step.id}\n"
+    #     f"步骤描述：{step.description}\n"
+    #     f"建议工具：{', '.join(step.tools_expected) if step.tools_expected else '（自行选择）'}\n\n"
+    #     "规则：\n"
+    #     "0) 业界标准：步骤开始/关键进展时，优先调用 display 输出一条简短进度（level=progress/info）。\n"
+    #     "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
+    #     "2) 如果本步骤已完成且不需要工具：只输出控制 JSON：{\"control\":\"step_done\"}。\n"
+    #     "3) 如果本步骤失败且需要重规划：只输出控制 JSON：{\"control\":\"replan\"}。\n"
+    # )
+    # 解决上面LLM输出不符合预期的问题后，保留原有提示词结构，但加强了规则的明确性和细节描述
     step_prompt = (
-        f"现在执行计划步骤：{step.id}\n"
-        f"步骤描述：{step.description}\n"
-        f"建议工具：{', '.join(step.tools_expected) if step.tools_expected else '（自行选择）'}\n\n"
-        "规则：\n"
-        "0) 业界标准：步骤开始/关键进展时，优先调用 display 输出一条简短进度（level=progress/info）。\n"
-        "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
-        "2) 如果本步骤已完成且不需要工具：只输出控制 JSON：{\"control\":\"step_done\"}。\n"
-        "3) 如果本步骤失败且需要重规划：只输出控制 JSON：{\"control\":\"replan\"}。\n"
+    f"【当前执行步骤】：{step.id}\n"
+    f"【核心任务目标】：{step.description}\n"
+    f"【可用工具集】：{', '.join(step.tools_expected) if step.tools_expected else '根据需求自主选择'}\n\n"
+    "## 强制执行规则：\n"
+    "1. 动作唯一性：单次回复仅允许执行一个动作（调用一个工具 或 输出一个控制JSON）。\n"
+    "2. 工具调用：若需操作，直接输出工具调用。建议在调用核心工具前，若有重大进展，可先通过 display 工具汇报 level='progress' 的简报。\n"
+    "3. 状态闭环：\n"
+    "   - 成功判定：若步骤目标已达成，输出且仅输出：{\"control\": \"step_done\"}\n"
+    "   - 无法继续：若环境报错或逻辑无法自洽，输出且仅输出：{\"control\": \"replan\", \"reason\": \"原因描述\"}\n"
+    "4. 严禁废话：不要输出任何开场白、解释或总结文字，只输出工具 JSON 或控制 JSON。"
     )
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)

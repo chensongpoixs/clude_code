@@ -304,12 +304,12 @@ class AgentLoop:
         # 1) Intake + Intent 分类（决策门）
         _set_state(AgentState.INTAKE, {"step": "classifying"})
         enable_planning = self._classify_intent_and_decide_planning(user_text, _ev)
-        planning_prompt = self._build_planning_prompt() if enable_planning else None
+        planning_prompt = self._build_planning_prompt(user_text) if enable_planning else None
 
         # 2) 记录用户输入（必要时把规划提示并入同一条 user 消息，避免 role 不交替）
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
-        user_content = user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
+        user_content = planning_prompt  # user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
         self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
         _ev(
@@ -472,11 +472,45 @@ class AgentLoop:
     - 这里返回的是“提示词文本”，不是消息对象；`run_turn` 会把它拼到用户输入后面作为同一条 user 消息发送。
     - tools_expected 的示例必须包含当前工程的全部工具名（从注册表提取，避免漏项）。
     """
-    def _build_planning_prompt(self) -> str:
+    def _build_planning_prompt(self, input_text: str) -> str:
         tool_names = self._get_prompt_tool_names()
         tools_expected_example = json.dumps(tool_names, ensure_ascii=False)
         tools_expected_hint = ", ".join(tool_names)
 
+
+
+        return (
+            "# Role\n"
+            "你是一个高逻辑性的任务规划专家，擅长将复杂目标拆解为原子化的、可验证的执行步骤。\n"
+            "\n"
+            "# Task\n"
+            "请针对用户输入的目标进行深度分析，并输出一个严格符合 JSON 结构的【任务执行蓝图】。\n"
+
+            "# Rules\n"
+            "1. 严禁输出任何解释性文字或 Markdown 代码块以外的内容。\n"
+            f"2. 步骤拆解：最多不超过 {self.cfg.orchestrator.max_plan_steps} 步，每一步必须是“原子化”的动作（单一输入，明确输出）。\n"
+            "3. 依赖关系：准确标注 `dependencies`，确保 ID 引用正确。\n"
+            f"4. 工具限制：`tools_expected` 必须严格限定在：[{tools_expected_hint}]。\n"
+            "5. 最终步要求：最后一步必须被设定为总结位，用于输出详细的思考逻辑与整体任务报告。\n"
+            "\n"
+            "# Output Format (JSON)\n"
+            "{\n"
+            "  \"title\": \"任务全局目标简述\",\n"
+            "  \"steps\": [\n"
+            "    {\n"
+            "      \"id\": \"step_1\",\n"
+            "      \"description\": \"具体可执行的动作描述\",\n"
+            "      \"dependencies\": [],\n"
+            "      \"status\": \"pending\",\n"
+            f"      \"tools_expected\":{tools_expected_example}\n"
+            "    }\n"
+            "  ],\n"
+            "  \"verification_policy\": \"run_verify\"\n"
+            "}\n\n"
+
+            "# Input\n" 
+            f"目标：{input_text}\n"
+            );
         return (
             "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
             "JSON 必须符合以下结构：\n"

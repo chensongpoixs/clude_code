@@ -68,8 +68,26 @@ class LocalTools:
     def glob_file_search(self, glob_pattern: str, target_directory: str = ".") -> ToolResult:
         return _glob_file_search_impl(workspace_root=self.workspace_root, glob_pattern=glob_pattern, target_directory=target_directory)
 
-    def grep(self, pattern: str, path: str = ".", ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
-        return _grep_impl(workspace_root=self.workspace_root, pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
+    """
+    @author: clude_code
+    @date: 2026-01-20
+    
+    Tool: grep（只读；优先 rg）。
+    用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。
+    支持 C/C++/Java 等多种语言的自动后缀匹配
+    如果你在寻找特定语言的定义（如 C++ 类或 Java 方法），指定 'language' 参数将极大提高准确率。
+    参数：
+    - pattern: 正则表达式模式
+    - path: 搜索路径
+    - language: 指定语言类型（如 "c++", "java"），用于自动匹配文件后缀
+    - include_glob: 额外的 glob 模式，用于进一步限定搜索文件
+    - ignore_case: 是否忽略大小写
+    - max_hits: 最大返回命中数
+    返回： ToolResult，包含匹配结果列表
+
+    """
+    def grep(self, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
+        return _grep_impl(workspace_root=self.workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
 
     def generate_repo_map(self) -> str:
         return _generate_repo_map_impl(workspace_root=self.workspace_root)
