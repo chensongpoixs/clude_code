@@ -84,9 +84,16 @@ class CommandToolConfig(BaseModel):
     )
 
 
+
+"""
+搜索工具配置（grep, search）
+"""
 class SearchToolConfig(BaseModel):
-    """搜索工具配置（grep, search）"""
     enabled: bool = Field(default=True, description="是否启用搜索工具。")
+    serper_api_key: str = Field(
+        default="",
+        description="Serper  API Key (免费额度：2500次/月)。也可通过环境变量 SERPER_API_KEY 设置。"
+    )
     timeout_s: int = Field(
         default=30,
         ge=1,
@@ -184,8 +191,7 @@ class TaskToolConfig(BaseModel):
         default=True,
         description="是否将任务操作日志写入文件。默认 True，写入 .clude/logs/app.log。"
     )
-
-
+ 
 class ToolConfigs(BaseModel):
     """
     所有工具模块的配置集合

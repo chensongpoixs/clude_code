@@ -21,7 +21,27 @@ except Exception:
     # 业界做法：可选依赖缺失时，工具应“可导入、可降级”，而不是让整个 CLI 崩溃。
     requests = None  # type: ignore
 
+# a835b5beb674f8a41746500b01a36e64501f097f
+"""WebSearch Tool Implementation
+import http.client
+import json
 
+conn = http.client.HTTPSConnection("google.serper.dev")
+payload = json.dumps({
+  "q": "apple inc",
+  "gl": "cn",
+  "hl": "zh-cn"
+})
+headers = {
+  'X-API-KEY': 'a835b5beb674f8a41746500b01a36e64501f097f',
+  'Content-Type': 'application/json'
+}
+conn.request("POST", "/images", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))
+
+"""
 def websearch(
     query: str,
     num_results: int = 8,
