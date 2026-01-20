@@ -90,6 +90,20 @@ command:
 # 搜索工具配置（grep, search）
 search:
   enabled: true                         # 是否启用搜索工具
+  # 网页搜索资料来源优先级：默认优先 Open-WebSearch MCP，失败自动回退 Serper
+  # 可选值：
+  # - open_websearch_mcp：优先（推荐）
+  # - serper：备用（需要 API Key）
+  websearch_providers: ["open_websearch_mcp", "serper"]
+  # Open-WebSearch MCP（优先）
+  open_websearch_mcp_enabled: true      # 是否启用 Open-WebSearch MCP 搜索源
+  open_websearch_mcp_base_url: "http://127.0.0.1:8765"   # MCP 服务地址（示例：本机服务）
+  open_websearch_mcp_endpoint: "/search"                 # 搜索接口路径（与 base_url 拼接）
+  open_websearch_mcp_api_key: ""        # 可选：如服务需要密钥，建议用环境变量 CLUDE_SEARCH__OPEN_WEBSERCH_MCP_API_KEY
+  # Serper（回退）
+  serper_api_key: "a835b5beb674f8a41746500b01a36e64501f097f"                    # Serper API Key（示例文件禁止放真实密钥；建议用环境变量 CLUDE_SEARCH__SERPER_API_KEY）
+  serper_gl: "cn"                       # 地域参数（默认 cn）
+  serper_hl: "zh-cn"                    # 语言参数（默认 zh-cn）
   timeout_s: 30                         # 搜索超时时间（秒）
   max_results: 1000                     # 搜索最大结果数量
   log_to_file: true                     # 是否将搜索日志写入文件

@@ -122,6 +122,24 @@
 | **统一日志** | 工具日志必须走统一 helper（如 `tooling/logger_helper.py`），并遵循全局日志配置与工具 `log_to_file`。 |
 | **错误反馈** | 工具错误必须提供可操作信息；敏感信息禁止出现在日志明文。 |
 
+#### 3.3.1 搜索资料（WebSearch）工具：Open-WebSearch MCP 与 Serper（强制）
+
+> **目标**：支持两个“搜索资料来源”（Search Provider），可通过配置选择；默认优先使用 **Open-WebSearch MCP**，失败自动回退 **Serper**。
+
+- **可配置选择（Configurable Choice）**：
+  - `open_websearch_mcp`：优先（Preferred），用于接入本地/自建的 Open-WebSearch MCP 服务器
+  - `serper`：备用（Fallback），用于调用 Serper（Google 搜索 API）
+- **优先级与回退（Priority & Fallback）**：
+  - 由 `search.websearch_providers` 指定优先级列表（例如 `["open_websearch_mcp", "serper"]`）
+  - 默认必须是：`open_websearch_mcp > serper`
+  - 任何 provider 发生：未配置/超时/网络错误/返回结构异常，都必须自动回退到下一个 provider
+- **敏感信息（Sensitive Info）**：
+  - API Key 必须使用环境变量或私有配置文件注入，示例文件不得提交真实密钥
+  - 推荐环境变量（嵌套 env）：`CLUDE_SEARCH__SERPER_API_KEY`、`CLUDE_SEARCH__OPEN_WEBSEARCH_MCP_API_KEY`
+- **日志（Logging）**：
+  - 只允许打印 provider、query、结果数量等摘要
+  - 禁止输出 API Key 明文；失败堆栈写入 file-only 日志，控制台输出可读摘要
+
 ## 4. 日志与调试（必须）
 
 - **禁止 print**：一律使用 logger。

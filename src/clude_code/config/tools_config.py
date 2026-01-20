@@ -90,10 +90,32 @@ class CommandToolConfig(BaseModel):
 """
 class SearchToolConfig(BaseModel):
     enabled: bool = Field(default=True, description="是否启用搜索工具。")
+    websearch_providers: list[str] = Field(
+        default_factory=lambda: ["open_websearch_mcp", "serper"],
+        description="网页搜索资料来源优先级（默认优先 Open-WebSearch MCP，失败回退 Serper）。",
+    )
+    open_websearch_mcp_enabled: bool = Field(
+        default=True,
+        description="是否启用 Open-WebSearch MCP 搜索源（推荐默认开启，优先使用）。",
+    )
+    open_websearch_mcp_base_url: str = Field(
+        default="http://127.0.0.1:8765",
+        description="Open-WebSearch MCP 服务地址（HTTP）。示例：http://127.0.0.1:8765",
+    )
+    open_websearch_mcp_endpoint: str = Field(
+        default="/search",
+        description="Open-WebSearch MCP 搜索接口路径（与 base_url 拼接）。默认 /search。",
+    )
+    open_websearch_mcp_api_key: str = Field(
+        default="",
+        description="Open-WebSearch MCP API Key（如服务需要）。建议用环境变量 CLUDE_SEARCH__OPEN_WEBSEARCH_MCP_API_KEY。",
+    )
     serper_api_key: str = Field(
         default="",
-        description="Serper  API Key (免费额度：2500次/月)。也可通过环境变量 SERPER_API_KEY 设置。"
+        description="Serper API Key（免费额度：2500次/月）。建议用环境变量 CLUDE_SEARCH__SERPER_API_KEY 设置。"
     )
+    serper_gl: str = Field(default="cn", description="Serper 地域参数 gl（默认 cn）。")
+    serper_hl: str = Field(default="zh-cn", description="Serper 语言参数 hl（默认 zh-cn）。")
     timeout_s: int = Field(
         default=30,
         ge=1,
@@ -281,6 +303,14 @@ def set_tool_configs(cfg: Any) -> None:
         # 搜索工具配置
         search=SearchToolConfig(
             enabled=getattr(cfg.search, "enabled", True),
+            websearch_providers=getattr(cfg.search, "websearch_providers", ["open_websearch_mcp", "serper"]),
+            open_websearch_mcp_enabled=getattr(cfg.search, "open_websearch_mcp_enabled", True),
+            open_websearch_mcp_base_url=getattr(cfg.search, "open_websearch_mcp_base_url", "http://127.0.0.1:8765"),
+            open_websearch_mcp_endpoint=getattr(cfg.search, "open_websearch_mcp_endpoint", "/search"),
+            open_websearch_mcp_api_key=getattr(cfg.search, "open_websearch_mcp_api_key", ""),
+            serper_api_key=getattr(cfg.search, "serper_api_key", ""),
+            serper_gl=getattr(cfg.search, "serper_gl", "cn"),
+            serper_hl=getattr(cfg.search, "serper_hl", "zh-cn"),
             timeout_s=getattr(cfg.search, "timeout_s", 30),
             max_results=getattr(cfg.search, "max_results", 1000),
             log_to_file=getattr(cfg.search, "log_to_file", True),
