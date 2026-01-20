@@ -759,7 +759,8 @@ def get_weather_forecast(
             "cnt": cnt,
         }
         _get_logger().debug(f"[Forecast] 数据点数量: {cnt} (days={days})")
-        
+        new_lat = lat;
+        new_lon = lon;
         if city:
             _get_logger().debug(f"[Forecast] 开始地理编码: {city}")
             geo_result = _geocode_city(city, api_key, timeout)
@@ -768,11 +769,14 @@ def get_weather_forecast(
                 return ToolResult(ok=False, error=geo_result["error"])
             params["lat"] = geo_result["lat"]
             params["lon"] = geo_result["lon"]
+            new_lat = geo_result["lat"];    
+            new_lon = geo_result["lon"];
             _get_logger().debug(f"[Forecast] 地理编码成功: ({params['lat']}, {params['lon']})")
         else:
             params["lat"] = lat
             params["lon"] = lon
         
+
         url = f"{OPENWEATHERMAP_BASE_URL}/forecast"
         start_time = time.time()
         _get_logger().debug(f"[Forecast] 发起 API 请求: {url}")
@@ -798,7 +802,7 @@ def get_weather_forecast(
                 "pop": item.get("pop", 0),  # 降水概率
             })
         
-        city_name = data.get("city", {}).get("name", city or f"{lat},{lon}")
+        city_name = data.get("city", {}).get("name", city or f"{new_lat},{new_lon}")
         country = data.get("city", {}).get("country", "")
         _get_logger().info(f"[Forecast] 获取成功: {city_name}, {country} | 预报数据点: {len(forecasts)}")
         

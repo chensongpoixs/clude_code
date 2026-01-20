@@ -9,7 +9,12 @@ from .tool_dispatch import TOOL_REGISTRY
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
 
+    """
+    统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
 
+    大文件治理说明：
+    - 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
+    """
 def run_tool_lifecycle(
     loop: "AgentLoop",
     name: str,
@@ -18,12 +23,7 @@ def run_tool_lifecycle(
     confirm: Callable[[str], bool],
     _ev: Callable[[str, dict[str, Any]], None],
 ) -> ToolResult:
-    """
-    统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
 
-    大文件治理说明：
-    - 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
-    """
     spec = TOOL_REGISTRY.get(name)
     side_effects = spec.side_effects if spec is not None else set()
 
@@ -112,7 +112,7 @@ def run_tool_lifecycle(
     loop.file_only_logger.info(
         f"工具执行结果 [tool={name}] [ok={result.ok}] "
         f"[error={json.dumps(result.error, ensure_ascii=False) if result.error else None}] "
-        f"[payload_keys={list(result.payload.keys()) if result.payload else []}]"
+        f"[payload_keys={(result.payload.keys()) if result.payload else []}]"
     )
 
     # 5. 自动化验证闭环 (自愈)

@@ -813,8 +813,9 @@ class AgentLoop:
             return f"成功: {count} 个语义匹配"
         else:
             # 通用：显示 payload 的键
-            keys = list(payload.keys())[:3]
-            return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
+            #keys = list(payload.keys())[:3]
+            #return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
+            return "成功: 有效 keys:{}.values:{}".format((payload.keys()), payload.values());
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         """
