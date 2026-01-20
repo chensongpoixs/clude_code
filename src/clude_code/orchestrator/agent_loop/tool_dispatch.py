@@ -914,7 +914,7 @@ def _spec_codesearch() -> ToolSpec:
     """ToolSpec：codesearch（网络代码搜索）。"""
     return ToolSpec(
         name="codesearch",
-        summary="通过 Grep.app 搜索开源代码片段（网络）。",
+        summary="网络搜索开源代码片段（网络）。",
         description=(
             "用于编程任务的代码片段检索（Network Code Search）。\n"
             "- 适合：查找某库/某框架的典型用法、报错修复示例、实现模式（会返回代码片段）。\n"

@@ -6,6 +6,7 @@
 """
 import inspect
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Union
@@ -177,13 +178,20 @@ def get_logger(
         # 核心修复点：如果不输出到控制台，则禁止消息向上传递给带有控制台处理器的父 logger
         logger.propagate = False
     
+    
     # 确定日志文件路径
     if not log_file and workspace_root:
         # 自动创建日志文件路径
         log_dir = Path(workspace_root) / ".clude" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = str(log_dir / "app.log")
-    
+    # 检查日志文件是否需要创建
+    # 检查文件是否存在，不存在则创建（包括必要的目录）
+    if not os.path.exists(log_file):
+    # 如果路径包含文件夹，可以先创建文件夹
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write("--- Clude Code  Log Initialized ---\n");
     # 如果指定了日志文件，添加文件处理器（始终启用文件输出）
     if log_file and not has_file_handler:
         file_handler = FileLineFileHandler(
