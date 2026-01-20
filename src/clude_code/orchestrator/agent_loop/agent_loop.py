@@ -1,12 +1,14 @@
 import json
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
+from clude_code.observability.usage import SessionUsage
 from clude_code.observability.logger import get_logger
 from clude_code.policy.command_policy import evaluate_command
 from clude_code.tooling.feedback import format_feedback_message
@@ -21,7 +23,7 @@ from clude_code.orchestrator.classifier import IntentClassifier, IntentCategory
 
 from .models import AgentTurn
 from .parsing import try_parse_tool_call
-from .prompts import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, load_project_memory
 from .tool_lifecycle import run_tool_lifecycle
 from .planning import execute_planning_phase
 from .execution import (
@@ -100,7 +102,7 @@ class AgentLoop:
     - RAG 语义搜索集成
     """
     
-    def __init__(self, cfg: CludeConfig) -> None:
+    def __init__(self, cfg: CludeConfig, *, session_id: str | None = None) -> None:
         """
         初始化 AgentLoop 实例。
         
@@ -122,15 +124,24 @@ class AgentLoop:
             __name__,
             workspace_root=cfg.workspace_root,
             log_to_console=cfg.logging.log_to_console,
+            level=cfg.logging.level,
+            log_format=cfg.logging.log_format,
+            date_format=cfg.logging.date_format,
         )
         # 创建只写入文件的 logger（用于记录 LLM 请求/响应详情）
         self.file_only_logger = get_logger(
             f"{__name__}.llm_detail",
             workspace_root=cfg.workspace_root,
             log_to_console=False,  # 只写入文件，不输出到控制台
+            level=cfg.logging.level,
+            log_file=cfg.logging.file_path,
+            max_bytes=cfg.logging.max_bytes,
+            backup_count=cfg.logging.backup_count,
+            log_format=cfg.logging.log_format,
+            date_format=cfg.logging.date_format,
         )
-        # keep it simple & stable enough for MVP; later replace with uuid4
-        self.session_id = f"sess_{id(self)}"
+        # 会话 ID：用于 trace/audit 关联。支持从 CLI 恢复会话时复用旧 session_id
+        self.session_id = session_id or f"sess_{id(self)}"
         self.logger.info(f"[dim]初始化 AgentLoop，session_id={self.session_id}[/dim]")
         self.llm = LlamaCppHttpClient(
             base_url=cfg.llm.base_url,
@@ -145,8 +156,20 @@ class AgentLoop:
             max_file_read_bytes=cfg.limits.max_file_read_bytes,
             max_output_bytes=cfg.limits.max_output_bytes,
         )
+        
+        # 初始化工具配置（统一管理，从全局配置注入）
+        try:
+            from clude_code.config import set_tool_configs
+            set_tool_configs(cfg)
+            # 初始化天气工具配置（向后兼容）
+            from clude_code.tooling.tools.weather import set_weather_config
+            set_weather_config(cfg)
+        except ImportError:
+            pass  # 工具模块可选
+        
         self.audit = AuditLogger(cfg.workspace_root, self.session_id)
         self.trace = TraceLogger(cfg.workspace_root, self.session_id)
+        self.usage = SessionUsage()
         
         # Knowledge / RAG systems
         self.indexer = IndexerService(cfg)
@@ -168,12 +191,26 @@ class AgentLoop:
         import platform
         repo_map = self.tools.generate_repo_map()
         env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
-        combined_system_prompt = f"{SYSTEM_PROMPT}\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
+
+        # Claude Code 对标：自动加载 CLUDE.md 作为项目记忆（只读、失败不阻塞）
+        project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)
+        self._project_memory_meta: dict[str, object] = project_memory_meta
+        self._project_memory_emitted: bool = False
+
+        combined_system_prompt = (
+            f"{SYSTEM_PROMPT}"
+            f"{project_memory_text}"
+            f"\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
+        )
         
         self.messages: list[ChatMessage] = [
             ChatMessage(role="system", content=combined_system_prompt),
         ]
-        self.logger.info("[dim]初始化系统提示词（包含 Repo Map 和环境信息）[/dim]")
+        if bool(project_memory_meta.get("loaded")):
+            self.logger.info(f"[dim]已加载 CLUDE.md 项目记忆: {project_memory_meta}[/dim]")
+        else:
+            self.logger.info("[dim]未加载 CLUDE.md（未找到或为空）[/dim]")
+        self.logger.info("[dim]初始化系统提示词（包含 Repo Map/环境信息/可选项目记忆）[/dim]")
 
     def run_turn(
         self,
@@ -210,12 +247,16 @@ class AgentLoop:
         
         流程图: 见 `agent_loop_run_turn_flow.svg`
         """
-        trace_id = f"trace_{abs(hash((self.session_id, user_text)))}"
+        # P0-1: Trace ID 必须跨进程稳定且全局唯一；Python 的 hash() 会受随机种子影响
+        trace_id = f"trace_{uuid.uuid4().hex}"
         self.logger.info(f"[bold cyan]开始新的一轮对话[/bold cyan] trace_id={trace_id}")
         self.logger.info(f"[dim]用户输入: {user_text[:100]}{'...' if len(user_text) > 100 else ''}[/dim]")
 
         # 阶段 C: 清空本轮修改追踪
         self._turn_modified_paths.clear()
+        # LLM 请求/返回日志：本轮只打印“本轮新增 user + 本次返回”，不输出历史轮次
+        # 说明：llm_io.py 会用这个 cursor 计算“本次请求新增消息”的切片范围
+        self._llm_log_cursor = len(self.messages)
 
         keywords = self._extract_keywords(user_text)
 
@@ -231,13 +272,24 @@ class AgentLoop:
                 self.trace.write(trace_id=trace_id, step=step_idx, event=event, data=data)
             if on_event is not None:
                 try:
-                    on_event(e)
+                    # 透传 trace_id：live UI / TUI / bug report 需要对齐同一轮 turn 的可追溯标识
+                    on_event({**e, "trace_id": trace_id})
                 except Exception as ex:
                     self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
+
+        # 让 live UI/TUI 能展示“默认 chat 日志”的开场行
+        _ev("turn_start", {"trace_id": trace_id})
 
         # 设置运行时上下文，供 display 工具使用
         self._current_ev = _ev
         self._current_trace_id = trace_id
+
+        # 仅在本会话首次 turn 发出“项目记忆加载状态”事件，供 live UI 展示
+        if not getattr(self, "_project_memory_emitted", False):
+            try:
+                _ev("project_memory", dict(getattr(self, "_project_memory_meta", {}) or {}))
+            finally:
+                self._project_memory_emitted = True
 
         current_state: AgentState = AgentState.INTAKE
 
@@ -259,6 +311,16 @@ class AgentLoop:
         _ev("user_message", {"text": user_text})
         user_content = user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
         self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
+        # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
+        _ev(
+            "user_content_built",
+            {
+                "preview": user_content[:2000],
+                "truncated": len(user_content) > 2000,
+                "messages_count": len(self.messages) + 1,  # 即将 append
+                "planning_prompt_included": bool(planning_prompt),
+            },
+        )
         self.messages.append(ChatMessage(role="user", content=user_content))
         self._trim_history(max_messages=30)
         self.logger.debug(f"[dim]当前消息历史长度: {len(self.messages)}[/dim]")
@@ -320,7 +382,7 @@ class AgentLoop:
             )
 
         # 5) ReAct fallback
-        return self._execute_react_fallback_loop(
+        assistant_text = self._execute_react_fallback_loop(
             trace_id=trace_id,
             keywords=keywords,
             confirm=confirm,
@@ -330,6 +392,28 @@ class AgentLoop:
             _try_parse_tool_call=_try_parse_tool_call,
             _tool_result_to_message=_tool_result_to_message,
             _set_state=_set_state,
+        ).assistant_text # 获取 fallback 循环的最终文本
+
+        # LLM 空白响应的智能处理：如果 LLM 返回空白，返回一个预设的友好提示
+        cleaned_text = assistant_text.strip()
+        if not cleaned_text or len(re.sub(r'\s+', '', cleaned_text)) < 5: # 移除所有空白字符后少于5个有效字符
+            self.logger.warning(f"[yellow]LLM 返回空白或过短的有效内容，将使用预设回复。[/yellow] trace_id={trace_id}")
+            assistant_text = "你好！有什么我可以帮你做的吗？"
+            tool_used = False # 避免将预设回复标记为工具使用
+        else:
+            tool_used = False # 在 ReAct fallback 之外，assistant_text 不代表工具使用
+
+        # 5) 记录 LLM 最终响应
+        self.audit.write(trace_id=trace_id, event="assistant_text", data={"text": assistant_text})
+        _ev("assistant_text", {"text": assistant_text})
+        self.messages.append(ChatMessage(role="assistant", content=assistant_text))
+        self._trim_history(max_messages=30)
+
+        return AgentTurn(
+            assistant_text=assistant_text,
+            tool_used=tool_used,
+            trace_id=trace_id,
+            events=events,
         )
 
     def _extract_keywords(self, user_text: str) -> set[str]:
@@ -374,20 +458,7 @@ class AgentLoop:
             # f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
             # "{\n"
             # "  \"id\": \"step_1\",\n"
-            # "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py\",\n"
-            # "  \"dependencies\": [],\n"
-            # "  \"status\": \"pending\",\n"
-            # "  \"tools_expected\": [\"read_file\"]\n"
-            # "}\n"
-            # "现在，请输出 JSON 对象。"
-            # "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
-            # "JSON 必须严格符合以下结构：\n"
-            # "{\n"
-            # "  \"title\": \"提取_try_parse_tool_call函数代码\",\n"
-            # "  \"steps\": [\n"
-            # "    {\n"
-            # "      \"id\": \"step_1\",\n"
-            # "      \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
+            # "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
             # "      \"dependencies\": [],\n"
             # "      \"status\": \"pending\",\n"
             # "      \"tools_expected\": [\"read_file\"]\n"
@@ -432,6 +503,15 @@ class AgentLoop:
         if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):
             if enable_planning:
                 self.logger.info("[dim]检测到能力询问或通用对话，跳过显式规划阶段。[/dim]")
+                _ev(
+                    "planning_skipped",
+                    {
+                        "reason": "capability_query_or_general_chat",
+                        "category": classification.category.value,
+                        "confidence": classification.confidence,
+                    },
+                )
+                # 模式判定：聊天/规划
                 enable_planning = False
         # 业界兜底：短文本 + UNCERTAIN 往往是问候/寒暄/无任务输入，不应进入规划
         # if classification.category == IntentCategory.UNCERTAIN:
@@ -561,35 +641,81 @@ class AgentLoop:
 
     def _trim_history(self, *, max_messages: int) -> None:
         """
-        裁剪对话历史，保持上下文窗口在合理范围内。
-        
+        高级对话历史裁剪，使用智能上下文管理和token预算。
+
         裁剪策略：
-        1. 始终保留第一条 system 消息（包含核心指令和 Repo Map）
-        2. 从尾部向前裁剪，但确保裁剪后的第一条消息是 'user' 角色
-           （满足 llama.cpp 等严格 chat template 的 user/assistant 交替要求）
-        3. 如果当前消息数 <= max_messages，则不进行裁剪
-        
+        1. 使用高级上下文管理器进行token-aware裁剪
+        2. 优先保留高优先级内容（系统消息、当前任务相关）
+        3. 智能压缩长内容以适应token预算
+        4. 保持对话的连贯性和角色交替
+
         参数:
-            max_messages: 最大保留消息数（包括 system 消息）
-        
+            max_messages: 最大保留消息数（兼容性参数，现主要使用token预算）
+
         流程图: 见 `agent_loop_trim_history_flow.svg`
         """
+        from clude_code.orchestrator.advanced_context import get_advanced_context_manager, ContextPriority
+
         old_len = len(self.messages)
-        if old_len <= max_messages:
+        if old_len <= 1:  # 至少保留system消息
             return
-        
-        system = self.messages[0]
-        # We need an odd number of messages in the tail if the last one is 'user'
-        # or just ensure the first message of the tail is 'user'.
-        tail_start_idx = len(self.messages) - (max_messages - 1)
-        
-        # Move forward until we find a 'user' message to keep parity
-        while tail_start_idx < len(self.messages) and self.messages[tail_start_idx].role != "user":
-            tail_start_idx += 1
-            
-        tail = self.messages[tail_start_idx:]
-        self.messages = [system, *tail]
-        self.logger.debug(f"[dim]历史裁剪: {old_len} → {len(self.messages)} 条消息[/dim]")
+
+        # 初始化上下文管理器
+        context_manager = get_advanced_context_manager(max_tokens=self.llm.max_tokens)
+
+        # 清空旧上下文
+        context_manager.clear_context(keep_system=True)
+
+        # 添加system消息（最高优先级）
+        if self.messages and self.messages[0].role == "system":
+            system_content = self.messages[0].content or ""
+            context_manager.add_system_context(system_content, ContextPriority.CRITICAL)
+
+        # 添加对话历史（按优先级分类）
+        for i, message in enumerate(self.messages[1:], 1):  # 跳过system消息
+            # 根据位置和内容确定优先级
+            if i >= len(self.messages) - 5:  # 最近5条消息
+                priority = ContextPriority.HIGH
+            elif i >= len(self.messages) - 15:  # 最近15条消息
+                priority = ContextPriority.MEDIUM
+            else:
+                priority = ContextPriority.LOW
+
+            context_manager.add_message(message, priority)
+
+        # 获取优化后的上下文
+        optimized_items = context_manager.optimize_context()
+
+        # 重建消息列表
+        new_messages = []
+
+        # 添加system消息
+        if self.messages and self.messages[0].role == "system":
+            new_messages.append(self.messages[0])
+
+        # 从优化后的上下文项重建消息
+        for item in optimized_items:
+            if item.category == "system":
+                continue  # system消息已添加
+
+            # 从metadata恢复原始消息
+            original_role = item.metadata.get("original_role", item.category)
+            message = ChatMessage(role=original_role, content=item.content)
+            new_messages.append(message)
+
+        # 如果优化后消息太少，至少保留最近的几条
+        if len(new_messages) < 3 and len(self.messages) > 3:
+            # 保留system + 最后两条对话
+            new_messages = [self.messages[0]] + self.messages[-4:] if len(self.messages) > 4 else self.messages
+
+        self.messages = new_messages
+
+        # 记录裁剪统计
+        stats = context_manager.get_context_stats()
+        self.logger.debug(
+            f"[dim]智能上下文裁剪: {old_len} → {len(self.messages)} 条消息, "
+            f"{stats.get('total_tokens', 0)} tokens ({stats.get('utilization_rate', 0):.1%})[/dim]"
+        )
 
     def _format_args_summary(self, tool_name: str, args: dict[str, Any]) -> str:
         """
@@ -687,8 +813,9 @@ class AgentLoop:
             return f"成功: {count} 个语义匹配"
         else:
             # 通用：显示 payload 的键
-            keys = list(payload.keys())[:3]
-            return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
+            #keys = list(payload.keys())[:3]
+            #return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
+            return "成功: 有效 keys:{}.values:{}".format((payload.keys()), payload.values());
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         """
@@ -743,5 +870,4 @@ class AgentLoop:
         流程图: 见 `agent_loop_semantic_search_flow.svg`
         """
         return _semantic_search_fn(self, query)
-
 

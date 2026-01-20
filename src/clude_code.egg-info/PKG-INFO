@@ -1,17 +1,24 @@
 Metadata-Version: 2.4
 Name: clude-code
 Version: 0.1.0
-Summary: A Claude Code-like local code agent CLI - docs & protocol first with full observability.
-Requires-Python: >=3.11
+Summary: A Clude Code-like local code agent CLI (Python) - docs & protocol first.
+Requires-Python: >=3.10
 Requires-Dist: typer>=0.12.0
 Requires-Dist: pydantic>=2.6.0
 Requires-Dist: pydantic-settings>=2.2.0
 Requires-Dist: rich>=13.7.0
 Requires-Dist: httpx>=0.27.0
-Requires-Dist: psutil>=5.9.0
+Requires-Dist: PyYAML>=6.0.1
 Provides-Extra: dev
 Requires-Dist: ruff>=0.7.0; extra == "dev"
 Requires-Dist: mypy>=1.11.0; extra == "dev"
 Requires-Dist: pytest>=8.0.0; extra == "dev"
-Requires-Dist: py-spy>=0.3.14; extra == "dev"
-Requires-Dist: memory-profiler>=0.61.0; extra == "dev"
+Provides-Extra: ui
+Requires-Dist: textual>=0.70.0; extra == "ui"
+Provides-Extra: rag
+Requires-Dist: lancedb>=0.9.0; extra == "rag"
+Requires-Dist: pyarrow>=14.0.0; extra == "rag"
+Requires-Dist: fastembed>=0.4.0; extra == "rag"
+Provides-Extra: rag-ts
+Requires-Dist: tree_sitter>=0.22.0; extra == "rag-ts"
+Requires-Dist: tree_sitter_languages>=1.10.0; extra == "rag-ts"

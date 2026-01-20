@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.prompt import Confirm
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
 from clude_code.cli.utils import select_model_interactively
@@ -60,7 +60,7 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
     if missing_tools and fix:
         logger.warning(f"\n[bold yellow]检测到缺失工具: {', '.join(missing_tools)}[/bold yellow]")
         _try_fix_missing_tools(missing_tools, logger)
-        return run_doctor(fix=False, logger=logger)
+        return run_doctor(fix=False, model="", select_model=False, logger=logger)
 
     if missing_tools and not fix:
         logger.warning("\n提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。")

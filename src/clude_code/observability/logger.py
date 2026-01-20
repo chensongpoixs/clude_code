@@ -8,7 +8,8 @@ import inspect
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+from logging.handlers import RotatingFileHandler
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -57,20 +58,30 @@ class FileLineRichHandler(RichHandler):
         )
 
 
-class FileLineFileHandler(logging.FileHandler):
+class FileLineFileHandler(RotatingFileHandler):
     """
-    文件输出处理器，格式与控制台一致。
+    文件输出处理器，支持自动滚动，格式与控制台一致。
     
     格式：级别     [文件名:行号] 级别 - 消息内容
     """
     
-    def __init__(self, filename: str, mode: str = "a", encoding: str = "utf-8", delay: bool = False):
-        super().__init__(filename, mode, encoding, delay)
+    def __init__(
+        self, 
+        filename: str, 
+        mode: str = "a", 
+        encoding: str = "utf-8", 
+        delay: bool = False,
+        maxBytes: int = 10_485_760,  # 10MB
+        backupCount: int = 5,
+        log_format: Optional[str] = None,
+        date_format: Optional[str] = None
+    ):
+        super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
         # 设置格式化器
-        formatter = logging.Formatter(
-            fmt="%(levelname)-8s [%(filename)s:%(lineno_caller)s] %(levelname)s - %(message)s",
-            datefmt="",
-        )
+        fmt = log_format or "%(levelname)-8s [%(filename)s:%(lineno_caller)s] %(levelname)s - %(message)s"
+        datefmt = date_format or ""
+        
+        formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
         self.setFormatter(formatter)
     
     def emit(self, record: logging.LogRecord) -> None:
@@ -96,25 +107,37 @@ class FileLineFileHandler(logging.FileHandler):
 
 def get_logger(
     name: str,
-    level: int = logging.INFO,
+    level: Union[int, str] = logging.INFO,
     log_file: Optional[str] = None,
     workspace_root: Optional[str] = None,
     log_to_console: bool = False,
+    max_bytes: int = 10_485_760,
+    backup_count: int = 5,
+    log_format: Optional[str] = None,
+    date_format: Optional[str] = None,
 ) -> logging.Logger:
     """
     获取配置好的日志记录器。
     
     参数:
         name: 日志记录器名称（通常是模块名，如 __name__）
-        level: 日志级别（默认 INFO）
+        level: 日志级别（可以是 int 如 logging.INFO，也可以是字符串如 'DEBUG'）
         log_file: 可选的文件路径，如果提供则同时输出到文件
         workspace_root: 工作区根目录，如果提供且 log_file 未指定，则自动创建 .clude/logs/app.log
         log_to_console: 是否输出到控制台（默认 False，只写入文件）
+        max_bytes: 日志文件最大字节数
+        backup_count: 保留的日志备份数量
+        log_format: 自定义日志格式
+        date_format: 自定义日期格式
     
     返回:
         配置好的 Logger 实例
     """
     logger = logging.getLogger(name)
+    
+    # 处理字符串级别的转换
+    if isinstance(level, str):
+        level = getattr(logging, level.upper(), logging.INFO)
     
     logger.setLevel(level)
     
@@ -163,7 +186,14 @@ def get_logger(
     
     # 如果指定了日志文件，添加文件处理器（始终启用文件输出）
     if log_file and not has_file_handler:
-        file_handler = FileLineFileHandler(log_file, encoding="utf-8")
+        file_handler = FileLineFileHandler(
+            log_file, 
+            encoding="utf-8",
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            log_format=log_format,
+            date_format=date_format
+        )
         file_handler.setLevel(level)
         logger.addHandler(file_handler)
     

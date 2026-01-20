@@ -1,6 +1,8 @@
-# 06｜代码编辑与补丁系统（Editing & Patching）
+# 06 | 代码编辑与补丁系统（可实现规格）(Editing & Patching Spec)
 
-目标：让“写文件/改代码”变成可控、可回滚、冲突可处理的工程动作，而不是随意覆盖文件。
+> **Status (状态)**: Stable Spec (稳定规格，可直接落地实现)  
+> **Audience (读者)**: Maintainers / Patch Engine Owners (维护者/补丁引擎负责人)  
+> **Goal (目标)**: 让“写文件/改代码”变成可控（Controllable/可控）、可回滚（Rollbackable/可回滚）、冲突可处理（Conflict-Resolvable/可处理冲突）的工程动作，而不是随意覆盖文件。
 
 ## 1. 编辑策略（优先级）
 
@@ -37,8 +39,8 @@
 ### 3.1 原子写（强烈建议）
 - 写临时文件 → 校验 → rename 覆盖
 - 记录：
-  - old_hash/new_hash
-  - patch 内容
+  - old_hash/new_hash（旧哈希/新哈希）
+  - patch 内容（补丁内容）
 
 ### 3.2 备份与撤销
 - 每次写操作保存 `undo_patch`
@@ -68,5 +70,13 @@
 - 先做：`apply_patch` + 失败重试 + undo_patch
 - 再做：冲突自动重基（rebase-like）
 - 最后做：语法树级编辑（AST-based editing）提升稳健性
+
+---
+
+## 7. 相关文档（See Also / 参见）
+
+- **工具协议（Tool Protocol）**: [`docs/02-tool-protocol.md`](./02-tool-protocol.md)
+- **计划分解与任务执行（Planning）**: [`docs/05-planning-and-tasking.md`](./05-planning-and-tasking.md)
+- **Lint/Test/Build（验证闭环）**: [`docs/08-lint-test-build.md`](./08-lint-test-build.md)
 
 

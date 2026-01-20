@@ -5,6 +5,28 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+
+
+# class UserIntent:
+#     # 核心功能类
+#     CODING_TASK = "CODING_TASK"           # 写、改、重构、测试代码
+#     ERROR_DIAGNOSIS = "ERROR_DIAGNOSIS"   # 分析错误信息，调试
+#     REPO_ANALYSIS = "REPO_ANALYSIS"       # 分析用户代码仓库：解释、搜素、找入口
+#     DOCUMENTATION_TASK = "DOCUMENTATION_TASK" # 生成或解释文档、注释
+
+#     # 咨询与规划类
+#     TECHNICAL_CONSULTING = "TECHNICAL_CONSULTING" # 解释概念、原理、最佳实践
+#     PROJECT_DESIGN = "PROJECT_DESIGN"     # 架构设计、技术选型
+#     SECURITY_CONSULTING = "SECURITY_CONSULTING" # 安全相关咨询
+
+#     # 元交互类
+#     CAPABILITY_QUERY = "CAPABILITY_QUERY" # 询问助手能力、使用方法
+#     GENERAL_CHAT = "GENERAL_CHAT"         # 问候、致谢等基础社交
+#     CASUAL_CHAT = "CASUAL_CHAT"           # 开放式闲聊、征求意见
+
+#     # 兜底类
+#     UNCERTAIN = "UNCERTAIN"               # 意图模糊，无法归类
+
 class IntentCategory(str, Enum):
     """用户意图分类标签。"""
     CODING_TASK = "CODING_TASK"           # 代码任务：修改、重构、写代码、跑测试、修复 bug
@@ -89,8 +111,8 @@ class IntentClassifier:
             # 打印返回 JSON 到文件（不输出到屏幕）
             if self.file_only_logger:
                 # 1. 长度截断保护（防止极端情况内存溢出）
-                safe_resp = response[:10000] + ("..." if len(response) > 10000 else "")
-                self.file_only_logger.info("====>意图分类器返回数据 Response: %s", safe_resp)
+                # safe_resp = response[:10000] + ("..." if len(response) > 10000 else "")
+                self.file_only_logger.info("====>意图分类器返回数据 Response: %s", response);
             
             # 容错提取 JSON
             json_match = re.search(r"(\{.*?\})", response, re.DOTALL)

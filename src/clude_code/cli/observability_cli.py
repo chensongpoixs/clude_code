@@ -16,7 +16,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich import print as rprint
 
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.observability.integration import get_observability_manager
 from clude_code.observability.metrics_storage import get_metrics_manager, MetricsQuery
 from clude_code.observability.profiler import get_profile_manager, ProfileType

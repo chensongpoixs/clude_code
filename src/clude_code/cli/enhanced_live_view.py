@@ -1,36 +1,16 @@
 """
-增强的实时显示组件，支持细粒度进度指示
+兼容层（Deprecated）：
+
+P0-2 已将增强 Live UI 迁移到 `src/clude_code/plugins/ui/`，避免 `cli/` 主链路膨胀。
+请改用：
+- `from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay`
 """
-from __future__ import annotations
 
-import time
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import deque
-
-from rich.console import Console, Group
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn, TaskID
-from rich.table import Table
-from rich.text import Text
-from rich.panel import Panel
-from rich.live import Live
-from rich.layout import Layout
-from rich.align import Align
-
-from clude_code.core.async_manager import TaskProgress, TaskStatus
-
-
-class TaskType(Enum):
-    """任务类型枚举"""
-    LLM_REQUEST = "llm_request"
-    FILE_READ = "file_read"
-    FILE_WRITE = "file_write"
-    SEARCH = "search"
-    COMMAND_EXEC = "command_exec"
-    INDEXING = "indexing"
-    VERIFICATION = "verification"
-    PATCHING = "patching"
+from clude_code.plugins.ui.enhanced_live_view import (  # noqa: F401
+    EnhancedLiveDisplay,
+    SimpleProgressDisplay,
+    TaskType,
+)
 
 
 @dataclass

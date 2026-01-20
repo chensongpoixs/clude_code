@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <defs>
+    <style>
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+      }
+      @keyframes flowLine {
+        from { stroke-dashoffset: 20; }
+        to { stroke-dashoffset: 0; }
+      }
+      .node { animation: fadeIn 0.5s ease-out forwards; }
+      .node-1 { animation-delay: 0.1s; opacity: 0; }
+      .node-2 { animation-delay: 0.3s; opacity: 0; }
+      .node-3 { animation-delay: 0.5s; opacity: 0; }
+      .node-4 { animation-delay: 0.7s; opacity: 0; }
+      .node-5 { animation-delay: 0.9s; opacity: 0; }
+      .node-6 { animation-delay: 1.1s; opacity: 0; }
+      .flow-line { 
+        stroke-dasharray: 5,5; 
+        animation: flowLine 1s linear infinite;
+      }
+      .title { font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }
+      .label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; }
+      .label-cn { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 11px; fill: #666; }
+      .success { fill: #2ecc71; }
+      .warning { fill: #f39c12; }
+      .error { fill: #e74c3c; }
+      .primary { fill: #4a9eff; }
+      .purple { fill: #9b59b6; }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#5c6370"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="600" fill="#1e2127"/>
+  
+  <!-- Title -->
+  <text x="400" y="35" text-anchor="middle" class="title" fill="#fff" font-size="18">
+    P0-2 Control Protocol Flow (控制协议解析流程)
+  </text>
+  
+  <!-- Input Node -->
+  <g class="node node-1" filter="url(#shadow)">
+    <rect x="320" y="60" width="160" height="50" rx="8" class="primary"/>
+    <text x="400" y="82" text-anchor="middle" fill="#fff" class="label">LLM Output Text</text>
+    <text x="400" y="98" text-anchor="middle" class="label-cn">(LLM 输出文本)</text>
+  </g>
+  
+  <!-- Decision: JSON Structure -->
+  <g class="node node-2" filter="url(#shadow)">
+    <polygon points="400,140 480,185 400,230 320,185" fill="#3498db"/>
+    <text x="400" y="178" text-anchor="middle" fill="#fff" class="label">Starts with {</text>
+    <text x="400" y="193" text-anchor="middle" fill="#fff" class="label">Ends with }?</text>
+    <text x="400" y="208" text-anchor="middle" class="label-cn">(是否 JSON 结构?)</text>
+  </g>
+  
+  <!-- JSON Parse -->
+  <g class="node node-3" filter="url(#shadow)">
+    <rect x="200" y="260" width="140" height="45" rx="8" class="purple"/>
+    <text x="270" y="282" text-anchor="middle" fill="#fff" class="label">json.loads()</text>
+    <text x="270" y="296" text-anchor="middle" class="label-cn">(JSON 解析)</text>
+  </g>
+  
+  <!-- Pydantic Validate -->
+  <g class="node node-4" filter="url(#shadow)">
+    <polygon points="270,330 350,365 270,400 190,365" fill="#3498db"/>
+    <text x="270" y="358" text-anchor="middle" fill="#fff" class="label">Pydantic</text>
+    <text x="270" y="373" text-anchor="middle" fill="#fff" class="label">Validate?</text>
+    <text x="270" y="388" text-anchor="middle" class="label-cn">(校验?)</text>
+  </g>
+  
+  <!-- Fallback -->
+  <g class="node node-3" filter="url(#shadow)">
+    <rect x="480" y="260" width="160" height="50" rx="8" class="warning"/>
+    <text x="560" y="282" text-anchor="middle" fill="#fff" class="label">Fallback: String Match</text>
+    <text x="560" y="298" text-anchor="middle" class="label-cn">(回退: 字符串匹配)</text>
+  </g>
+  
+  <!-- Success: Structured Control -->
+  <g class="node node-5" filter="url(#shadow)">
+    <rect x="100" y="430" width="160" height="50" rx="8" class="success"/>
+    <text x="180" y="452" text-anchor="middle" fill="#fff" class="label">✅ Structured Control</text>
+    <text x="180" y="468" text-anchor="middle" class="label-cn">(结构化控制信号)</text>
+  </g>
+  
+  <!-- Action: step_done -->
+  <g class="node node-6" filter="url(#shadow)">
+    <rect x="50" y="510" width="120" height="45" rx="8" class="success"/>
+    <text x="110" y="532" text-anchor="middle" fill="#fff" class="label">step_done</text>
+    <text x="110" y="546" text-anchor="middle" class="label-cn">(步骤完成)</text>
+  </g>
+  
+  <!-- Action: replan -->
+  <g class="node node-6" filter="url(#shadow)">
+    <rect x="190" y="510" width="120" height="45" rx="8" class="purple"/>
+    <text x="250" y="532" text-anchor="middle" fill="#fff" class="label">replan</text>
+    <text x="250" y="546" text-anchor="middle" class="label-cn">(需要重规划)</text>
+  </g>
+  
+  <!-- Warning Log -->
+  <g class="node node-5" filter="url(#shadow)">
+    <rect x="480" y="430" width="160" height="50" rx="8" class="warning"/>
+    <text x="560" y="452" text-anchor="middle" fill="#fff" class="label">⚠️ Log Warning</text>
+    <text x="560" y="468" text-anchor="middle" class="label-cn">(记录告警推动迁移)</text>
+  </g>
+  
+  <!-- Flow Lines -->
+  <g stroke="#5c6370" stroke-width="2" fill="none" marker-end="url(#arrowhead)">
+    <!-- Input to Decision -->
+    <line x1="400" y1="110" x2="400" y2="140" class="flow-line"/>
+    
+    <!-- Decision Yes to JSON Parse -->
+    <path d="M 320,185 L 270,185 L 270,260" class="flow-line"/>
+    <text x="285" y="175" class="label" fill="#2ecc71">Yes</text>
+    
+    <!-- Decision No to Fallback -->
+    <path d="M 480,185 L 560,185 L 560,260" class="flow-line"/>
+    <text x="515" y="175" class="label" fill="#e74c3c">No</text>
+    
+    <!-- JSON Parse to Pydantic -->
+    <line x1="270" y1="305" x2="270" y2="330" class="flow-line"/>
+    
+    <!-- Pydantic Valid to Success -->
+    <path d="M 190,365 L 180,365 L 180,430" class="flow-line"/>
+    <text x="150" y="395" class="label" fill="#2ecc71">Valid</text>
+    
+    <!-- Pydantic Invalid to Fallback -->
+    <path d="M 350,365 L 480,365 L 480,285" class="flow-line"/>
+    <text x="410" y="355" class="label" fill="#e74c3c">Invalid</text>
+    
+    <!-- Success to step_done -->
+    <path d="M 140,480 L 110,480 L 110,510" class="flow-line"/>
+    
+    <!-- Success to replan -->
+    <path d="M 220,480 L 250,480 L 250,510" class="flow-line"/>
+    
+    <!-- Fallback to Warning -->
+    <line x1="560" y1="310" x2="560" y2="430" class="flow-line"/>
+  </g>
+  
+  <!-- Legend -->
+  <g transform="translate(620, 520)">
+    <text x="0" y="0" class="label" fill="#888">Legend (图例):</text>
+    <rect x="0" y="10" width="12" height="12" rx="2" class="success"/>
+    <text x="18" y="20" class="label" fill="#888">Success (成功)</text>
+    <rect x="0" y="28" width="12" height="12" rx="2" class="warning"/>
+    <text x="18" y="38" class="label" fill="#888">Fallback (回退)</text>
+    <rect x="0" y="46" width="12" height="12" rx="2" class="purple"/>
+    <text x="18" y="56" class="label" fill="#888">Process (处理)</text>
+  </g>
+</svg>

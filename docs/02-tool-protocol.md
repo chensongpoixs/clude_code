@@ -1,22 +1,32 @@
-# 02｜工具协议（Tool/Function Calling）与权限/沙箱（可实现规格）
+# 02 | 工具协议与权限/沙箱（可实现规格）(Tool/Function Calling + Policy/Sandbox Spec)
 
-本章定义“代理如何调用工具”，目标是：**一致、可校验、可审计、可扩展**。
+> **Status (状态)**: Stable Spec (稳定规格，可直接落地实现)  
+> **Audience (读者)**: Maintainers / Tool Authors (维护者/工具作者)  
+> **Goal (目标)**: 定义 Agent 与工具层的调用协议、参数契约、权限策略（Policy/策略）与执行隔离（Sandbox/沙箱），确保一致、可校验、可审计、可扩展。
 
-## 1. 工具总原则
+本章定义“代理如何调用工具（Tool/Function Calling/工具调用）”，目标是：**一致、可校验、可审计、可扩展**。
+
+---
+
+## 1. 工具总原则 (Principles)
 
 - 工具是“受控能力边界”，代理不得直接做文件 IO/执行命令，必须通过工具层。
 - 每个工具都声明：
-  - **name**
-  - **version**
-  - **description**
+  - **name（名称）**
+  - **version（版本）**
+  - **description（描述）**
   - **args_schema**（JSON Schema 或等价结构）
-  - **return_schema**
+  - **return_schema（返回结构）**
   - **required_permissions**（read/write/exec/network 等）
   - **side_effects**（是否写文件、是否创建进程等）
 
-## 2. 工具调用消息格式（建议）
+> **约束（Constraint）**：所有工具都必须以 ToolSpec（工具契约）为单一真实源（Single Source of Truth/单一真实源）。
 
-### 2.1 ToolCallRequest
+---
+
+## 2. 工具调用消息格式（建议）(Message Shapes)
+
+### 2.1 ToolCallRequest（工具调用请求）
 - `tool_call_id: string`（全局唯一，便于回放）
 - `name: string`
 - `version: string`
@@ -25,7 +35,7 @@
 - `trace_id: string`
 - `timestamp: number`
 
-### 2.2 ToolCallResult
+### 2.2 ToolCallResult（工具调用结果）
 统一返回结构，避免“成功/失败”在不同工具里不一致：
 - `tool_call_id: string`
 - `ok: boolean`
@@ -34,7 +44,9 @@
 - `artifacts?: { files_changed?: string[], commands_run?: string[] }`
 - `duration_ms: number`
 
-## 3. 参数校验与类型系统
+---
+
+## 3. 参数校验与类型系统 (Validation & Types)
 
 ### 3.1 Schema 校验
 - 工具层必须对 `args` 做严格校验（缺字段/多字段/类型不符都拒绝）
@@ -50,7 +62,9 @@
   - `realpath`/符号链接解析
   - 路径是否在 workspace 内
 
-## 4. 权限模型（Policy）
+---
+
+## 4. 权限模型（Policy/策略）
 
 ### 4.1 权限类型（示例）
 - `fs.read`
@@ -72,7 +86,9 @@
 - **网络**：默认 `DENY`，企业版基于域名/IP allowlist
 - **写操作**：默认允许但需要“变更预览/可撤销”；高风险（删除/批量改）走确认
 
-## 5. 沙箱（Sandbox）与执行隔离
+---
+
+## 5. 沙箱（Sandbox/沙箱）与执行隔离 (Execution Isolation)
 
 ### 5.1 文件系统沙箱
 - 工具层强制将所有相对路径解析到 workspace
@@ -90,7 +106,9 @@
   - 必须记录 `pid` 与启动参数
   - 提供查询/停止工具（可选）
 
-## 6. 工具清单（MVP 推荐）
+---
+
+## 6. 工具清单（MVP 推荐）(Tool Catalog)
 
 ### 6.1 文件类
 - `list_dir(path, ignore_globs?)`
@@ -115,7 +133,7 @@
 - **安全性**：不读写文件、不执行命令，仅输出信息；因此在策略层通常不需要用户确认。
 - **工程价值**：显著降低“黑盒执行感”，提升可观测性与可控性（尤其在 `--live` 模式下）。
 
-**args_schema（JSON Schema）**：
+**args_schema（JSON Schema/JSON 模式）**：
 
 ```json
 {
@@ -135,7 +153,7 @@
 }
 ```
 
-**示例**：
+**示例（Examples/示例）**：
 
 ```json
 {"tool":"display","args":{"content":"正在分析第 3/10 个文件…","level":"progress"}}
@@ -143,6 +161,19 @@
 
 ```json
 {"tool":"display","args":{"title":"代码审计","content":"发现 2 处高风险点，准备修复。","level":"warning"}}
+```
+
+```json
+{
+  "tool": "display",
+  "args": {
+    "title": "执行思路",
+    "level": "info",
+    "content": "准备收敛入口：先统一事件协议，再迁移 UI 到 plugins。",
+    "thought": "原因：目前存在多入口导致行为分裂；先把链路收口才能保证 UI/工具/审计一致。",
+    "evidence": ["入口: cli/chat_handler.py", "UI: plugins/ui/opencode_tui.py", "协议: docs/02-tool-protocol.md"]
+  }
+}
 ```
 
 **实现说明（本项目）**：
@@ -162,7 +193,96 @@
 ### 6.5 记忆类（可选）
 - `update_memory(action, title, knowledge_to_store, existing_knowledge_id)`
 
-## 7. 审计日志（必做）
+### 6.6 外部 API 类（External API Tools）
+
+#### 6.6.1 `get_weather`（天气查询 / Weather Query）
+
+用途：使用 OpenWeatherMap API 获取全球任意城市的**实时天气信息**。
+
+**配置方式（二选一）**：
+
+```yaml
+# 方式 1：配置文件 clude.yaml（推荐）
+weather:
+  api_key: "your_api_key_here"
+  default_units: metric    # metric=摄氏度, imperial=华氏度
+  default_lang: zh_cn      # 默认中文
+  log_to_file: true         # 是否将天气模块日志写入文件（默认 true，写入 .clude/logs/app.log）
+```
+
+```bash
+# 方式 2：环境变量
+export OPENWEATHERMAP_API_KEY="your_api_key_here"
+```
+
+> 获取免费 API Key: https://openweathermap.org/api
+
+**args_schema**：
+```json
+{
+  "type": "object",
+  "properties": {
+    "city": { "type": "string", "description": "城市名称（支持中文、英文），如 'Beijing', '北京'" },
+    "lat": { "type": "number", "description": "纬度（-90 到 90）", "minimum": -90, "maximum": 90 },
+    "lon": { "type": "number", "description": "经度（-180 到 180）", "minimum": -180, "maximum": 180 },
+    "units": { "type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric", "description": "温度单位：metric=摄氏度，imperial=华氏度" },
+    "lang": { "type": "string", "default": "zh_cn", "description": "返回语言" }
+  },
+  "additionalProperties": false
+}
+```
+
+**示例**：
+```json
+// 按城市名查询
+{ "city": "Beijing", "units": "metric" }
+
+// 按经纬度查询
+{ "lat": 39.9042, "lon": 116.4074 }
+```
+
+**返回数据**：
+- `data.temperature`: 当前温度
+- `data.feels_like`: 体感温度
+- `data.humidity`: 湿度百分比
+- `data.wind_speed`: 风速
+- `data.weather_description`: 天气描述（中文）
+- `human_readable`: 人类可读的格式化天气描述
+
+#### 6.6.2 `get_weather_forecast`（天气预报 / Weather Forecast）
+
+用途：获取**未来5天**的天气预报，每3小时一个数据点。
+
+**args_schema**：
+```json
+{
+  "type": "object",
+  "properties": {
+    "city": { "type": "string", "description": "城市名称" },
+    "lat": { "type": "number", "description": "纬度" },
+    "lon": { "type": "number", "description": "经度" },
+    "days": { "type": "integer", "default": 5, "minimum": 1, "maximum": 5, "description": "预报天数" },
+    "units": { "type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric" }
+  },
+  "additionalProperties": false
+}
+```
+
+**示例**：
+```json
+{ "city": "Shanghai", "days": 3 }
+```
+
+**返回数据**：
+- `forecasts[]`: 预报数据数组，每个元素包含：
+  - `dt_txt`: 日期时间（如 "2024-01-20 12:00:00"）
+  - `temp`: 预报温度
+  - `weather`: 天气描述
+  - `pop`: 降水概率（0-1）
+
+---
+
+## 7. 审计日志（必做）(Audit Log)
 
 每次工具调用必须写一条结构化日志（JSON Lines 推荐）：
 - `trace_id`、`tool_call_id`
@@ -173,7 +293,9 @@
 - `duration_ms`
 - `artifacts.files_changed / commands_run`
 
-## 8. 工具版本与兼容
+---
+
+## 8. 工具版本与兼容 (Versioning & Compatibility)
 
 ### 8.1 版本策略
 - `MAJOR`：破坏性变更（schema/语义改变）
@@ -183,4 +305,11 @@
 ### 8.2 向后兼容要求
 - 工具层必须能识别“旧 schema”的请求并给出明确错误提示或自动适配
 
+---
+
+## 9. 相关文档（See Also / 参见）
+
+- **端到端流程与状态机（E2E Spec）**: [`docs/01-e2e-flow-and-state-machine.md`](./01-e2e-flow-and-state-machine.md)
+- **可观测与审计（Observability）**: [`docs/12-observability.md`](./12-observability.md)
+- **安全与策略（Security & Policy）**: [`docs/11-security-and-policy.md`](./11-security-and-policy.md)
 

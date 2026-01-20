@@ -214,6 +214,23 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         }
         return summary
 
+    #  extension: wearther_tool
+    if  tool == "weather_tool":
+        weather_info = payload.get("weather_info") or {}
+        summary["summary"] = {
+            "location": weather_info.get("location"),
+            "temperature": weather_info.get("temperature"),
+            "condition": weather_info.get("condition"),
+            "humidity": weather_info.get("humidity"),
+        }
+        return summary
+    # extension: get_weather
+    # extract full payload for get_weather tool
+
+    if tool == "get_weather":
+        return payload;
+    if tool == "get_weather_forecast":
+        return payload;
     # default: pass a small view
     summary["summary"] = {"keys": sorted(list(payload.keys()))[:30]}
     return summary

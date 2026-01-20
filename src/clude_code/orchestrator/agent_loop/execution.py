@@ -7,6 +7,7 @@ from clude_code.llm.llama_cpp_http import ChatMessage
 from clude_code.tooling.local_tools import ToolResult
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.orchestrator.planner import Plan
+from .control_protocol import try_parse_control_envelope
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -86,8 +87,6 @@ def execute_single_step_iteration(
     )
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
 
-    loop._log_llm_request_params_to_file()
-
     step_prompt = (
         f"现在执行计划步骤：{step.id}\n"
         f"步骤描述：{step.description}\n"
@@ -95,8 +94,8 @@ def execute_single_step_iteration(
         "规则：\n"
         "0) 业界标准：步骤开始/关键进展时，优先调用 display 输出一条简短进度（level=progress/info）。\n"
         "1) 如果需要工具：只输出一个工具调用 JSON（与系统要求一致）。\n"
-        "2) 如果本步骤已完成且不需要工具：只输出字符串【STEP_DONE】。\n"
-        "3) 如果本步骤失败且需要重规划：只输出字符串【REPLAN】。\n"
+        "2) 如果本步骤已完成且不需要工具：只输出控制 JSON：{\"control\":\"step_done\"}。\n"
+        "3) 如果本步骤失败且需要重规划：只输出控制 JSON：{\"control\":\"replan\"}。\n"
     )
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)
@@ -110,7 +109,36 @@ def execute_single_step_iteration(
         _ev("stuttering_detected", {"length": len(assistant), "step_id": step.id})
 
     a_strip = assistant.strip()
+
+    # P0-2：优先解析结构化控制协议（JSON Envelope / JSON 信封）
+    ctrl = try_parse_control_envelope(a_strip)
+    if ctrl is not None and ctrl.control == "step_done":
+        loop.messages.append(ChatMessage(role="assistant", content=assistant))
+        loop._trim_history(max_messages=30)
+        step.status = "done"
+        loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
+        _ev("plan_step_done", {"step_id": step.id})
+        loop.logger.info(f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description}")
+        _ev("control_signal", {"control": "step_done", "step_id": step.id})
+        return "STEP_DONE", False, False
+
+    if ctrl is not None and ctrl.control == "replan":
+        loop.messages.append(ChatMessage(role="assistant", content=assistant))
+        loop._trim_history(max_messages=30)
+        step.status = "failed"
+        loop.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
+        _ev("plan_step_replan_requested", {"step_id": step.id})
+        loop.logger.warning(f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description}")
+        _ev("control_signal", {"control": "replan", "step_id": step.id})
+        return "REPLAN", False, False
+
+    # 兼容旧协议（但必须告警）：字符串 STEP_DONE/REPLAN
     if "STEP_DONE" in a_strip or "【STEP_DONE】" in a_strip or a_strip.upper().startswith("STEP_DONE"):
+        loop.file_only_logger.warning(
+            "检测到旧控制协议输出（STEP_DONE），已兼容处理。建议升级为 {\"control\":\"step_done\"}。",
+            exc_info=False,
+        )
+        _ev("control_protocol_legacy", {"control": "step_done", "step_id": step.id})
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "done"
@@ -120,6 +148,11 @@ def execute_single_step_iteration(
         return "STEP_DONE", False, False
 
     if "REPLAN" in a_strip or "【REPLAN】" in a_strip or a_strip.upper().startswith("REPLAN"):
+        loop.file_only_logger.warning(
+            "检测到旧控制协议输出（REPLAN），已兼容处理。建议升级为 {\"control\":\"replan\"}。",
+            exc_info=False,
+        )
+        _ev("control_protocol_legacy", {"control": "replan", "step_id": step.id})
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "failed"
@@ -129,11 +162,15 @@ def execute_single_step_iteration(
         return "REPLAN", False, False
 
     tool_call = _try_parse_tool_call(assistant)
-    loop._log_llm_response_data_to_file(assistant, tool_call)
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
-        loop.messages.append(ChatMessage(role="user", content="你的输出既不是工具调用 JSON，也不是【STEP_DONE】/【REPLAN】。请严格按规则输出。"))
+        loop.messages.append(
+            ChatMessage(
+                role="user",
+                content="你的输出既不是工具调用 JSON，也不是控制 JSON（{\"control\":\"step_done\"}/{\"control\":\"replan\"}）。请严格按规则输出。",
+            )
+        )
         loop._trim_history(max_messages=30)
         return None, False, False
 
@@ -176,10 +213,38 @@ def handle_replanning(
     _set_state(AgentState.RECOVERING, {"reason": "step_failed", "step_id": step.id, "replans_used": replans_used})
     _set_state(AgentState.PLANNING, {"reason": "replan", "replans_used": replans_used})
 
+    # P0-3：优先局部重规划（PlanPatch），失败回退全量 Plan（兼容迁移期）
+    try:
+        from clude_code.orchestrator.planner import render_plan_markdown
+        cur_plan_md = render_plan_markdown(plan)
+    except Exception as e:
+        # P1-1: 渲染失败不阻塞主流程，但记录日志便于排查
+        loop.file_only_logger.warning(f"render_plan_markdown 失败: {e}", exc_info=True)
+        cur_plan_md = "(render_plan_markdown 失败，略)"
+
     replan_prompt = (
-        "出现阻塞/失败，需要重规划。请输出新的 Plan JSON（严格 JSON，不要解释，不要调用工具）。\n"
-        f"限制：steps 不超过 {loop.cfg.orchestrator.max_plan_steps}。\n"
-        "请结合当前对话中的错误与工具反馈，生成更可执行的步骤。"
+        "出现阻塞/失败，需要重规划。\n"
+        "优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：\n"
+        "{\n"
+        '  "title": "可选：新标题",\n'
+        '  "remove_steps": ["step_x"],\n'
+        '  "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],\n'
+        '  "add_steps": [{"id":"step_4","description":"...","dependencies":["step_3"],"tools_expected":["read_file"],"status":"pending"}],\n'
+        '  "reason": "可选：为什么这样 patch"\n'
+        "}\n"
+        "约束：\n"
+        f"- steps 总数不超过 {loop.cfg.orchestrator.max_plan_steps}\n"
+        "- 禁止删除/修改 status=done 的步骤\n"
+        "- 新增步骤的 status 会被强制设为 pending\n"
+        "\n"
+        "当前失败步骤：\n"
+        f"- step_id={step.id}\n"
+        f"- description={step.description}\n"
+        "\n"
+        "当前 Plan（含状态/依赖/建议工具）：\n"
+        f"{cur_plan_md}\n"
+        "\n"
+        "如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。"
     )
     loop.messages.append(ChatMessage(role="user", content=replan_prompt))
     loop._trim_history(max_messages=30)
@@ -189,9 +254,44 @@ def handle_replanning(
     loop._trim_history(max_messages=30)
 
     try:
-        from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown
+        from clude_code.orchestrator.planner import (
+            apply_plan_patch,
+            carry_over_done_status,
+            parse_plan_from_text,
+            parse_plan_patch_from_text,
+            render_plan_markdown,
+        )
 
+        # 1) 优先解析/应用 PlanPatch（P0-3）
+        try:
+            patch = parse_plan_patch_from_text(assistant_plan)
+            new_plan, meta = apply_plan_patch(
+                plan,
+                patch,
+                max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
+            )
+            # 防止误判：如果补丁是“空操作”，视为无效，回退 full Plan
+            title_changed = bool((patch.title or "").strip())
+            if (meta.get("added", 0) + meta.get("updated", 0) + meta.get("removed", 0)) == 0 and not title_changed:
+                raise ValueError("PlanPatch 是空操作（无新增/更新/删除/标题更新），拒绝应用并回退 full Plan")
+            loop.audit.write(
+                trace_id=trace_id,
+                event="plan_patch_applied",
+                data={"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used},
+            )
+            _ev(
+                "plan_patch_applied",
+                {"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used, "steps": len(new_plan.steps)},
+            )
+            loop.file_only_logger.info("计划补丁已应用:\n" + render_plan_markdown(new_plan))
+            return new_plan, replans_used
+        except Exception as e:
+            # patch 失败：回退全量 Plan（兼容迁移期）
+            loop.file_only_logger.warning(f"PlanPatch 解析/应用失败，回退 full Plan: {e}", exc_info=True)
+
+        # 2) 回退：解析 full Plan（旧协议）
         new_plan = parse_plan_from_text(assistant_plan)
+        new_plan = carry_over_done_status(plan, new_plan)
         if len(new_plan.steps) > loop.cfg.orchestrator.max_plan_steps:
             new_plan.steps = new_plan.steps[: loop.cfg.orchestrator.max_plan_steps]
         loop.audit.write(trace_id=trace_id, event="replan_generated", data={"title": new_plan.title, "steps": [s.model_dump() for s in new_plan.steps]})
@@ -264,6 +364,10 @@ def execute_plan_steps(
             break
 
         step = plan.steps[step_cursor]
+        # P0-3：局部重规划会保留 done 步骤，必须跳过，避免重复执行/状态被覆盖
+        if getattr(step, "status", None) == "done":
+            step_cursor += 1
+            continue
         unmet_deps = check_step_dependencies(loop, step, plan, trace_id, _ev)
         if unmet_deps:
             step_cursor += 1

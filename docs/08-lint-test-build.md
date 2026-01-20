@@ -1,6 +1,8 @@
-# 08｜自动化校验与闭环自愈 (Lint, Test & Build)
+# 08 | 自动化校验与闭环自愈（可实现规格）(Lint, Test & Build Spec)
 
-本规范定义了 Agent 如何利用现有的工程基础设施进行“自我纠偏”。通过集成编译、静态检查与自动化测试，我们将 Agent 的产出从“看似正确”提升到“工程正确”。
+> **Status (状态)**: Stable Spec (稳定规格，可直接落地实现)  
+> **Audience (读者)**: Maintainers / Verification Owners (维护者/验证负责人)  
+> **Goal (目标)**: 定义 Agent 如何集成 Lint/Test/Build（质量门禁/Quality Gates）形成闭环自愈（Self-Healing/自愈），把产出从“看似正确”提升到“工程正确”。
 
 ---
 
@@ -34,6 +36,16 @@
 
 ---
 
-## 4. 结论 (Conclusion)
+---
+
+## 4. 相关文档（See Also / 参见）
+
+- **运行时与命令执行（Runtime & Terminal）**: [`docs/07-runtime-and-terminal.md`](./07-runtime-and-terminal.md)
+- **代码编辑与补丁系统（Patching）**: [`docs/06-code-editing-and-patching.md`](./06-code-editing-and-patching.md)
+- **自愈闭环实现报告（Verification）**: [`src/clude_code/verification/ANALYSIS_REPORT.md`](../src/clude_code/verification/ANALYSIS_REPORT.md)
+
+---
+
+## 5. 结论 (Conclusion/结论)
 
 “没有自检的 Agent 产出代码不可靠”。通过将 Lint、Test 与 Build 深度集成到编排循环中，我们赋予了 Agent 独立发现并修复错误的能力，显著降低了开发者的 Code Review 负担。

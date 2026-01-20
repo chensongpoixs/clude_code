@@ -9,6 +9,11 @@ from typing import Any
 
 from ..types import ToolResult
 from ..workspace import resolve_in_workspace
+from ..logger_helper import get_tool_logger
+from ...config.tools_config import get_search_config
+
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
 
 
 _NOISE_DIRS = {".git", ".clude", "node_modules", ".venv", "dist", "build"}
@@ -18,10 +23,22 @@ def grep(*, workspace_root: Path, pattern: str, path: str = ".", ignore_case: bo
     """
     优先使用 ripgrep（rg）以获得更稳定性能和结构化输出；无 rg 时回退到 Python 扫描。
     """
+    # 检查工具是否启用
+    config = get_search_config()
+    if not config.enabled:
+        _logger.warning("[Grep] 搜索工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "search tool is disabled"})
+
+    _logger.debug(f"[Grep] 开始搜索: pattern={pattern}, path={path}, ignore_case={ignore_case}, max_hits={max_hits}")
     if shutil.which("rg"):
+        _logger.debug("[Grep] 使用 ripgrep (rg)")
         tr = _rg_grep(workspace_root=workspace_root, pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
         if tr.ok:
+            _logger.info(f"[Grep] ripgrep 搜索成功: 找到 {len(tr.payload.get('matches', [])) if tr.payload else 0} 个匹配")
             return tr
+        _logger.warning("[Grep] ripgrep 搜索失败，回退到 Python 扫描")
+    else:
+        _logger.debug("[Grep] ripgrep 不可用，使用 Python 扫描")
     return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, ignore_case=ignore_case, max_hits=max_hits)
 
 

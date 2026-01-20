@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from clude_code.policy.advanced_security import RiskLevel
+
 
 @dataclass(frozen=True)
 class CommandDecision:
@@ -27,18 +29,30 @@ DEFAULT_DENYLIST = [
 
 
 def evaluate_command(command: str, *, allow_network: bool) -> CommandDecision:
+    """
+    兼容性函数：保持原有接口，同时使用新的安全策略系统
+    """
+    from clude_code.policy.advanced_security import (
+        get_security_policy, SecurityContext, evaluate_command_with_context
+    )
+
     cmd = command.strip()
     if not cmd:
         return CommandDecision(False, "empty command")
 
-    denylist = list(DEFAULT_DENYLIST)
-    if allow_network:
-        # allow network tools in general, but still keep destructive + sudo blocked
-        denylist = [p for p in denylist if p not in {r"\bcurl\b", r"\bwget\b", r"\binvoke-webrequest\b", r"\birm\b"}]
+    # 创建安全上下文
+    security_context = SecurityContext(
+        network_enabled=allow_network,
+        risk_threshold=RiskLevel.MEDIUM  # 默认中等风险阈值
+    )
 
-    for pattern in denylist:
-        if re.search(pattern, cmd, flags=re.IGNORECASE):
-            return CommandDecision(False, f"command denied by policy: matched `{pattern}`")
+    # 使用新的安全策略系统评估
+    allowed, reason, risk_level = evaluate_command_with_context(
+        cmd, {"allow_network": allow_network}, security_context
+    )
+
+    if not allowed:
+        return CommandDecision(False, reason)
 
     return CommandDecision(True, "")
 

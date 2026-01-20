@@ -1,46 +1,67 @@
-# 15｜部署与运维（Local / Enterprise）
+# 15 | 安装与部署（可实现规格）(Installation & Deployment Spec)
 
-目标：让该类 code agent 能在个人本地与企业内网稳定运行，并可配置、可升级、可治理。
+> **Status (状态)**: Stable Spec (稳定规格)  
+> **Audience (读者)**: End Users / DevOps (最终用户/运维)  
+> **Goal (目标)**: 提供简单、可靠的安装与更新机制，支持多平台环境。
 
-## 1. 运行形态
+---
 
-### 1.1 本地版（个人）
-- CLI 二进制/脚本
-- 索引与记忆保存在 workspace 或用户目录
-- 默认禁网、默认最小权限
+## 1. 安装方式 (Installation Methods)
 
-### 1.2 企业版（内网）
-- 模型：私有化模型服务或代理网关
-- 审计：集中式日志/回放存储
-- 策略：组织级策略下发（policy bundle）
-- 插件：内部工具接入（Jira/GitLab/监控）
+### 1.1 Python Package (推荐)
+适用于开发者环境，基于 `pip` 或 `pipx`。
 
-## 2. 配置体系（建议）
+```bash
+# 安装
+pip install clude-code
 
-### 2.1 配置来源优先级
-1. 命令行参数
-2. workspace 配置（例如 `.clude/config.json`）
-3. 用户全局配置（用户目录）
-4. 默认值
+# 安装带 UI 依赖 (Textual)
+pip install "clude-code[ui]"
 
-### 2.2 配置项示例
-- `network.enabled: boolean`
-- `network.allowlist: string[]`
-- `verify.default_mode: lint|test|build`
-- `tools.enable_semantic_search: boolean`
-- `limits.max_files_changed: number`
-- `audit.retention_days: number`
+# 安装带 RAG 依赖 (LanceDB)
+pip install "clude-code[rag]"
+```
 
-## 3. 更新与版本管理
-- 本地：自更新（可选）或包管理器更新
-- 企业：灰度发布、版本锁定、回滚包
+### 1.2 源码安装 (Source)
+适用于贡献者。
 
-## 4. 运维与故障处理
-- 提供 `doctor` 命令：
-  - 检查依赖（rg/git/node/python）
-  - 检查权限与策略
-  - 检查索引健康度
-- 提供导出诊断包：
-  - trace + 关键日志 + 配置（脱敏）
+```bash
+git clone https://github.com/your-repo/clude-code.git
+cd clude-code
+pip install -e ".[dev,ui,rag]"
+```
 
+---
 
+## 2. 环境依赖 (Prerequisites)
+
+- **OS（操作系统）**: Windows, macOS, Linux
+- **Python（Python 版本）**: >= 3.10
+- **RAM（内存）**: 
+  - 基础运行: < 500MB
+  - RAG 索引: 取决于仓库大小 (建议 2GB+)
+- **LLM**: 需可访问 OpenAI 兼容接口 (本地 llama.cpp 或 云端 API)
+
+---
+
+## 3. 配置管理 (Configuration)
+
+首次运行时，系统会引导生成 `~/.clude/config.yaml`。
+
+```yaml
+llm:
+  provider: openai_compat
+  base_url: http://localhost:8000/v1
+  api_key: sk-xxx
+
+rag:
+  enabled: true
+  db_path: .clude/vector_db
+```
+
+---
+
+## 4. 相关文档 (See Also)
+
+- **架构总览 (Overview)**: [`docs/00-overview.md`](./00-overview.md)
+- **运行时规格 (Runtime)**: [`docs/07-runtime-and-terminal.md`](./07-runtime-and-terminal.md)

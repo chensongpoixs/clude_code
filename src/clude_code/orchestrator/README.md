@@ -41,25 +41,29 @@
 
 为了保证模块化开发的协作精度，我们定义了标准的数据契约：
 
-- **数据模型协议**: [`PROTOCOLS.md`](PROTOCOLS.md) - 包含 Plan、Step、VerificationResult 的 JSON Schema 及异常处理策略。
+- **工具协议（Tool Protocol）与权限/沙箱（Policy/Sandbox）**: [`docs/02-tool-protocol.md`](../../../docs/02-tool-protocol.md) - 工具调用消息格式、Schema 校验与权限模型（带中文注释）。
+- **端到端流程与状态机（E2E Flow & State Machine）**: [`docs/01-e2e-flow-and-state-machine.md`](../../../docs/01-e2e-flow-and-state-machine.md) - Orchestrator 的状态定义、事件与转移规则。
 
 ## 完整执行流程
 
 详细的 Agent 执行流程说明和流程图：
 
-- **详细流程文档**: [`AGENT_FLOW_DETAILED.md`](AGENT_FLOW_DETAILED.md) - 包含完整的流程说明、设计决策和关键机制
+- **执行链路审计与结论（Decision Audit）**: [`docs/17-agent-decision-audit.md`](../../../docs/17-agent-decision-audit.md) - Trace ID / 控制协议 / 重规划的审计结论与 P0 计划。
+- **工程路线图（Roadmap）**: [`docs/16-development-plan.md`](../../../docs/16-development-plan.md) - P0/P1/P2 迭代计划与验收标准。
 - **动画流程图**: ![Agent Complete Flow](../../assets/agent_complete_flow_animated.svg) - 可视化展示从初始化到返回结果的完整执行路径
 
 ## 用户问题流程图（专项）
 
-- **用户问「你可以干嘛啊？」的正确分析流程**: [`USER_QUERY_你可以干嘛啊_分析流程.md`](USER_QUERY_你可以干嘛啊_分析流程.md)
+- **用户问「你可以干嘛啊？」的正确分析流程（专项说明）**: 建议参考 `docs/01-e2e-flow-and-state-machine.md` 中的 `INTAKE/CLARIFYING` 处理原则，并结合 `docs/13-ui-cli-ux.md` 的交互输出规范。
   - 流程图（动画 SVG）: ![用户能力询问分析流程](../../assets/user_query_capabilities_flow_animated.svg)
 
 ## 与业界标准对比分析
 
 详细的对比分析文档，识别当前实现与业界标准（Claude Code、Aider、Cursor）的差距：
 
-- **对比分析文档**: [`AGENT_VS_INDUSTRY_ANALYSIS.md`](AGENT_VS_INDUSTRY_ANALYSIS.md) - 基于 8 个维度的详细对比，包含问题分析、评分对比和改进建议
+- **业界对标白皮书（Industry Whitepaper）**: [`docs/technical-reports/industry-whitepaper.md`](../../../docs/technical-reports/industry-whitepaper.md) - 业界能力矩阵与“黄金路径”结论（含中文注释）。
+- **编排层健壮性分析（Orchestrator Robustness）**: [`docs/technical-reports/orchestrator-robustness.md`](../../../docs/technical-reports/orchestrator-robustness.md)
+- **编排层实现报告（Orchestrator Implementation）**: [`docs/technical-reports/orchestrator-implementation.md`](../../../docs/technical-reports/orchestrator-implementation.md)
 
 ### 流程概览
 

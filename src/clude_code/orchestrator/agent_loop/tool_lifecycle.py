@@ -9,7 +9,12 @@ from .tool_dispatch import TOOL_REGISTRY
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
 
+    """
+    统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
 
+    大文件治理说明：
+    - 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
+    """
 def run_tool_lifecycle(
     loop: "AgentLoop",
     name: str,
@@ -18,14 +23,23 @@ def run_tool_lifecycle(
     confirm: Callable[[str], bool],
     _ev: Callable[[str, dict[str, Any]], None],
 ) -> ToolResult:
-    """
-    统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
 
-    大文件治理说明：
-    - 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
-    """
     spec = TOOL_REGISTRY.get(name)
     side_effects = spec.side_effects if spec is not None else set()
+
+    # 0) 工具权限（对标 Claude Code：allowedTools/disallowedTools）
+    allowed = list(getattr(loop.cfg.policy, "allowed_tools", []) or [])
+    denied = set(getattr(loop.cfg.policy, "disallowed_tools", []) or [])
+    if allowed and name not in allowed:
+        loop.logger.warning(f"[red]✗ 工具被 allowed_tools 限制拒绝: {name}[/red]")
+        loop.audit.write(trace_id=trace_id, event="policy_deny_tool", data={"tool": name, "reason": "not_in_allowed_tools"})
+        _ev("policy_deny_tool", {"tool": name, "reason": "not_in_allowed_tools"})
+        return ToolResult(ok=False, error={"code": "E_POLICY", "message": f"tool not allowed: {name}"})
+    if name in denied:
+        loop.logger.warning(f"[red]✗ 工具被 disallowed_tools 禁止: {name}[/red]")
+        loop.audit.write(trace_id=trace_id, event="policy_deny_tool", data={"tool": name, "reason": "in_disallowed_tools"})
+        _ev("policy_deny_tool", {"tool": name, "reason": "in_disallowed_tools"})
+        return ToolResult(ok=False, error={"code": "E_POLICY", "message": f"tool disallowed: {name}"})
 
     # 1. 确认策略 (MVP: 写/执行 确认)
     if ("write" in side_effects) and loop.cfg.policy.confirm_write:
@@ -85,11 +99,20 @@ def run_tool_lifecycle(
         audit_data["payload"] = result.payload  # 记录 hash/undo_id
     loop.audit.write(trace_id=trace_id, event="tool_call", data=audit_data)
 
+    # 3.1 记录用量（工具调用）
+    try:
+        if hasattr(loop, "usage"):
+            loop.usage.record_tool(name=name, ok=bool(result.ok))
+        _ev("tool_usage", {"tool": name, "ok": bool(result.ok), "totals": (loop.usage.summary() if hasattr(loop, "usage") else None)})
+    except Exception as ex:
+        # P1-1: 用量统计失败不影响主流程，但写入 file-only 日志便于排查
+        loop.file_only_logger.warning(f"工具用量统计失败: {ex}", exc_info=True)
+
     # 4. 记录详细结果到文件
     loop.file_only_logger.info(
         f"工具执行结果 [tool={name}] [ok={result.ok}] "
         f"[error={json.dumps(result.error, ensure_ascii=False) if result.error else None}] "
-        f"[payload_keys={list(result.payload.keys()) if result.payload else []}]"
+        f"[payload_keys={(result.payload.keys()) if result.payload else []}]"
     )
 
     # 5. 自动化验证闭环 (自愈)

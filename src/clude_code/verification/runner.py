@@ -3,7 +3,7 @@ import re
 import os
 from pathlib import Path
 from typing import List, Dict
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from .models import VerificationResult, VerificationIssue
 from .detector import ProjectDetector
 from clude_code.observability.logger import get_logger

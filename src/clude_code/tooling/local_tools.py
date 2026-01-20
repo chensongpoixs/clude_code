@@ -9,9 +9,16 @@ from .tools.grep import grep as _grep_impl
 from .tools.list_dir import list_dir as _list_dir_impl
 from .tools.patching import apply_patch as _apply_patch_impl
 from .tools.patching import undo_patch as _undo_patch_impl
+from .tools.question import ask_question as _ask_question_impl
 from .tools.read_file import read_file as _read_file_impl
 from .tools.repo_map import generate_repo_map as _generate_repo_map_impl
 from .tools.run_cmd import run_cmd as _run_cmd_impl
+from .tools.search import websearch as _websearch_impl, codesearch as _codesearch_impl
+from .tools.skill import load_skill as _load_skill_impl, list_skills as _list_skills_impl
+from .tools.task_agent import run_task as _run_task_impl, get_task_status as _get_task_status_impl
+from .tools.todo_manager import todowrite as _todowrite_impl, todoread as _todoread_impl
+from .tools.weather import get_weather as _get_weather_impl, get_weather_forecast as _get_weather_forecast_impl
+from .tools.webfetch import fetch_web_content as _fetch_web_content_impl
 from .tools.write_file import write_file as _write_file_impl
 
 
@@ -33,8 +40,8 @@ class LocalTools:
             limit=limit,
         )
 
-    def write_file(self, path: str, text: str) -> ToolResult:
-        return _write_file_impl(workspace_root=self.workspace_root, path=path, text=text)
+    def write_file(self, path: str, text: str, content_based: bool = False, insert_at_line: int | None = None) -> ToolResult:
+        return _write_file_impl(workspace_root=self.workspace_root, path=path, text=text, content_based=content_based, insert_at_line=insert_at_line)
 
     def apply_patch(
         self,
@@ -74,5 +81,61 @@ class LocalTools:
             command=command,
             cwd=cwd,
         )
+
+    def ask_question(self, question: str, options: list[str] | None = None, multiple: bool = False, header: str | None = None) -> ToolResult:
+        return _ask_question_impl(question=question, options=options, multiple=multiple, header=header)
+
+    def fetch_web_content(self, url: str, format: str = "markdown", timeout: int = 30) -> ToolResult:
+        return _fetch_web_content_impl(url=url, format=format, timeout=timeout)
+
+    def websearch(self, query: str, num_results: int = 8, livecrawl: str = "fallback", search_type: str = "auto", context_max_chars: int = 10000) -> ToolResult:
+        return _websearch_impl(query=query, num_results=num_results, livecrawl=livecrawl, search_type=search_type, context_max_chars=context_max_chars)
+
+    def codesearch(self, query: str, tokens_num: int = 5000) -> ToolResult:
+        return _codesearch_impl(query=query, tokens_num=tokens_num)
+
+    def load_skill(self, skill_name: str) -> ToolResult:
+        return _load_skill_impl(skill_name=skill_name, workspace_root=str(self.workspace_root))
+
+    def list_skills(self) -> ToolResult:
+        return _list_skills_impl(workspace_root=str(self.workspace_root))
+
+    def todowrite(self, content: str, priority: str = "medium", status: str = "pending") -> ToolResult:
+        return _todowrite_impl(content=content, priority=priority, status=status)
+
+    def todoread(self, status: str | None = None, todo_id: str | None = None) -> ToolResult:
+        return _todoread_impl(status=status, todo_id=todo_id)
+
+    def run_task(self, description: str, prompt: str, subagent_type: str = "general", session_id: str | None = None) -> ToolResult:
+        return _run_task_impl(description=description, prompt=prompt, subagent_type=subagent_type, session_id=session_id)
+
+    def get_task_status(self, task_id: str) -> ToolResult:
+        return _get_task_status_impl(task_id=task_id)
+
+    def get_weather(
+        self,
+        city: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        units: str = "metric",
+        lang: str = "zh_cn",
+        timeout: int = 10,
+    ) -> ToolResult:
+        """获取实时天气信息"""
+        return _get_weather_impl(city=city, lat=lat, lon=lon, units=units, lang=lang, timeout=timeout)
+
+    def get_weather_forecast(
+        self,
+        city: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        units: str = "metric",
+        lang: str = "zh_cn",
+        days: int = 5,
+        timeout: int = 10,
+    ) -> ToolResult:
+        """获取天气预报（5天）"""
+        return _get_weather_forecast_impl(city=city, lat=lat, lon=lon, units=units, lang=lang, days=days, timeout=timeout)
+
 
 

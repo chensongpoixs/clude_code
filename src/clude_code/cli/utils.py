@@ -1,6 +1,6 @@
 import logging
 from rich.prompt import Prompt
-from clude_code.config import CludeConfig
+from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import LlamaCppHttpClient
 
 def select_model_interactively(cfg: CludeConfig, logger: logging.Logger) -> None:
@@ -29,16 +29,20 @@ def select_model_interactively(cfg: CludeConfig, logger: logging.Logger) -> None
         for i, mid in enumerate(ids, start=1):
             logger.info(f"{i}. {mid}")
         
-        sel = Prompt.ask("请选择模型序号", default="1")
         try:
+            # 尝试交互式输入
+            sel = Prompt.ask("请选择模型序号", default="1")
             idx = int(sel)
             if 1 <= idx <= len(ids):
                 cfg.llm.model = ids[idx - 1]
                 logger.info(f"已选择模型: [bold cyan]{cfg.llm.model}[/bold cyan]")
             else:
-                logger.warning("序号超出范围。")
-        except ValueError:
-            logger.warning("输入无效，继续使用当前模型。")
+                logger.warning("序号超出范围，使用默认模型。")
+        except (ValueError, EOFError, KeyboardInterrupt):
+            # 非交互式环境或输入错误，使用默认模型
+            default_model = ids[0] if ids else cfg.llm.model
+            cfg.llm.model = default_model
+            logger.info(f"使用默认模型: [bold cyan]{cfg.llm.model}[/bold cyan]")
     except Exception as e:
         logger.error(f"获取模型列表失败: {e}", exc_info=True)
 

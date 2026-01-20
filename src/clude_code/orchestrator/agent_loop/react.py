@@ -32,9 +32,30 @@ def execute_react_fallback_loop(
         loop.logger.info(f"[bold yellow]→ 第 {iteration + 1} 轮：请求 LLM（消息数={len(loop.messages)}）[/bold yellow]")
         _ev("llm_request", {"messages": len(loop.messages)})
 
-        loop._log_llm_request_params_to_file()
-
-        assistant = _llm_chat("react_fallback", None)
+        try:
+            assistant = _llm_chat("react_fallback", None)
+        except RuntimeError as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                _ev("llm_error", {"error": "timeout", "message": f"LLM 请求超时（{loop.llm.timeout_s}秒）"})
+                loop.logger.error(f"[red]LLM 请求超时: {error_msg}[/red]")
+                from .models import AgentTurn
+                return AgentTurn(
+                    assistant_text=f"LLM 请求超时（{loop.llm.timeout_s}秒）。请检查模型服务是否正常运行，或尝试降低 max_tokens（当前: {loop.llm.max_tokens}）。",
+                    tool_used=tool_used,
+                    trace_id=trace_id,
+                    events=events,
+                )
+            else:
+                _ev("llm_error", {"error": "request_failed", "message": error_msg})
+                loop.logger.error(f"[red]LLM 请求失败: {error_msg}[/red]")
+                from .models import AgentTurn
+                return AgentTurn(
+                    assistant_text=f"LLM 请求失败: {error_msg}",
+                    tool_used=tool_used,
+                    trace_id=trace_id,
+                    events=events,
+                )
 
         if assistant.count("[") > 50 or assistant.count("{") > 50:
             loop.logger.warning("[red]检测到模型输出异常（复读字符），已强制截断[/red]")
@@ -45,7 +66,6 @@ def execute_react_fallback_loop(
         loop.logger.debug(f"[dim]LLM 响应长度: {len(assistant)} 字符[/dim]")
 
         tool_call = _try_parse_tool_call(assistant)
-        loop._log_llm_response_data_to_file(assistant, tool_call)
 
         if tool_call is None:
             loop.logger.info("[bold green]✓ LLM 返回最终回复（无工具调用）[/bold green]")

@@ -9,6 +9,8 @@ import threading
 import traceback
 import sys
 import os
+import json
+import io
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -338,6 +340,8 @@ class FunctionProfiler(Profiler):
         self._start_time: Optional[float] = None
         self._name: Optional[str] = None
         self._call_stack: List[str] = []
+        self._profile: Optional[any] = None
+        self._pstats: Optional[any] = None
     
     def start(self, name: str) -> None:
         """开始函数分析"""
@@ -359,7 +363,7 @@ class FunctionProfiler(Profiler):
             self._profile = cProfile.Profile()
             self._profile.enable()
             self._pstats = pstats.Stats(self._profile)
-            self._logger.info("Started function profiling with cProfile")
+            self.logger.info("Started function profiling with cProfile")
         except ImportError:
             self.logger.warning("cProfile not available, using fallback function profiling")
             self._profile = None
@@ -385,7 +389,7 @@ class FunctionProfiler(Profiler):
         
         if self._profile:
             self._profile.disable()
-            
+
             # 获取统计信息
             stats_stream = io.StringIO()
             self._pstats.sort_stats('cumulative').print_stats(20, stream=stats_stream)
@@ -443,11 +447,11 @@ class ProfileManager:
     def __init__(self, workspace_root: str):
         self.workspace_root = workspace_root
         self.logger = get_logger(__name__, workspace_root=workspace_root)
-        
+
         # 创建存储目录
         self.storage_dir = Path(workspace_root) / ".clude" / "profiles"
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 创建分析器
         self.profilers = {
             ProfileType.CPU: CPUProfiler(workspace_root),
@@ -455,11 +459,78 @@ class ProfileManager:
             ProfileType.IO: IOProfiler(workspace_root),
             ProfileType.FUNCTION: FunctionProfiler(workspace_root)
         }
-        
+
         # 分析记录
         self.records: List[ProfileRecord] = []
         self._lock = threading.Lock()
-    
+
+        # 加载持久化的运行状态
+        self._load_running_state()
+
+    def _load_running_state(self) -> None:
+        """加载持久化的运行状态"""
+        state_file = self.storage_dir / "running_state.json"
+        if not state_file.exists():
+            return
+
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+
+            # 恢复运行状态
+            for profile_type_str, profile_data in state_data.get("running_profilers", {}).items():
+                try:
+                    profile_type = ProfileType(profile_type_str)
+                    profiler = self.profilers[profile_type]
+
+                    # 恢复分析器状态（简化版本）
+                    if hasattr(profiler, '_name'):
+                        profiler._name = profile_data.get('name')
+                    if hasattr(profiler, '_start_time'):
+                        profiler._start_time = profile_data.get('start_time')
+                    if hasattr(profiler, '_running'):
+                        profiler._running = True
+
+                    self.logger.info(f"Restored running profiler: {profile_type_str}")
+                except (ValueError, KeyError) as e:
+                    self.logger.warning(f"Failed to restore profiler {profile_type_str}: {e}")
+
+        except (json.JSONDecodeError, IOError) as e:
+            self.logger.warning(f"Failed to load running state: {e}")
+
+    def _save_running_state(self) -> None:
+        """保存当前的运行状态"""
+        state_file = self.storage_dir / "running_state.json"
+
+        try:
+            state_data = {"running_profilers": {}}
+
+            # 保存所有正在运行的分析器状态
+            for profile_type, profiler in self.profilers.items():
+                if profiler.is_running():
+                    profile_data = {}
+
+                    # 收集分析器状态
+                    if hasattr(profiler, '_name') and profiler._name:
+                        profile_data['name'] = profiler._name
+                    if hasattr(profiler, '_start_time') and profiler._start_time:
+                        profile_data['start_time'] = profiler._start_time
+
+                    if profile_data:
+                        state_data["running_profilers"][profile_type.value] = profile_data
+                        self.logger.debug(f"Saving state for {profile_type.value}: {profile_data}")
+
+            self.logger.debug(f"Saving state data: {state_data}")
+            with open(state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, indent=2, default=str)
+
+            self.logger.debug(f"State saved to {state_file}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to save running state: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+
     def start_profiling(self, name: str, profile_type: ProfileType) -> bool:
         """开始指定类型的分析"""
         profiler = self.profilers[profile_type]
@@ -470,6 +541,8 @@ class ProfileManager:
         try:
             profiler.start(name)
             self.logger.info(f"Started {profile_type.value} profiling: {name}")
+            # 保存运行状态
+            self._save_running_state()
             return True
         except Exception as e:
             self.logger.error(f"Error starting {profile_type.value} profiling: {e}")
@@ -486,8 +559,12 @@ class ProfileManager:
             record = profiler.stop()
             with self._lock:
                 self.records.append(record)
-            
+
             self.logger.info(f"Stopped {profile_type.value} profiling: {record.name}")
+            # 保存运行状态（移除已停止的分析器）
+            self._save_running_state()
+            # 保存分析记录
+            self.save_records()
             return record
         except Exception as e:
             self.logger.error(f"Error stopping {profile_type.value} profiling: {e}")
@@ -497,18 +574,78 @@ class ProfileManager:
         """获取分析记录"""
         with self._lock:
             records = self.records.copy()
-        
+
+        # 从文件加载历史记录
+        records.extend(self._load_records_from_files(profile_type))
+
         # 按类型过滤
         if profile_type:
             records = [r for r in records if r.profile_type == profile_type]
-        
+
         # 按时间排序
         records.sort(key=lambda r: r.start_time, reverse=True)
-        
+
         # 限制数量
         if limit:
             records = records[:limit]
-        
+
+        return records
+
+    def _load_records_from_files(self, profile_type: Optional[ProfileType] = None) -> List[ProfileRecord]:
+        """从文件加载历史记录"""
+        records = []
+
+        try:
+            # 如果指定了类型，只加载该类型的文件
+            if profile_type:
+                filename = f"{profile_type.value}_profiles.json"
+                filepath = self.storage_dir / filename
+                if filepath.exists():
+                    records.extend(self._load_records_from_file(filepath))
+            else:
+                # 加载所有类型的文件
+                for profile_type_item in ProfileType:
+                    filename = f"{profile_type_item.value}_profiles.json"
+                    filepath = self.storage_dir / filename
+                    if filepath.exists():
+                        records.extend(self._load_records_from_file(filepath))
+
+        except Exception as e:
+            self.logger.warning(f"Failed to load records from files: {e}")
+
+        return records
+
+    def _load_records_from_file(self, filepath: Path) -> List[ProfileRecord]:
+        """从单个文件加载记录"""
+        records = []
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            for item in data:
+                try:
+                    # 转换profile_type字符串为枚举
+                    profile_type_str = item.get('profile_type', '')
+                    profile_type = ProfileType(profile_type_str)
+
+                    record = ProfileRecord(
+                        name=item.get('name', ''),
+                        profile_type=profile_type,
+                        start_time=item.get('start_time', 0),
+                        end_time=item.get('end_time'),
+                        duration=item.get('duration'),
+                        data=item.get('data', {}),
+                        thread_id=item.get('thread_id'),
+                        call_stack=item.get('call_stack', [])
+                    )
+                    records.append(record)
+                except (ValueError, KeyError) as e:
+                    self.logger.warning(f"Failed to parse record from file: {e}")
+
+        except (json.JSONDecodeError, IOError) as e:
+            self.logger.warning(f"Failed to load records from {filepath}: {e}")
+
         return records
     
     def save_records(self, profile_type: Optional[ProfileType] = None) -> None:

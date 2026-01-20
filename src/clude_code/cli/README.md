@@ -18,6 +18,7 @@
   - **`--select-model`**：启动时调用 `/v1/models` 获取列表并交互选择（仅对 `openai_compat` 有意义）
   - **`--debug`**：输出可观测执行轨迹（并写入 `.clude/logs/trace.jsonl`）
   - **`--live`**：固定 50 行实时刷新 UI（开启后会自动启用 `--debug`；结束后保持最终状态显示）
+  - **`--live-ui`**：Live UI 风格（`classic|enhanced|opencode`，仅在 `--live` 时生效；默认 `classic`）
 
 - **示例**
 
@@ -31,11 +32,80 @@ clude chat --debug
 # 开启 50 行 Live UI（不刷屏；排障/演示用）
 clude chat --live
 
+# 选择增强 Live UI（同一入口，不再维护第二套 chat 主循环）
+clude chat --live --live-ui enhanced
+
+# 选择 OpenCode 风格 TUI（Textual，多窗格滚动/鼠标滚轮查看历史）
+clude chat --live --live-ui opencode
+
+# 说明：enhanced 会以“Claude Code 风格”呈现（左侧滚动输出 + 右侧状态/操作面板 + 底部事件轨迹）
+
+# 非交互（Print 模式，对标 Claude Code -p）
+clude chat --print "总结这个项目的架构并指出三个风险点"
+
+# 非交互 + JSON 输出（便于脚本消费）
+clude chat --print --output-format json "列出当前仓库所有 TODO 项并按优先级排序"
+
 # 指定模型
 clude chat --model "ggml-org/gemma-3-12b-it-GGUF"
 
 # 交互选择模型（openai_compat）
 clude chat --select-model
+```
+
+- **会话恢复（对标 Claude Code -c/-r）**
+  - `-c/--continue`：继续最近一次保存的会话（从 `.clude/sessions/latest.json` 指针加载）
+  - `-r/--resume <session_id>`：恢复指定会话
+
+```bash
+# 继续最近会话
+clude chat -c
+
+# 恢复指定会话
+clude chat -r sess_123456
+```
+
+- **自定义命令（对标 Claude Code `.claude/commands`）**
+  - 目录：`.clude/commands/*.md`
+  - 调用：在会话里输入 `/<name> ...`，系统会把该命令的模板展开成 prompt 并交给 AgentLoop 执行。
+  - 内置查看：`/commands`
+
+**文件格式（支持可选 frontmatter）**：
+
+```markdown
+---
+name: review
+description: 审查指定文件并给出改进建议
+args: path
+required: path
+usage: <path> [extra...]
+allowed_tools: read_file, grep
+disallowed_tools: run_cmd
+allow_network: false
+---
+请审查文件 {{arg1}}，并给出：问题清单（P0/P1/P2）+ 修改建议 + 验收标准。
+```
+
+**使用示例**：
+
+```bash
+/review src/clude_code/cli/main.py
+```
+
+- **Slash Commands（对标 Claude Code）**
+  - 在交互模式中输入 `/命令` 可直接执行本地命令（不走 LLM），用于管理会话/配置/权限等：
+    - `/help` `/clear` `/config` `/model` `/permissions` `/tools` `/doctor` `/init` `/memory` `/bug` `/cost`
+  - 示例：
+
+```bash
+# 显示帮助
+/help
+
+# 清空会话上下文（保留 system）
+/clear
+
+# 生成项目记忆文件（CLUDE.md）
+/init
 ```
 
 - **输出与日志**
