@@ -14,6 +14,7 @@ dependencies = [
   "rich>=13.7.0",
   "httpx>=0.27.0",
   "PyYAML>=6.0.1",
+  "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,8 @@ dev = [
   "ruff>=0.7.0",
   "mypy>=1.11.0",
   "pytest>=8.0.0",
+  "py-spy>=0.3.14",
+  "memory-profiler>=0.61.0",
 ]
 ui = [
   "textual>=0.70.0",
@@ -58,7 +61,7 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 ignore = [
-  "E501", # 交给 ruff format/实际可读性处理；超长行不强制报错
+  "E501",
 ]
 
 [tool.ruff.lint.isort]
@@ -83,4 +86,3 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

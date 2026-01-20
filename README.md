@@ -15,13 +15,16 @@
 
 | 特性 | 说明 | 状态 |
 | :--- | :--- | :--- |
-| **本地优先 (Local-First)** | 深度集成 `llama.cpp` HTTP API，保护隐私，无须云端 Token。 | ✅ Ready |
-| **精准编辑 (Patch Engine)** | 借鉴 Aider 的 **Search-Replace** 块逻辑，支持 `apply_patch` 与 `undo_patch`。 | ✅ Ready |
-| **仓库感知 (Repo Map)** | 基于 `universal-ctags` 的符号拓扑，让 Agent 拥有全局架构视野。 | ✅ Ready |
-| **语义 RAG (Vector Search)** | 集成 `LanceDB` + `fastembed`，支持 **AST 分块** 与 **混合检索 (Hybrid Search)**。 | ✅ Ready |
-| **交互体验 (TUI)** | 支持 **OpenCode 风格 TUI** (多窗格滚动) 和 **Claude Code 风格 CLI**。 | ✅ Ready |
-| **安全审计 (Audit Trace)** | 全量记录工具调用日志与执行轨迹，支持 Hash 级补丁完整性校验。 | ✅ Ready |
-| **交互式修复 (Auto-Fix)** | `doctor --fix` 能够自动诊断并跨平台安装 `rg`、`ctags` 等外部依赖。 | ✅ Ready |
+| **本地优先 (Local-First)** | 深度集成 `llama.cpp` HTTP API，保护隐私，无须云端 Token。 | ✅ 已落地 |
+| **精准编辑 (Patch Engine)** | 借鉴 Aider 的 `Search-Replace` 块逻辑，支持 `apply_patch` 与 `undo_patch`。 | ✅ 已落地 |
+| **仓库感知 (Repo Map)** | 基于 `universal-ctags` 的符号拓扑，让 Agent 拥有全局架构视野。 | ✅ 已落地 |
+| **语义 RAG (Vector Search)** | 集成 `LanceDB` + `fastembed`，支持对大规模代码库的异步索引与语义检索。 | ✅ 已落地 |
+| **安全审计 (Audit Trace)** | 全量记录工具调用日志与执行轨迹，支持 Hash 级补丁完整性校验。 | ✅ 已落地 |
+| **交互式修复 (Auto-Fix)** | `doctor --fix` 能够自动诊断并跨平台安装 `rg`、`ctags` 等外部依赖。 | ✅ 已落地 |
+| **可观测性 (Observability)** | 全面的性能指标监控、分布式追踪和性能分析功能。 | ✅ 已落地 |
+| **性能监控** | 自动收集系统、应用和业务指标，支持 Prometheus 格式导出。 | ✅ 已落地 |
+| **分布式追踪** | 基于 OpenTelemetry 标准的端到端追踪，支持采样和批量导出。 | ✅ 已落地 |
+| **性能分析** | CPU、内存、I/O 和函数级性能分析，支持装饰器和上下文管理器。 | ✅ 已落地 |
 
 ---
 
@@ -85,7 +88,7 @@ clude chat --live --live-ui opencode
 
 ---
 
-## 4. 文档导航 (Documentation Index)
+## 6. 文档导航 (Documentation Index)
 
 本项目文档体系分为设计规范、进度报告与技术深挖三部分。
 
