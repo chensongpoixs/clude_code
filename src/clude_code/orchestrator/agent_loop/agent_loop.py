@@ -42,7 +42,7 @@ from .llm_io import (
 )
 from .react import execute_react_fallback_loop as _react_execute_react_fallback_loop
 from .semantic_search import semantic_search as _semantic_search_fn
-from .tool_dispatch import dispatch_tool as _dispatch_tool_fn
+from .tool_dispatch import dispatch_tool as _dispatch_tool_fn, iter_tool_specs as _iter_tool_specs
 
 
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -430,14 +430,53 @@ class AgentLoop:
     def _llm_chat(self, stage: str, *, step_id: str | None = None, _ev: Callable[[str, dict[str, Any]], None] | None = None) -> str:
         return _io_llm_chat(self, stage, step_id=step_id, _ev=_ev)
 
-    def _build_planning_prompt(self) -> str:
-        """
-        构建规划阶段提示词（并入 user 消息，避免 user/user 连续导致 llama.cpp 报错）。
+    """
+    获取可用于 prompt 的工具名列表（Prompt Tool Names）
+    @author chensong（chensong）
+    @date 2026-01-20
+    @brief 从 ToolSpec 注册表提取“可见且可调用”的工具名，用于 planning prompt 的 tools_expected 提示
+    """
+    def _get_prompt_tool_names(self) -> list[str]:
+        # 说明：
+        # - 统一以 tool_dispatch.iter_tool_specs() 为单一事实来源（避免手写漏工具）
+        # - 仅收集 visible_in_prompt 且 callable_by_model 的工具
+        # - 做去重 + 稳定顺序（保持注册表顺序）
+        try:
+            names = [
+                s.name
+                for s in _iter_tool_specs()
+                if getattr(s, "visible_in_prompt", True) and getattr(s, "callable_by_model", True)
+            ]
+        except Exception:
+            # 兜底：如果 registry 异常，避免 planning 阶段崩溃
+            names = ["read_file", "grep", "apply_patch"]
 
-        注意：
-        - 这里输出的是“提示词文本”，不是消息对象。
-        - `run_turn` 会把它拼到用户输入后面，作为同一条 user 消息发送。
-        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for n in names:
+            if not n or not isinstance(n, str):
+                continue
+            if n in seen:
+                continue
+            seen.add(n)
+            out.append(n)
+        return out
+
+    """
+    构建规划阶段提示词（Planning Prompt Builder）
+    @author chensong（chensong）
+    @date 2026-01-20
+    @brief 生成 planning 阶段的 JSON 规划提示，并将 tools_expected 示例自动覆盖所有现有工具
+    
+    注意（Notes）：
+    - 这里返回的是“提示词文本”，不是消息对象；`run_turn` 会把它拼到用户输入后面作为同一条 user 消息发送。
+    - tools_expected 的示例必须包含当前工程的全部工具名（从注册表提取，避免漏项）。
+    """
+    def _build_planning_prompt(self) -> str:
+        tool_names = self._get_prompt_tool_names()
+        tools_expected_example = json.dumps(tool_names, ensure_ascii=False)
+        tools_expected_hint = ", ".join(tool_names)
+
         return (
             "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
             "JSON 必须符合以下结构：\n"
@@ -449,12 +488,14 @@ class AgentLoop:
             '      "description": "可执行且可验证的动作（可跨文件）",\n'
             '      "dependencies": [],\n'
             '      "status": "pending",\n'
-            '      "tools_expected": ["read_file","grep","apply_patch"]\n'
+            f'      "tools_expected": {tools_expected_example}\n'
             "    }\n"
             "  ],\n"
             '  "verification_policy": "run_verify"\n'
             "}\n\n"
-            f"要求：1. steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。2. 最后一步要输出给生成详细思考流程，总结信息"
+            f"要求：1. steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。"
+            f"2. tools_expected 必须从以下工具名中选择：{tools_expected_hint}。"
+            "3. 最后一步需要输出：给出详细思考流程 + 总结信息。"
             # f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
             # "{\n"
             # "  \"id\": \"step_1\",\n"

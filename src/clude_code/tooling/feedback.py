@@ -226,11 +226,11 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         return summary
     # extension: get_weather
     # extract full payload for get_weather tool
-
-    if tool == "get_weather":
+    if tool in {"list_dir", "read_file", "glob_file_search", "grep", "apply_patch", "undo_patch", "write_file", "run_cmd", "search_semantic", "display", "preview_multi_edit", "question", "webfetch", "load_skill", "todowrite", "todoread", "websearch", "codesearch",
+"run_task", "get_task_status", "get_weather", "get_weather_forecast"}:
         return payload;
-    if tool == "get_weather_forecast":
-        return payload;
+    # if tool == "get_weather_forecast":
+    #     return payload;
     # default: pass a small view
     summary["summary"] = {"keys": sorted(list(payload.keys()))[:30]}
     return summary
