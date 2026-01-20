@@ -116,6 +116,20 @@ class SearchToolConfig(BaseModel):
     )
     serper_gl: str = Field(default="cn", description="Serper 地域参数 gl（默认 cn）。")
     serper_hl: str = Field(default="zh-cn", description="Serper 语言参数 hl（默认 zh-cn）。")
+
+    # codesearch（代码搜索）：本项目仅实现网络搜索（Grep.app）
+    grep_app_enabled: bool = Field(
+        default=True,
+        description="是否启用 Grep.app 代码搜索源。",
+    )
+    grep_app_base_url: str = Field(
+        default="https://grep.app",
+        description="Grep.app 服务地址（默认 https://grep.app）。",
+    )
+    grep_app_endpoint: str = Field(
+        default="/api/search",
+        description="Grep.app 搜索 API 路径（默认 /api/search）。",
+    )
     timeout_s: int = Field(
         default=30,
         ge=1,
@@ -311,6 +325,9 @@ def set_tool_configs(cfg: Any) -> None:
             serper_api_key=getattr(cfg.search, "serper_api_key", ""),
             serper_gl=getattr(cfg.search, "serper_gl", "cn"),
             serper_hl=getattr(cfg.search, "serper_hl", "zh-cn"),
+            grep_app_enabled=getattr(cfg.search, "grep_app_enabled", True),
+            grep_app_base_url=getattr(cfg.search, "grep_app_base_url", "https://grep.app"),
+            grep_app_endpoint=getattr(cfg.search, "grep_app_endpoint", "/api/search"),
             timeout_s=getattr(cfg.search, "timeout_s", 30),
             max_results=getattr(cfg.search, "max_results", 1000),
             log_to_file=getattr(cfg.search, "log_to_file", True),

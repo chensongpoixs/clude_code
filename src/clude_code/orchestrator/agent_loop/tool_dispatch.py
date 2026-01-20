@@ -219,7 +219,11 @@ def _h_write_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
 
 def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.run_cmd(command=args["command"], cwd=args.get("cwd", "."))
+    return loop.tools.run_cmd(
+        command=args["command"],
+        cwd=args.get("cwd", "."),
+        timeout_s=args.get("timeout_s"),
+    )
 
 
 def _h_search_semantic(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -280,6 +284,11 @@ def _spec_list_dir() -> ToolSpec:
     return ToolSpec(
         name="list_dir",
         summary="列出目录内容（只读）。",
+        description=(
+            "用于查看某个目录下有哪些文件/子目录（List Directory）。\n"
+            "- 适合：先 list_dir 再决定 read_file/grep/glob_file_search。\n"
+            "- 注意：path 必须是工作区内的相对路径。"
+        ),
         args_schema=_obj_schema(
             properties={"path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"}},
             required=[],
@@ -300,6 +309,11 @@ def _spec_read_file() -> ToolSpec:
     return ToolSpec(
         name="read_file",
         summary="读取文件内容（只读，支持 offset/limit 分段）。",
+        description=(
+            "用于读取工作区内文件内容（Read File）。\n"
+            "- 大文件建议用 offset/limit 分段读取，避免上下文刷屏。\n"
+            "- 如需搜索再定位：优先用 grep/search_semantic 再 read_file 精读。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "description": "相对工作区的文件路径"},
@@ -324,6 +338,11 @@ def _spec_glob_file_search() -> ToolSpec:
     return ToolSpec(
         name="glob_file_search",
         summary="按文件名模式查找文件（只读，支持 ** 递归）。",
+        description=(
+            "用于按文件名模式快速定位文件（Glob File Search）。\n"
+            "- 适合：找某类文件（例如 **/*.md、**/*config*.py）。\n"
+            "- 注意：这是文件名匹配，不是内容搜索；内容搜索请用 grep。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "glob_pattern": {"type": "string", "description": "glob 模式，例如 **/*.md, **/*.py, **/*.cpp, **/*.c, **/*.h, **/*.cc, **/*.java, **/*.js, **/*.ts, **/*.html, **/*.css, **/*.json, **/*.xml"},
@@ -347,6 +366,11 @@ def _spec_grep() -> ToolSpec:
     return ToolSpec(
         name="grep",
         summary="代码搜索（优先 rg，fallback Python）。",
+        description=(
+            "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。\n"
+            "- 适合：定位函数名/类名/错误字符串/配置键。\n"
+            "- 建议：pattern 尽量具体；返回太多时用 path 限定目录或降低 max_hits。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
@@ -372,6 +396,12 @@ def _spec_apply_patch() -> ToolSpec:
     return ToolSpec(
         name="apply_patch",
         summary="补丁式编辑（写文件，支持 fuzzy）。",
+        description=(
+            "用于对文件进行“基于上下文的补丁替换”（Apply Patch）。\n"
+            "- 建议：old/new 块带足够上下文（前后至少 3-5 行）以保证唯一匹配。\n"
+            "- fuzzy=true 仅建议在单点替换且文本略有漂移时使用。\n"
+            "- 重要：该工具会写文件，必须遵守 policy 的确认机制。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
@@ -406,6 +436,11 @@ def _spec_undo_patch() -> ToolSpec:
     return ToolSpec(
         name="undo_patch",
         summary="回滚补丁（写文件，基于 undo_id）。",
+        description=(
+            "用于回滚 apply_patch 产生的变更（Undo Patch）。\n"
+            "- 适合：补丁应用错误/需要撤销。\n"
+            "- 注意：force=true 会忽略 hash 冲突检查，可能覆盖你后续手动修改。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "undo_id": {"type": "string", "description": "apply_patch 返回的 undo_id"},
@@ -429,6 +464,13 @@ def _spec_write_file() -> ToolSpec:
     return ToolSpec(
         name="write_file",
         summary="写入文件（写文件）。",
+        description=(
+            "用于创建/覆盖/追加写入文件（Write File）。\n"
+            "- 默认：覆盖写入（wrote）。\n"
+            "- content_based=true：文件非空则追加（appended）。\n"
+            "- insert_at_line：按行插入（注意行号是 0-based）。\n"
+            "重要：该工具会写文件，必须遵守 policy 的确认机制。"
+        ),
          args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
@@ -438,7 +480,7 @@ def _spec_write_file() -> ToolSpec:
             },
             required=["path"],
         ),
-        example_args={"path": "notes.md", "text": "hello world", "content_based": True, "insert_at_line": 5},
+        example_args={"path": "notes.md", "text": "hello world\n", "content_based": True},
         side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -454,14 +496,21 @@ def _spec_run_cmd() -> ToolSpec:
     return ToolSpec(
         name="run_cmd",
         summary="执行命令（可能有副作用，受策略约束）。",
+        description=(
+            "用于在工作区内执行命令（Execute Command）。\n"
+            "- 适合：运行测试/格式化/构建/一次性诊断命令。\n"
+            "- 注意：该工具可能产生副作用（写文件/联网/安装依赖），必须遵守 policy 的确认与限制。\n"
+            "- 建议：命令尽量幂等；输出可能会被 max_output_bytes 截断。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "command": {"type": "string", "description": "要执行的命令字符串"},
                 "cwd": {"type": "string", "default": ".", "description": "工作目录（相对工作区）"},
+                "timeout_s": {"type": "integer", "default": 30, "minimum": 1, "description": "超时时间（秒），默认取配置 command.timeout_s"},
             },
             required=["command"],
         ),
-        example_args={"command": "python -m pytest -q", "cwd": "."},
+        example_args={"command": "python -m pytest -q", "cwd": ".", "timeout_s": 60},
         side_effects={"exec"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -691,7 +740,13 @@ def _spec_webfetch() -> ToolSpec:
     """ToolSpec：webfetch（获取网页内容）。"""
     return ToolSpec(
         name="webfetch",
-        summary="获取网页内容，支持多种格式。",
+        summary="抓取网页内容（支持 markdown/text/html）。",
+        description=(
+            "用于把指定 URL 的网页内容抓取为可读文本（Web Fetch）。\n"
+            "- 适合：抓官网文档/博客/FAQ，然后结合内容回答或写代码。\n"
+            "- 注意：只支持 http/https；内容会按配置的 max_content_length 截断。\n"
+            "- 提示：如果只是需要“找资料”，先用 websearch 再 webfetch 关键页面。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "url": {"type": "string", "description": "要获取的URL"},
@@ -700,7 +755,7 @@ def _spec_webfetch() -> ToolSpec:
             },
             required=["url"],
         ),
-        example_args={"url": "https://example.com", "format": "markdown", "timeout": 30},
+        example_args={"url": "https://httpx.readthedocs.io/en/latest/", "format": "markdown", "timeout": 30},
         side_effects={"network"},  # 网络访问
         external_bins_required=set(),
         external_bins_optional={"curl", "wget"},  # 可选的外部工具
@@ -819,7 +874,12 @@ def _spec_websearch() -> ToolSpec:
     """ToolSpec：websearch（网页搜索）。"""
     return ToolSpec(
         name="websearch",
-        summary="执行实时网页搜索。",
+        summary="执行实时网页搜索（返回标题/链接/摘要）。",
+        description=(
+            "用于“找资料/找页面”，返回搜索结果列表（title/url/snippet）。\n"
+            "- 如需阅读全文：拿 websearch 的 url 再用 webfetch 抓取页面内容。\n"
+            "- 搜索源由配置决定（Open-WebSearch MCP / Serper）。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "query": {"type": "string", "description": "搜索查询"},
@@ -830,7 +890,7 @@ def _spec_websearch() -> ToolSpec:
             },
             required=["query"],
         ),
-        example_args={"query": "Python async programming", "num_results": 5},
+        example_args={"query": "httpx timeout best practices", "num_results": 5},
         side_effects={"network"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -850,18 +910,33 @@ def _h_codesearch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
 
 def _spec_codesearch() -> ToolSpec:
-    """ToolSpec：codesearch（代码搜索）。"""
+    """ToolSpec：codesearch（网络代码搜索）。"""
     return ToolSpec(
         name="codesearch",
-        summary="为编程任务搜索相关上下文。",
+        summary="通过 Grep.app 搜索开源代码片段（网络）。",
+        description=(
+            "用于编程任务的代码片段检索（Network Code Search）。\n"
+            "- 适合：查找某库/某框架的典型用法、报错修复示例、实现模式（会返回代码片段）。\n"
+            "- 不适合：读取当前仓库源码（请优先用 read_file/grep/search_semantic）。\n"
+            "注意：返回的是开源匹配片段，可能需要根据项目上下文改造与验证（tests/lint）。"
+        ),
         args_schema=_obj_schema(
             properties={
-                "query": {"type": "string", "description": "代码搜索查询"},
-                "tokens_num": {"type": "integer", "default": 5000, "minimum": 1000, "maximum": 50000, "description": "返回的token数量"}
+                "query": {
+                    "type": "string",
+                    "description": "代码搜索查询（建议包含库名/函数名/关键字/语言，例如 'python httpx timeout Client'）",
+                },
+                "tokens_num": {
+                    "type": "integer",
+                    "default": 5000,
+                    "minimum": 500,
+                    "maximum": 50000,
+                    "description": "输出预算（越大返回越多；工具会做上限与截断，避免刷屏）。",
+                }
             },
             required=["query"],
         ),
-        example_args={"query": "React useState hook examples", "tokens_num": 3000},
+        example_args={"query": "python httpx Client timeout usage", "tokens_num": 2500},
         side_effects={"network"},  # 可能需要外部API
         external_bins_required=set(),
         external_bins_optional=set(),

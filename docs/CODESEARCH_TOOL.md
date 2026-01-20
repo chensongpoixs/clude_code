@@ -74,10 +74,13 @@
 - **失败降级**：外部 provider 失败时应返回明确 error code（如 `E_NOT_CONFIGURED/E_PROVIDER_FAILED`）
 - **可回放**：建议在文件日志里记录 provider、耗时、结果条数（但不记录明文密钥）
 
-### 7. 演进建议（Roadmap）
+### 7. 本项目当前实现（仅网络搜索：Grep.app）
 
-为了与本项目 `websearch`（已支持 Open-WebSearch MCP 优先、Serper 回退）的思路一致，`codesearch` 推荐也做成“多 provider 可配置”的形式：
-- `codesearch_providers: ["local_rag", "external_api_x"]`
-- 默认优先 `local_rag`（对当前仓库最相关），失败再回退外部 provider
+按你的要求，本项目的 `codesearch` **只实现网络代码搜索**（Grep.app），不提供 `local_rag` 本地检索与回退。
+
+- **Grep.app（Network Code Search）**：
+  - 配置项：`search.grep_app_enabled / search.grep_app_base_url / search.grep_app_endpoint`
+  - 请求方式：`GET {base_url}{endpoint}?q=...`
+  - 返回：统一转换为 `results[]`（含 `repo/path/language/code/url`），并限制结果条数与内容预算避免刷屏
 
 

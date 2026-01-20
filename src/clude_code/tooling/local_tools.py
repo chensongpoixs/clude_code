@@ -74,12 +74,13 @@ class LocalTools:
     def generate_repo_map(self) -> str:
         return _generate_repo_map_impl(workspace_root=self.workspace_root)
 
-    def run_cmd(self, command: str, cwd: str = ".") -> ToolResult:
+    def run_cmd(self, command: str, cwd: str = ".", timeout_s: int | None = None) -> ToolResult:
         return _run_cmd_impl(
             workspace_root=self.workspace_root,
             max_output_bytes=self.max_output_bytes,
             command=command,
             cwd=cwd,
+            timeout_s=timeout_s,
         )
 
     def ask_question(self, question: str, options: list[str] | None = None, multiple: bool = False, header: str | None = None) -> ToolResult:

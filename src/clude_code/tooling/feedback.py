@@ -72,14 +72,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                 else:
                     others.append(h)
             
-            combined = (prioritized + others)[:20]
+            combined = (prioritized + others)
             for h in combined:
                 if isinstance(h, dict):
                     head.append(
                         {
                             "path": h.get("path"),
                             "line": h.get("line"),
-                            "preview": (h.get("preview") or "")[:200],
+                            "preview": (h.get("preview") or ""),
                         }
                     )
             summary["summary"] = {
@@ -146,7 +146,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
             "offset": payload.get("offset"),
             "limit": payload.get("limit"),
             "chars_total": len(text),
-            "content": sampled_text[:4000], # Final safety limit
+            "content": sampled_text, # Final safety limit
             "truncated": len(text) > len(sampled_text) or len(text) > 4000,
         }
         return summary
@@ -207,10 +207,78 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                 {
                     "path": h.get("path"),
                     "lines": f"{h.get('start_line')}-{h.get('end_line')}",
-                    "preview": (h.get("text") or "")[:200]
+                    "preview": (h.get("text") or "")
                 }
                 for h in hits[:5]
             ]
+        }
+        return summary
+
+    if tool == "codesearch":
+        results = payload.get("results") or []
+        provider = payload.get("provider")
+        out_items = []
+        if isinstance(results, list):
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                code = str(r.get("code") or "")
+                out_items.append(
+                    {
+                        "repo": r.get("repo"),
+                        "path": r.get("path"),
+                        "language": r.get("language"),
+                        "preview": code,
+                        "url": r.get("url"),
+                    }
+                )
+        summary["summary"] = {
+            "provider": provider,
+            "query": payload.get("query"),
+            "results_total":  len(results)  ,
+            "results": out_items,
+        }
+        return summary
+
+    if tool == "websearch":
+        results = payload.get("results") or []
+        out_items = []
+        if isinstance(results, list):
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                out_items.append(
+                    {
+                        "title": r.get("title"),
+                        "url": r.get("url"),
+                        "snippet": (str(r.get("snippet") or "")),
+                    }
+                )
+        summary["summary"] = {
+            "provider": payload.get("provider"),
+            "query": payload.get("query"),
+            "results_total": len(results)  ,
+            "results": out_items,
+        }
+        return summary
+
+    if tool == "webfetch":
+        content = str(payload.get("content") or "")
+        summary["summary"] = {
+            "url": payload.get("url"),
+            "format": payload.get("format"),
+            "status_code": payload.get("status_code"),
+            "content_length": payload.get("content_length"),
+            "truncated": bool(payload.get("truncated", False)),
+            "content_preview": content,
+        }
+        return summary
+
+    if tool == "write_file":
+        summary["summary"] = {
+            "path": payload.get("path"),
+            "action": payload.get("action"),
+            "bytes_written": payload.get("bytes_written"),
         }
         return summary
 
@@ -226,7 +294,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         return summary
     # extension: get_weather
     # extract full payload for get_weather tool
-    if tool in {"list_dir", "read_file", "glob_file_search", "grep", "apply_patch", "undo_patch", "write_file", "run_cmd", "search_semantic", "display", "preview_multi_edit", "question", "webfetch", "load_skill", "todowrite", "todoread", "websearch", "codesearch",
+    if tool in {"display", "preview_multi_edit", "question", "load_skill", "todowrite", "todoread",
 "run_task", "get_task_status", "get_weather", "get_weather_forecast"}:
         return payload;
     # if tool == "get_weather_forecast":

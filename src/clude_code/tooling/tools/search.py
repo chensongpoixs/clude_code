@@ -166,41 +166,164 @@ def codesearch(
     query: str,
     tokens_num: int = 5000
 ) -> ToolResult:
-    # 说明：当前 codesearch 仍为 mock（待接入真实代码检索源）。
-    try:
-        # 这里需要配置实际的代码搜索API（例如Exa Code API）
-        # 现在返回模拟结果
+    # 说明：
+    # - 本项目按你的要求：codesearch **只实现网络搜索代码**（Grep.app）
+    # - 不提供 local_rag（本地检索）能力
+    config = get_search_config()
+    if not config.enabled:
+        _logger.warning("[CodeSearch] 代码搜索工具已被禁用")
+        return ToolResult(False, error={"code": "E_TOOL_DISABLED", "message": "search tool is disabled"})
 
-        mock_results = {
-            "query": query,
-            "results": [
-                {
-                    "language": "python",
-                    "code": "def example_function():\n    return 'Hello World'",
-                    "explanation": f"Example code result for query: {query}",
-                    "relevance_score": 0.92
-                },
-                {
-                    "language": "javascript",
-                    "code": "function example() {\n    return 'Hello World';\n}",
-                    "explanation": f"JavaScript implementation related to {query}",
-                    "relevance_score": 0.85
-                }
-            ],
-            "tokens_used": min(tokens_num, 2500),
-            "total_available": tokens_num
-        }
+    timeout_s = int(getattr(config, "timeout_s", 30) or 30)
+    max_results = int(getattr(config, "max_results", 50) or 50)
 
-        return ToolResult(
-            ok=True,
-            payload=mock_results
-        )
+    # budget：粗略将 tokens 预算映射到字符上限（避免输出过大）
+    max_chars_budget = max(int(tokens_num or 0) * 4, 2000)
 
-    except Exception as e:
+    r = _codesearch_via_grep_app(
+        query=query,
+        timeout_s=timeout_s,
+        max_results=min(max_results, 50),
+        max_chars_budget=max_chars_budget,
+    )
+    if r.ok:
+        if r.payload is None:
+            r.payload = {}
+        r.payload["provider"] = "grep_app"
+    return r
+
+
+def _codesearch_via_grep_app(*, query: str, timeout_s: int, max_results: int, max_chars_budget: int) -> ToolResult:
+    config = get_search_config()
+    if not getattr(config, "grep_app_enabled", True):
+        return ToolResult(ok=False, error={"code": "E_PROVIDER_DISABLED", "message": "grep_app disabled"})
+
+    base_url = (getattr(config, "grep_app_base_url", "") or "").rstrip("/")
+    endpoint = getattr(config, "grep_app_endpoint", "/api/search") or "/api/search"
+    if not base_url:
+        return ToolResult(ok=False, error={"code": "E_NOT_CONFIGURED", "message": "grep_app_base_url is empty"})
+
+    # 说明：grep.app 的返回结构可能随版本变化，这里做“宽松解析” + “异常降级”
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        return ToolResult(ok=False, error={"code": "E_NOT_CONFIGURED", "message": f"invalid grep_app_base_url: {base_url}"})
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+
+    url = f"{base_url}{endpoint}"
+    params = {"q": query}
+    headers = {
+        "Accept": "application/json",
+        # 避免被部分服务当作机器人拦截；不输出到日志以免刷屏
+        "User-Agent": "clude-code/0.1 (codesearch; grep.app)",
+    }
+
+    # 轻量重试：处理临时性网络抖动/限流
+    tries = 2
+    last_exc: Exception | None = None
+    last_status: int | None = None
+    body_text: str | None = None
+    for attempt in range(tries):
+        try:
+            with httpx.Client(timeout=max(float(timeout_s or 0), 1.0)) as client:
+                resp = client.get(url, params=params, headers=headers)
+            last_status = resp.status_code
+            body_text = resp.text
+
+            if resp.status_code in (429, 502, 503, 504) and attempt < tries - 1:
+                time.sleep(0.35 * (attempt + 1))
+                continue
+
+            if resp.status_code >= 400:
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "code": "E_PROVIDER_HTTP",
+                        "message": f"grep_app http {resp.status_code}",
+                        "details": {"status_code": resp.status_code, "url": url},
+                    },
+                )
+
+            try:
+                data = resp.json()
+            except Exception:
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "code": "E_BAD_RESPONSE",
+                        "message": "grep_app returned non-json response",
+                        "details": {
+                            "status_code": resp.status_code,
+                            "content_type": resp.headers.get("content-type"),
+                            "text_preview": (body_text or "")[:300],
+                        },
+                    },
+                )
+            break
+        except Exception as e:
+            last_exc = e
+            if attempt < tries - 1:
+                time.sleep(0.25 * (attempt + 1))
+                continue
+            return ToolResult(ok=False, error={"code": "E_PROVIDER_FAILED", "message": str(e), "provider": "grep_app"})
+
+    # 宽松解析命中列表：优先 hits.hits（即使为空列表也要保留），其次 results/items
+    hits: Any = None
+    if isinstance(data, dict):
+        hits_obj = data.get("hits")
+        if isinstance(hits_obj, dict) and "hits" in hits_obj:
+            hits = hits_obj.get("hits")
+        elif "results" in data:
+            hits = data.get("results")
+        elif "items" in data:
+            hits = data.get("items")
+    if not isinstance(hits, list):
         return ToolResult(
             ok=False,
             error={
-                "message": f"Code search failed: {str(e)}",
-                "code": "CODESEARCH_FAILED"
+                "code": "E_BAD_RESPONSE",
+                "message": "grep_app response missing hits list",
+                "details": {"status_code": last_status, "url": url},
+            },
+        )
+
+    results: list[dict[str, Any]] = []
+    used_chars = 0
+    for h in hits:
+        if not isinstance(h, dict):
+            continue
+        repo = (h.get("repo") or {}) if isinstance(h.get("repo"), dict) else {}
+        path_obj = (h.get("path") or {}) if isinstance(h.get("path"), dict) else {}
+        content_obj = (h.get("content") or {}) if isinstance(h.get("content"), dict) else {}
+
+        repo_name = str(repo.get("name") or "")
+        file_path = str(path_obj.get("path") or h.get("path") or "")
+        snippet = str(content_obj.get("snippet") or content_obj.get("text") or h.get("snippet") or "")
+        language = str(h.get("lang") or h.get("language") or "")
+        score = h.get("score") or h.get("_score") or None
+
+        if not file_path and not snippet:
+            continue
+
+        # budget 控制：避免返回过大
+        if used_chars + len(snippet) > max_chars_budget:
+            snippet = snippet[: max(0, max_chars_budget - used_chars)]
+
+        used_chars += len(snippet)
+        results.append(
+            {
+                "repo": repo_name,
+                "path": file_path,
+                "language": language,
+                "code": snippet,
+                "explanation": "来自 Grep.app 的开源代码匹配片段（可能需要你根据项目上下文改造）。",
+                "relevance_score": score,
+                "url": f"{base_url}/search?q={query}",
             }
         )
+        if len(results) >= max_results or used_chars >= max_chars_budget:
+            break
+
+    if not results:
+        return ToolResult(ok=False, error={"code": "E_NO_RESULTS", "message": "grep_app returned no results"})
+
+    return ToolResult(ok=True, payload={"query": query, "results": results, "total_results": len(results)})

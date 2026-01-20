@@ -99,11 +99,15 @@ search:
   open_websearch_mcp_enabled: true      # 是否启用 Open-WebSearch MCP 搜索源
   open_websearch_mcp_base_url: "http://127.0.0.1:8765"   # MCP 服务地址（示例：本机服务）
   open_websearch_mcp_endpoint: "/search"                 # 搜索接口路径（与 base_url 拼接）
-  open_websearch_mcp_api_key: ""        # 可选：如服务需要密钥，建议用环境变量 CLUDE_SEARCH__OPEN_WEBSERCH_MCP_API_KEY
+  open_websearch_mcp_api_key: "a835b5beb674f8a41746500b01a36e64501f097f"        # 可选：如服务需要密钥，建议用环境变量 CLUDE_SEARCH__OPEN_WEBSEARCH_MCP_API_KEY
   # Serper（回退）
-  serper_api_key: "a835b5beb674f8a41746500b01a36e64501f097f"                    # Serper API Key（示例文件禁止放真实密钥；建议用环境变量 CLUDE_SEARCH__SERPER_API_KEY）
+  serper_api_key: ""                    # Serper API Key（示例文件禁止放真实密钥；建议用环境变量 CLUDE_SEARCH__SERPER_API_KEY）
   serper_gl: "cn"                       # 地域参数（默认 cn）
   serper_hl: "zh-cn"                    # 语言参数（默认 zh-cn）
+  # codesearch（代码搜索）：仅实现网络搜索（Grep.app），用于“编程任务”检索代码片段（code snippet）
+  grep_app_enabled: true                # 是否启用 Grep.app 搜索源
+  grep_app_base_url: "https://grep.app" # Grep.app 服务地址
+  grep_app_endpoint: "/api/search"      # Grep.app API 路径（默认 /api/search）
   timeout_s: 30                         # 搜索超时时间（秒）
   max_results: 1000                     # 搜索最大结果数量
   log_to_file: true                     # 是否将搜索日志写入文件

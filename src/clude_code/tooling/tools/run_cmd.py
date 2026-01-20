@@ -13,7 +13,14 @@ from ...config.tools_config import get_command_config
 _logger = get_tool_logger(__name__)
 
 
-def run_cmd(*, workspace_root: Path, max_output_bytes: int, command: str, cwd: str = ".") -> ToolResult:
+def run_cmd(
+    *,
+    workspace_root: Path,
+    max_output_bytes: int,
+    command: str,
+    cwd: str = ".",
+    timeout_s: int | None = None,
+) -> ToolResult:
     """
     执行命令（MVP：shell=True），并做基础环境变量脱敏，限制输出大小。
 
@@ -27,6 +34,9 @@ def run_cmd(*, workspace_root: Path, max_output_bytes: int, command: str, cwd: s
 
     _logger.debug(f"[RunCmd] 开始执行命令: {command}, cwd={cwd}")
     wd = resolve_in_workspace(workspace_root, cwd)
+    eff_timeout = int(timeout_s or getattr(config, "timeout_s", 30) or 30)
+    if eff_timeout < 1:
+        eff_timeout = 1
 
     # Env scrub：保留常见无敏感变量；Windows 需要 SystemRoot/ComSpec 才更稳
     safe_keys = {
@@ -57,8 +67,12 @@ def run_cmd(*, workspace_root: Path, max_output_bytes: int, command: str, cwd: s
             encoding="utf-8",
             errors="replace",
             env=scrubbed_env,
+            timeout=eff_timeout,
         )
         _logger.info(f"[RunCmd] 命令执行完成: {command}, 返回码: {cp.returncode}, 输出大小: {len(cp.stdout)} bytes")
+    except subprocess.TimeoutExpired:
+        _logger.warning(f"[RunCmd] 命令超时: {command} (timeout_s={eff_timeout})")
+        return ToolResult(False, error={"code": "E_TIMEOUT", "message": f"command timed out after {eff_timeout}s"})
     except Exception as e:
         _logger.error(f"[RunCmd] 命令执行失败: {command}, 错误: {e}", exc_info=True)
         return ToolResult(False, error={"code": "E_EXEC", "message": str(e)})
