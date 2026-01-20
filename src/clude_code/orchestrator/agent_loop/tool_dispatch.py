@@ -750,7 +750,8 @@ def _spec_webfetch() -> ToolSpec:
         args_schema=_obj_schema(
             properties={
                 "url": {"type": "string", "description": "要获取的URL"},
-                "format": {"type": "string", "enum": ["markdown", "text", "html"], "default": "markdown", "description": "返回格式"},
+                # "format": {"type": "string", "enum": ["markdown", "text", "html"], "default": "markdown", "description": "返回格式"},
+                "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown", "description": "返回格式"},
                 "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"}
             },
             required=["url"],

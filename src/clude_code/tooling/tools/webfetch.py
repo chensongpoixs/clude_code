@@ -20,7 +20,7 @@ _logger = get_tool_logger(__name__)
 
 def fetch_web_content(
     url: str,
-    format: Literal["markdown", "text", "html"] = "markdown",
+    format: Literal["markdown", "text"] = "markdown",
     timeout: int = 30
 ) -> ToolResult:
     # 检查工具是否启用
@@ -80,9 +80,10 @@ def fetch_web_content(
             )
 
         # 根据格式处理内容
-        if format == "html":
-            content = response.text
-        elif format == "text":
+        # if format == "html":
+        #     content = response.text
+        # elif format == "text":
+        if format == "text":
             # 简单的HTML到文本转换
             try:
                 from bs4 import BeautifulSoup  # type: ignore
