@@ -39,6 +39,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     # Pre-process keywords for search
     kw_list = [k.lower() for k in (keywords or []) if k]
 
+    # 全局护栏：回喂给 LLM 的摘要必须有上限（防止上下文膨胀/刷屏）
+    MAX_PREVIEW_CHARS = 200
+    MAX_GREP_HITS = 20
+    MAX_READ_FILE_CHARS = 4000
+    MAX_WEB_RESULTS = 5
+    MAX_CODE_RESULTS = 5
+    MAX_WEBFETCH_PREVIEW_CHARS = 800
+
     if tool == "list_dir":
         # ... (list_dir logic remains same as it's already compact)
         items = payload.get("items") or []
@@ -72,14 +80,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                 else:
                     others.append(h)
             
-            combined = (prioritized + others)
+            combined = (prioritized + others)[:MAX_GREP_HITS]
             for h in combined:
                 if isinstance(h, dict):
                     head.append(
                         {
                             "path": h.get("path"),
                             "line": h.get("line"),
-                            "preview": (h.get("preview") or ""),
+                            "preview": (h.get("preview") or "")[:MAX_PREVIEW_CHARS],
                         }
                     )
             summary["summary"] = {
@@ -87,7 +95,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                 "engine": payload.get("engine", "python"),
                 "hits_shown": len(head),
                 "hits_total": len(hits),
-                "truncated": bool(payload.get("truncated", False)) or len(hits) > 20,
+                "truncated": bool(payload.get("truncated", False)) or len(hits) > MAX_GREP_HITS,
                 "hits": head,
             }
         else:
@@ -141,13 +149,16 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
             # Fallback to head/tail if no keywords matched
             sampled_text = text[:800] + "\n...[gap]...\n" + _tail_lines(text, max_lines=15, max_chars=1200)
 
+        # 最终护栏：避免极端窗口合并导致 sampled_text 仍然过大
+        if len(sampled_text) > MAX_READ_FILE_CHARS:
+            sampled_text = sampled_text[:MAX_READ_FILE_CHARS] + "\n...(内容已截断)\n"
         summary["summary"] = {
             "path": payload.get("path"),
             "offset": payload.get("offset"),
             "limit": payload.get("limit"),
             "chars_total": len(text),
-            "content": sampled_text, # Final safety limit
-            "truncated": len(text) > len(sampled_text) or len(text) > 4000,
+            "content": sampled_text,
+            "truncated": len(text) > len(sampled_text) or len(text) > MAX_READ_FILE_CHARS,
         }
         return summary
 
@@ -207,7 +218,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                 {
                     "path": h.get("path"),
                     "lines": f"{h.get('start_line')}-{h.get('end_line')}",
-                    "preview": (h.get("text") or "")
+                    "preview": (h.get("text") or "")[:MAX_PREVIEW_CHARS]
                 }
                 for h in hits[:5]
             ]
@@ -219,7 +230,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         provider = payload.get("provider")
         out_items = []
         if isinstance(results, list):
-            for r in results:
+            for r in results[:MAX_CODE_RESULTS]:
                 if not isinstance(r, dict):
                     continue
                 code = str(r.get("code") or "")
@@ -228,14 +239,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
                         "repo": r.get("repo"),
                         "path": r.get("path"),
                         "language": r.get("language"),
-                        "preview": code,
+                        "preview": code[:MAX_PREVIEW_CHARS],
                         "url": r.get("url"),
                     }
                 )
         summary["summary"] = {
             "provider": provider,
             "query": payload.get("query"),
-            "results_total":  len(results)  ,
+            "results_total": (len(results) if isinstance(results, list) else 0),
             "results": out_items,
         }
         return summary
@@ -244,20 +255,20 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         results = payload.get("results") or []
         out_items = []
         if isinstance(results, list):
-            for r in results:
+            for r in results[:MAX_WEB_RESULTS]:
                 if not isinstance(r, dict):
                     continue
                 out_items.append(
                     {
                         "title": r.get("title"),
                         "url": r.get("url"),
-                        "snippet": (str(r.get("snippet") or "")),
+                        "snippet": (str(r.get("snippet") or "")[:MAX_PREVIEW_CHARS]),
                     }
                 )
         summary["summary"] = {
             "provider": payload.get("provider"),
             "query": payload.get("query"),
-            "results_total": len(results)  ,
+            "results_total": (len(results) if isinstance(results, list) else 0),
             "results": out_items,
         }
         return summary
@@ -270,7 +281,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
             "status_code": payload.get("status_code"),
             "content_length": payload.get("content_length"),
             "truncated": bool(payload.get("truncated", False)),
-            "content_preview": content,
+            "content_preview": content[:MAX_WEBFETCH_PREVIEW_CHARS],
         }
         return summary
 
@@ -296,7 +307,7 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     # extract full payload for get_weather tool
     if tool in {"display", "preview_multi_edit", "question", "load_skill", "todowrite", "todoread",
 "run_task", "get_task_status", "get_weather", "get_weather_forecast"}:
-        return payload;
+        return payload
     # if tool == "get_weather_forecast":
     #     return payload;
     # default: pass a small view

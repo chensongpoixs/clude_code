@@ -217,7 +217,7 @@ def _h_write_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
         text=args.get("text", ""),
         content_based=bool(args.get("content_based", False)),
         insert_at_line=args.get("insert_at_line")
-    );
+    )
 
 
 def _h_run_cmd(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:

@@ -24,6 +24,7 @@ from clude_code.orchestrator.classifier import IntentClassifier, IntentCategory
 from .models import AgentTurn
 from .parsing import try_parse_tool_call
 from .prompts import SYSTEM_PROMPT, load_project_memory
+from clude_code.prompts import read_prompt, render_prompt
 from .tool_lifecycle import run_tool_lifecycle
 from .planning import execute_planning_phase
 from .execution import (
@@ -173,8 +174,11 @@ class AgentLoop:
         
         # Knowledge / RAG systems
         self.indexer = IndexerService(cfg)
-        self.indexer.start() # Start background indexing
-        self.logger.info("[dim]启动后台索引服务（LanceDB RAG）[/dim]")
+        self.indexer.start()  # Start background indexing (best-effort)
+        if str(getattr(self.indexer, "status", "")).startswith("disabled:"):
+            self.logger.info(f"[dim]后台索引已禁用: {self.indexer.status}[/dim]")
+        else:
+            self.logger.info("[dim]启动后台索引服务（LanceDB RAG）[/dim]")
         self.embedder = CodeEmbedder(cfg)
         self.vector_store = VectorStore(cfg)
         self.verifier = Verifier(cfg)
@@ -309,10 +313,10 @@ class AgentLoop:
         # 2) 记录用户输入（必要时把规划提示并入同一条 user 消息，避免 role 不交替）
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
-        # planning_prompt
-        user_content =    user_text if not planning_prompt else (planning_prompt + "\n\n" + user_text)
-        
-        self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
+        # planning_prompt：将规划提示并入同一条 user 消息（保持 role 交替 + 便于审计）
+        user_content = user_text if not planning_prompt else (planning_prompt + "\n\n" + user_text)
+
+        self.logger.info(f"[bold cyan]发送给 LLM 的 user_content[/bold cyan] len={len(user_content)}")
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
         _ev(
             "user_content_built",
@@ -478,120 +482,12 @@ class AgentLoop:
         tool_names = self._get_prompt_tool_names()
         tools_expected_example = json.dumps(tool_names, ensure_ascii=False)
         tools_expected_hint = ", ".join(tool_names)
-
-
-        return (
-            "# Role\n"
-            "你是一个高逻辑性的任务规划专家。\n"
-            "你的职责是将用户目标拆解为原子化、可验证、可执行的任务步骤。\n"
-            "你不具备执行权限，不得假设任何真实环境状态。\n"
-            "\n"
-            "# Core Rules\n"
-            "1. 你只能进行规划，不能执行任何操作。\n"
-            "2. 不得假设文件存在、目录结构、命令执行结果。\n"
-            "3. 所有思考必须结构化到 JSON 字段中，禁止输出自由解释文本。\n"
-            "4. 输出必须是单一、完整、合法的 JSON。\n"
-            "\n"
-            "# Planning Constraints\n"
-            f"1. 步骤数量不得超过 {self.cfg.orchestrator.max_plan_steps}。\n"
-            "2. 每一步必须是原子化动作（单一输入，明确输出）。\n"
-            "3. dependencies 必须准确引用已有 step id。\n"
-            f"4. [{tools_expected_hint}] 只能从允许列表中选择，不得发明工具。\n"
-            "5. 最后一个 step 必须是总结步骤。\n"
-            "\n"
-            "# Output Format (JSON Only)\n"
-            "{\n"
-            "  \"title\": \"任务全局目标简述\",\n"
-            "  \"assumptions\": [\"规划所依赖的前置假设\"],\n"
-            "  \"constraints\": [\"必须满足的限制条件\"],\n"
-            "  \"steps\": [\n"
-            "    {\n"
-            "      \"id\": \"step_1\",\n"
-            "      \"description\": \"具体要做的动作\",\n"
-            "      \"expected_output\": \"该步骤完成后应得到的结果\",\n"
-            "      \"dependencies\": [],\n"
-            f"      \"tools_expected\": {tools_expected_example}\n"
-            "    }\n"
-            "  ],\n"
-            "  \"risks\": [\"可能导致失败或重规划的风险点\"],\n"
-            "  \"verification_policy\": \"run_verify\"\n"
-            "}\n\n"
-            "# Input\n"
-            f"目标：{input_text}"
-
-        )
-
-        return (
-            "# Role\n"
-            "你是一个高逻辑性的任务规划专家，擅长将复杂目标拆解为原子化的、可验证的执行步骤。\n"
-            "\n"
-            "# Task\n"
-            "请针对用户输入的目标进行深度分析，并输出一个严格符合 JSON 结构的【任务执行蓝图】。\n"
-
-            "# Rules\n"
-            "1. 严禁输出任何解释性文字或 Markdown 代码块以外的内容。\n"
-            f"2. 步骤拆解：最多不超过 {self.cfg.orchestrator.max_plan_steps} 步，每一步必须是“原子化”的动作（单一输入，明确输出）。\n"
-            "3. 依赖关系：准确标注 `dependencies`，确保 ID 引用正确。\n"
-            f"4. 工具限制：`tools_expected` 必须严格限定在：[{tools_expected_hint}]。\n"
-            "5. 最终步要求：最后一步必须被设定为总结位，用于输出详细的思考逻辑与整体任务报告。\n"
-            "\n"
-            "# Output Format (JSON)\n"
-            "{\n"
-            "  \"title\": \"任务全局目标简述\",\n"
-            "  \"steps\": [\n"
-            "    {\n"
-            "      \"id\": \"step_1\",\n"
-            "      \"description\": \"具体可执行的动作描述\",\n"
-            "      \"dependencies\": [],\n"
-            "      \"status\": \"pending\",\n"
-            f"      \"tools_expected\":{tools_expected_example}\n"
-            "    }\n"
-            "  ],\n"
-            "  \"verification_policy\": \"run_verify\"\n"
-            "}\n\n"
-
-            "# Input\n" 
-            f"目标：{input_text}\n"
-            );
-        return (
-            "现在进入【规划阶段】。请先输出一个严格的 JSON 对象（不要输出任何解释、不要调用工具）。\n"
-            "JSON 必须符合以下结构：\n"
-            "{\n"
-            '  "title": "任务全局目标",\n'
-            '  "steps": [\n'
-            "    {\n"
-            '      "id": "step_1",\n'
-            '      "description": "可执行且可验证的动作（可跨文件）",\n'
-            '      "dependencies": [],\n'
-            '      "status": "pending",\n'
-            f'      "tools_expected": {tools_expected_example}\n'
-            "    }\n"
-            "  ],\n"
-            '  "verification_policy": "run_verify"\n'
-            "}\n\n"
-            f"要求：1. steps 不超过 {self.cfg.orchestrator.max_plan_steps} 步；每步尽量小且明确。"
-            f"2. tools_expected 必须从以下工具名中选择：{tools_expected_hint}。"
-            "3. 最后一步需要输出：给出详细思考流程 + 总结信息。"
-            # f"要求：请生成 *一个* 步骤。该步骤应包含至少一个工具，例如 read_file，grep，apply_patch。 步骤描述应明确可执行且可验证，例如 '使用 read_file 读取文件 X'。  steps 的数量不应超过 {self.cfg.orchestrator.max_plan_steps} 步。 示例：\n"
-            # "{\n"
-            # "  \"id\": \"step_1\",\n"
-            # "  \"description\": \"使用 read_file 读取文件 src/clude_code/orchestrator/agent_loop/agent_loop.py，并将文件内容存储在变量 'file_content' 中。\n",
-            # "      \"dependencies\": [],\n"
-            # "      \"status\": \"pending\",\n"
-            # "      \"tools_expected\": [\"read_file\"]\n"
-            # "    },\n"
-            # "    {\n"
-            # "      \"id\": \"step_2\",\n"
-            # "      \"description\": \"使用 grep 工具，从变量 'file_content' 中提取包含函数定义 '_try_parse_tool_call' 的代码块，并将提取的代码块存储在变量 'function_code' 中。\n",
-            # "      \"dependencies\": [\"step_1\"],\n"
-            # "      \"status\": \"pending\",\n"
-            # "      \"tools_expected\": [\"grep\"]\n"
-            # "    }\n"
-            # "  ],\n"
-            # "  \"verification_policy\": \"run_verify\"\n"
-            # "}\n\n"
-            # f"要求：请生成包含两个步骤的 JSON 对象。每个步骤必须明确指定要使用的工具和操作，并说明结果应该存储在哪个变量中。 steps 的数量不应超过 15 步。 确保生成的代码块是完整的函数定义，包括函数签名和函数体。"
-
+        return render_prompt(
+            "agent_loop/planning_prompt.j2",
+            max_plan_steps=int(self.cfg.orchestrator.max_plan_steps),
+            tools_expected_example=tools_expected_example,
+            tools_expected_hint=tools_expected_hint,
+            input_text=input_text,
         )
 
     def _log_llm_request_params_to_file(self) -> None:
@@ -932,7 +828,10 @@ class AgentLoop:
             # 通用：显示 payload 的键
             #keys = list(payload.keys())[:3]
             #return f"成功: {', '.join(keys)}{'...' if len(payload) > 3 else ''}"
-            return "成功: 有效 keys:{}.values:{}".format((payload.keys()), payload.values());
+            keys = list(payload.keys()) if isinstance(payload, dict) else []
+            keys_preview = keys[:8]
+            more = "…" if len(keys) > len(keys_preview) else ""
+            return f"成功: payload_keys={keys_preview}{more}"
 
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> ToolResult:
         """

@@ -5,6 +5,7 @@ from typing import Any, Callable, TYPE_CHECKING
 from clude_code.llm.llama_cpp_http import ChatMessage
 from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
 from clude_code.orchestrator.state_m import AgentState
+from clude_code.prompts import read_prompt
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -77,7 +78,7 @@ def execute_planning_phase(
             loop.logger.error(f"[red]✗ 计划解析失败 (尝试 {plan_attempts}/{loop.cfg.orchestrator.planning_retry + 1}): {e}[/red]", exc_info=True)
             loop.audit.write(trace_id=trace_id, event="plan_parse_failed", data={"attempt": plan_attempts, "error": str(e)})
             _ev("plan_parse_failed", {"attempt": plan_attempts, "error": str(e)})
-            loop.messages.append(ChatMessage(role="user", content="上面的输出无法解析为 Plan JSON。请只输出一个严格 JSON 对象（不要解释，不要代码块）。"))
+            loop.messages.append(ChatMessage(role="user", content=read_prompt("agent_loop/plan_parse_retry.md").strip()))
             loop._trim_history(max_messages=30)
 
     return None

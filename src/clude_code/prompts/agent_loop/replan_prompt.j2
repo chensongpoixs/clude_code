@@ -1,0 +1,27 @@
+# 出现阻塞/失败，需要重规划。
+
+优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：
+{
+  "title": "可选：新标题",
+  "remove_steps": ["step_x"],
+  "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],
+  "add_steps": [{"id":"step_4","description":"...","dependencies":["step_3"],"tools_expected":["read_file"],"status":"pending"}],
+  "reason": "可选：为什么这样 patch"
+}
+
+#约束：
+
+- steps 总数不超过 {{max_plan_steps}}
+- 禁止删除/修改 status=done 的步骤
+- 新增步骤的 status 会被强制设为 pending
+
+# 当前失败步骤：
+
+- step_id={{step.id}}
+- description={{step.description}}
+
+# 当前 Plan（含状态/依赖/建议工具）：
+ {{cur_plan_md}}
+ 
+# 说明：
+如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。

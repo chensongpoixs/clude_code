@@ -22,6 +22,7 @@ import json
 import re
 import shutil
 import subprocess
+import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -200,11 +201,17 @@ def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str
     except re.error as e:
         return ToolResult(False, error={"code": "E_INVALID_REGEX", "message": str(e)})
 
+    target_exts = set(LANG_EXTENSIONS.get(language, [])) if language != "all" else None
+
     hits: list[dict[str, Any]] = []
     for fp in root.rglob("*"):
         if fp.is_dir():
             continue
         if any(part in fp.parts for part in _NOISE_DIRS):
+            continue
+        if target_exts is not None and fp.suffix.lower() not in target_exts:
+            continue
+        if include_glob and not fnmatch.fnmatch(fp.name, include_glob):
             continue
         try:
             if fp.stat().st_size > 2_000_000:

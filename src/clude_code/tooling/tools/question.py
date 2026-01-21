@@ -15,25 +15,25 @@ from ...config.tools_config import get_question_config
 # 工具模块 logger（延迟初始化）
 _logger = get_tool_logger(__name__)
 
+"""
+向用户提问工具
 
+Args:
+    question: 问题文本
+    options: 可选的选项列表
+    multiple: 是否允许多选
+    header: 问题标题
+
+Returns:
+    ToolResult: 包含用户回答的工具结果
+"""
 def ask_question(
     question: str,
     options: Optional[List[str]] = None,
     multiple: bool = False,
     header: Optional[str] = None
 ) -> ToolResult:
-    """
-    向用户提问工具
 
-    Args:
-        question: 问题文本
-        options: 可选的选项列表
-        multiple: 是否允许多选
-        header: 问题标题
-
-    Returns:
-        ToolResult: 包含用户回答的工具结果
-    """
     try:
         # 检查工具是否启用
         config = get_question_config()

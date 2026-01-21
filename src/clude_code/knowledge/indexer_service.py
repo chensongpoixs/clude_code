@@ -38,6 +38,14 @@ class IndexerService:
             date_format=cfg.logging.date_format,
         )
 
+        # 依赖探测：fastembed 缺失时禁用索引线程，避免每个文件都刷一次“索引失败”
+        try:
+            from clude_code.knowledge import embedder as _embedder_mod
+            self._embedding_available = bool(getattr(_embedder_mod, "TextEmbedding", None))
+        except Exception:
+            self._embedding_available = False
+        self._warned_embedder_missing = False
+
         # P2-1: 并发索引时的状态锁
         self._state_lock = threading.Lock()
 
@@ -55,6 +63,15 @@ class IndexerService:
         self._load_state()
 
     def start(self):
+        if not getattr(self.cfg.rag, "enabled", True):
+            self.status = "disabled: rag.disabled"
+            return
+        if not self._embedding_available:
+            self.status = "disabled: fastembed missing"
+            if not self._warned_embedder_missing:
+                self._logger.warning("已禁用后台索引：缺少依赖 fastembed（可选）。如需启用，请安装：pip install fastembed")
+                self._warned_embedder_missing = True
+            return
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
