@@ -123,20 +123,23 @@ class LlamaCppHttpClient:
             with httpx.Client(timeout=self.timeout_s) as client:
                 r = client.post(url, json=payload)
                 if r.status_code >= 400:
+                    logger.warning(f"llama.cpp OpenAI-compatible request failed: status={r.status_code} url={url} payload={payload} body={r.text}");
                     # Surface response body — llama.cpp often explains which field is invalid.
                     body = r.text
                     raise RuntimeError(
                         "llama.cpp OpenAI-compatible request failed: "
-                        f"status={r.status_code} url={url} body={body[:2000]}"
+                        f"status={r.status_code} url={url} body={body}"
                     )
                 data = r.json()
         except httpx.TimeoutException as e:
+            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload},  request timed out: {e}");
             raise RuntimeError(
                 "llama.cpp OpenAI-compatible request failed: "
                 f"timeout url={url} (timeout_s={self.timeout_s})"
             ) from e
         except httpx.RequestError as e:
             # 业界常见：代理/证书/连接失败。这里把根因抛给上层用于友好提示。
+            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload}, request error: {e}");
             raise RuntimeError(
                 "llama.cpp OpenAI-compatible request failed: "
                 f"request_error url={url} err={type(e).__name__}: {e}"
@@ -150,6 +153,7 @@ class LlamaCppHttpClient:
             try:
                 return data["choices"][0]["text"]
             except Exception as e:
+                logger.warning(f"无法解析 llama.cpp OpenAI-compatible 响应: {e} 数据: {data}", exc_info=True);
                 raise RuntimeError(f"unexpected response format: {data}") from e
 
     def _chat_completion(self, messages: list[ChatMessage]) -> str:

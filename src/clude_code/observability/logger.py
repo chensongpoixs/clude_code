@@ -15,13 +15,13 @@ from logging.handlers import RotatingFileHandler
 from rich.console import Console
 from rich.logging import RichHandler
 
+"""
+自定义 Rich 处理器，在日志开头添加文件名和行号。
 
+格式：级别     [文件名:行号] 级别 - 消息内容（支持 Rich markup）
+"""
 class FileLineRichHandler(RichHandler):
-    """
-    自定义 Rich 处理器，在日志开头添加文件名和行号。
-    
-    格式：级别     [文件名:行号] 级别 - 消息内容（支持 Rich markup）
-    """
+
     
     def emit(self, record: logging.LogRecord) -> None:
         # 获取调用日志的文件名和行号
@@ -43,12 +43,12 @@ class FileLineRichHandler(RichHandler):
         
         # 调用父类方法
         super().emit(record)
-    
+    """
+    重写 render 方法，控制台输出只显示消息内容（不带前缀）。
+    文件输出会在 FileLineFileHandler 中添加完整格式。
+    """
     def render(self, *, record: logging.LogRecord, traceback, message_renderable, **kwargs):
-        """
-        重写 render 方法，控制台输出只显示消息内容（不带前缀）。
-        文件输出会在 FileLineFileHandler 中添加完整格式。
-        """
+
         # 控制台输出直接使用原始消息，不添加前缀
         # 调用父类 render
         return super().render(
@@ -105,7 +105,23 @@ class FileLineFileHandler(RotatingFileHandler):
         # 调用父类方法
         super().emit(record)
 
+"""
+获取配置好的日志记录器。
 
+参数:
+    name: 日志记录器名称（通常是模块名，如 __name__）
+    level: 日志级别（可以是 int 如 logging.INFO，也可以是字符串如 'DEBUG'）
+    log_file: 可选的文件路径，如果提供则同时输出到文件
+    workspace_root: 工作区根目录，如果提供且 log_file 未指定，则自动创建 .clude/logs/app.log
+    log_to_console: 是否输出到控制台（默认 False，只写入文件）
+    max_bytes: 日志文件最大字节数
+    backup_count: 保留的日志备份数量
+    log_format: 自定义日志格式
+    date_format: 自定义日期格式
+
+返回:
+    配置好的 Logger 实例
+"""
 def get_logger(
     name: str,
     level: Union[int, str] = logging.INFO,
@@ -117,23 +133,7 @@ def get_logger(
     log_format: Optional[str] = None,
     date_format: Optional[str] = None,
 ) -> logging.Logger:
-    """
-    获取配置好的日志记录器。
-    
-    参数:
-        name: 日志记录器名称（通常是模块名，如 __name__）
-        level: 日志级别（可以是 int 如 logging.INFO，也可以是字符串如 'DEBUG'）
-        log_file: 可选的文件路径，如果提供则同时输出到文件
-        workspace_root: 工作区根目录，如果提供且 log_file 未指定，则自动创建 .clude/logs/app.log
-        log_to_console: 是否输出到控制台（默认 False，只写入文件）
-        max_bytes: 日志文件最大字节数
-        backup_count: 保留的日志备份数量
-        log_format: 自定义日志格式
-        date_format: 自定义日期格式
-    
-    返回:
-        配置好的 Logger 实例
-    """
+
     logger = logging.getLogger(name)
     
     # 处理字符串级别的转换
@@ -177,8 +177,14 @@ def get_logger(
     else:
         # 核心修复点：如果不输出到控制台，则禁止消息向上传递给带有控制台处理器的父 logger
         logger.propagate = False
-    
-    
+
+    # 确定日志文件路径是否需要创建
+    if not os.path.exists(log_file):
+        # 如果路径包含文件夹，可以先创建文件夹
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        # with open(log_file, 'w', encoding='utf-8') as f:
+            # f.write("--- Clude Code  Log Initialized ---\n");
+
     # 确定日志文件路径
     if not log_file and workspace_root:
         # 自动创建日志文件路径
@@ -190,8 +196,8 @@ def get_logger(
     if not os.path.exists(log_file):
     # 如果路径包含文件夹，可以先创建文件夹
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        with open(log_file, 'w', encoding='utf-8') as f:
-            f.write("--- Clude Code  Log Initialized ---\n");
+        # with open(log_file, 'w', encoding='utf-8') as f:
+            # f.write("--- Clude Code  Log Initialized ---\n");
     # 如果指定了日志文件，添加文件处理器（始终启用文件输出）
     if log_file and not has_file_handler:
         file_handler = FileLineFileHandler(
@@ -211,41 +217,48 @@ def get_logger(
 # 全局默认日志记录器（用于快速使用）
 _default_logger: Optional[logging.Logger] = None
 
+"""
+获取默认日志记录器（单例模式）。
 
+返回:
+    全局默认 Logger 实例
+"""
 def get_default_logger() -> logging.Logger:
-    """
-    获取默认日志记录器（单例模式）。
-    
-    返回:
-        全局默认 Logger 实例
-    """
+
     global _default_logger
     if _default_logger is None:
         _default_logger = get_logger("clude_code")
     return _default_logger
 
-
+"""
+DEBUG 级别日志快捷函数。
+"""
 def debug(msg: str, *args, **kwargs) -> None:
-    """DEBUG 级别日志快捷函数。"""
+    
     get_default_logger().debug(msg, *args, **kwargs)
 
-
+"""
+INFO 级别日志快捷函数。
+"""
 def info(msg: str, *args, **kwargs) -> None:
-    """INFO 级别日志快捷函数。"""
     get_default_logger().info(msg, *args, **kwargs)
 
-
+"""
+WARNING 级别日志快捷函数。
+"""
 def warning(msg: str, *args, **kwargs) -> None:
-    """WARNING 级别日志快捷函数。"""
     get_default_logger().warning(msg, *args, **kwargs)
 
-
+"""
+ERROR 级别日志快捷函数。
+"""
 def error(msg: str, *args, **kwargs) -> None:
-    """ERROR 级别日志快捷函数。"""
+
     get_default_logger().error(msg, *args, **kwargs)
 
-
+"""
+ERROR 级别日志快捷函数（带异常信息）。
+"""
 def exception(msg: str, *args, exc_info=True, **kwargs) -> None:
-    """ERROR 级别日志快捷函数（带异常信息）。"""
     get_default_logger().error(msg, *args, exc_info=exc_info, **kwargs)
 

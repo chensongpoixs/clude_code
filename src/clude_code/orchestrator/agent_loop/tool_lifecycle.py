@@ -9,12 +9,12 @@ from .tool_dispatch import TOOL_REGISTRY
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
 
-    """
-    统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
+"""
+统一工具执行生命周期：策略检查 -> 确认 -> 审计 -> 执行 -> 验证。
 
-    大文件治理说明：
-    - 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
-    """
+大文件治理说明：
+- 这段逻辑会被 Planning 与 ReAct 两种模式复用，单独抽离后更易维护/测试。
+"""
 def run_tool_lifecycle(
     loop: "AgentLoop",
     name: str,

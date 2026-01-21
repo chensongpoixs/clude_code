@@ -17,17 +17,17 @@ from typing import Any, Dict, List, Optional, Union
 from clude_code.observability.metrics import MetricPoint, MetricType
 from clude_code.observability.logger import get_logger
 
-
+"""存储后端类型"""
 class StorageBackend(Enum):
-    """存储后端类型"""
+    
     MEMORY = "memory"
     FILE = "file"
     REMOTE = "remote"  # 预留，未来实现
 
-
+"""指标查询"""
 @dataclass
 class MetricsQuery:
-    """指标查询"""
+    
     name: Optional[str] = None
     metric_type: Optional[MetricType] = None
     labels: Dict[str, str] = field(default_factory=dict)
@@ -35,33 +35,33 @@ class MetricsQuery:
     end_time: Optional[float] = None
     limit: Optional[int] = None
 
-
+"""指标存储接口"""
 class MetricsStorage(ABC):
-    """指标存储接口"""
     
+    """存储指标数据点"""
     @abstractmethod
     def store(self, points: List[MetricPoint]) -> None:
-        """存储指标数据点"""
+        
         pass
-    
+    """查询指标数据点"""
     @abstractmethod
     def query(self, query: MetricsQuery) -> List[MetricPoint]:
-        """查询指标数据点"""
+        
         pass
-    
+    """获取所有指标名称"""
     @abstractmethod
     def get_metric_names(self) -> List[str]:
-        """获取所有指标名称"""
+        
         pass
-    
+    """清理过期数据，返回删除的数据点数量"""
     @abstractmethod
     def cleanup(self, retention_hours: int = 24) -> int:
-        """清理过期数据，返回删除的数据点数量"""
+        
         pass
 
-
+"""内存指标存储"""
 class MemoryMetricsStorage(MetricsStorage):
-    """内存指标存储"""
+    
     
     def __init__(self, max_points: int = 10000):
         self.max_points = max_points
@@ -147,9 +147,11 @@ class MemoryMetricsStorage(MetricsStorage):
             self._points.clear()
             self._index.clear()
 
-
+"""
+文件指标存储
+"""
 class FileMetricsStorage(MetricsStorage):
-    """文件指标存储"""
+    
     
     def __init__(self, workspace_root: str, max_file_size_mb: int = 100):
         self.workspace_root = workspace_root
@@ -170,9 +172,11 @@ class FileMetricsStorage(MetricsStorage):
         
         # 初始化
         self._ensure_files()
-    
+    """
+    确保文件存在
+    """
     def _ensure_files(self) -> None:
-        """确保文件存在"""
+        
         if not self.data_file.exists():
             self.data_file.touch()
         
@@ -514,13 +518,15 @@ class MetricsManager:
 # 全局指标管理器实例
 _global_manager: Optional[MetricsManager] = None
 
-
+"""
+获取全局指标管理器实例
+"""
 def get_metrics_manager(
     workspace_root: str = ".",
     storage_backend: StorageBackend = StorageBackend.FILE,
     storage_options: Dict[str, Any] = None
 ) -> MetricsManager:
-    """获取全局指标管理器实例"""
+    
     global _global_manager
     if _global_manager is None:
         _global_manager = MetricsManager(workspace_root, storage_backend, storage_options)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+
+from jinja2 import Template;
+
 from typing import Any, Callable, TYPE_CHECKING
 
 from clude_code.llm.llama_cpp_http import ChatMessage
@@ -8,6 +11,9 @@ from clude_code.tooling.local_tools import ToolResult
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.orchestrator.planner import Plan
 from .control_protocol import try_parse_control_envelope
+
+
+
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -54,8 +60,8 @@ def handle_tool_call_in_step(
 
     result_msg = _tool_result_to_message(name, result, keywords=keywords)
     loop.messages.append(ChatMessage(role="user", content=result_msg))
-    loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name} [步骤] {step.id}")
-    loop.file_only_logger.debug(f"工具结果回喂 [step={step.id}] [tool={name}] [len={len(result_msg)}]")
+    loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name} [步骤] {step.id} [result_msg: {result_msg[:10]}{'...' if len(result_msg) > 10 else ''}]")
+    loop.file_only_logger.debug(f"工具结果回喂 [step={step.id}] [tool={name}] [result_msg={result_msg}]")
     _ev("tool_result_fed_back", {"tool": name, "step_id": step.id})
     loop._trim_history(max_messages=30)
 
@@ -243,31 +249,172 @@ def handle_replanning(
         # P1-1: 渲染失败不阻塞主流程，但记录日志便于排查
         loop.file_only_logger.warning(f"render_plan_markdown 失败: {e}", exc_info=True)
         cur_plan_md = "(render_plan_markdown 失败，略)"
-
+    concurrency = 0;#  loop.cfg.executor.concurrency;
+    # replan_prompt = (
+    #     "出现阻塞/失败，需要重规划。\n"
+    #     "优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：\n"
+    #     "{\n"
+    #     '  "title": "可选：新标题",\n'
+    #     '  "remove_steps": ["step_x"],\n'
+    #     '  "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],\n'
+    #     '  "add_steps": [{"id":"step_4","description":"...","dependencies":["step_3"],"tools_expected":["read_file"],"status":"pending"}],\n'
+    #     '  "reason": "可选：为什么这样 patch"\n'
+    #     "}\n"
+    #     "约束：\n"
+    #     f"- steps 总数不超过 {loop.cfg.orchestrator.max_plan_steps}\n"
+    #     "- 禁止删除/修改 status=done 的步骤\n"
+    #     "- 新增步骤的 status 会被强制设为 pending\n"
+    #     "\n"
+    #     "当前失败步骤：\n"
+    #     f"- step_id={step.id}\n"
+    #     f"- description={step.description}\n"
+    #     "\n"
+    #     "当前 Plan（含状态/依赖/建议工具）：\n"
+    #     f"{cur_plan_md}\n"
+    #     "\n"
+    #     "如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。"
+    # )
+   
     replan_prompt = (
-        "出现阻塞/失败，需要重规划。\n"
-        "优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：\n"
-        "{\n"
-        '  "title": "可选：新标题",\n'
-        '  "remove_steps": ["step_x"],\n'
-        '  "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],\n'
-        '  "add_steps": [{"id":"step_4","description":"...","dependencies":["step_3"],"tools_expected":["read_file"],"status":"pending"}],\n'
-        '  "reason": "可选：为什么这样 patch"\n'
-        "}\n"
-        "约束：\n"
-        f"- steps 总数不超过 {loop.cfg.orchestrator.max_plan_steps}\n"
-        "- 禁止删除/修改 status=done 的步骤\n"
-        "- 新增步骤的 status 会被强制设为 pending\n"
+        "# Role \n"
+        "你是任务规划器的重规划模块（Replanner）。\n"
+        "你唯一职责是根据失败步骤生成 PlanPatch，修补当前计划。\n"
+        "禁止执行任何操作，只输出严格 JSON。\n"
         "\n"
-        "当前失败步骤：\n"
+        "# Rules\n"
+        "1. 输出 JSON 严格格式，不允许任何解释性文字。\n"
+        "2. 优先使用 PlanPatch 修复计划：\n"
+        "   - remove_steps：移除步骤\n"
+        "   - update_steps：更新步骤信息\n"
+        "   - add_steps：新增步骤\n"
+        "3. 仅在 PlanPatch 无法表达修复时，才输出完整 Plan JSON。\n"
+        "4. 禁止删除或修改 status=\"done\" 的步骤。\n"
+        "5. add_steps 的 status 必须为 \"pending\"。\n"
+        "6. remove_steps、update_steps、add_steps 的 id 必须唯一，不与已有步骤冲突。\n"
+        "7. 删除步骤前必须检查是否被其他步骤依赖，不能破坏依赖链。\n"
+        "\n"
+        "# JSON Output Format (PlanPatch)\n"
+        "{\n"
+        "\"title\": \"可选：新标题，必填时替换旧标题\",\n"
+        f"\"remove_steps\": [\"step_x\"],\n"
+        "\"update_steps\": [\n"
+            "{\n"
+            "            \"id\": \"step_3\",\n"
+            "            \"description\": \"必填：完整描述更新后的动作\",\n"
+            "            \"dependencies\": [\"step_id1\",\"step_id2\"],\n"
+            "            \"tools_expected\": [\"tool_name\"],\n"
+            "            \"status\": \"pending 或原状态，如果非 done\"\n"
+            "}\n"
+        "],\n"
+        "\"add_steps\": [\n"
+            "{\n"
+            "            \"id\": \"step_4\",\n"
+            "            \"description\": \"必填：完整描述新增动作\",\n"
+            "            \"dependencies\": [\"step_3\"],\n"
+            "            \"tools_expected\": [\"tool_name\"],\n"
+            "            \"status\": \"pending\"\n"
+            "}\n"
+        "],\n"
+        "\"reason\": \"可选：说明为何进行此修补\"\n"
+        "}\n"
+
+        "# Input Context (Jinja Template)\n"
+        "- 当前失败步骤：\n"
         f"- step_id={step.id}\n"
         f"- description={step.description}\n"
-        "\n"
-        "当前 Plan（含状态/依赖/建议工具）：\n"
-        f"{cur_plan_md}\n"
-        "\n"
-        "如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。"
-    )
+        "- 当前 Plan（含状态/依赖/建议工具）：\n"
+        f"{cur_plan_md}\n" 
+        "# Execution Settings\n"
+        f"- 并发控制：-c {concurrency}   # 填 0 自动按系统合理并发执行\n"
+        f"- 模板渲染：启用 Jinja，占位符 {step.id}, {loop.index}, {cur_plan_md}, {concurrency} 可自动替换\n"
+        "- 输出要求：仅 JSON，不允许自然语言\n"
+
+        "# Instructions for Loop Execution\n"
+        "{% for step in failed_steps %}\n"
+        "- 生成 PlanPatch 针对 step    {{step.id}}\n"
+        "- 使用并发控制 {{concurrency}}\n"
+        "{% endfor %} ");
+
+     # bingfeng: 2024-10-15 优化提示词，增强可控性和输出质量
+    # ----------------------------
+    # 模拟输入数据
+    # ----------------------------
+
+    # failed_steps = [
+    #     {"id": "step_2", "description": "检查配置文件是否存在"},
+    #     {"id": "step_5", "description": "读取数据并解析"}
+    # ]
+
+    # # 当前计划的简化 JSON（可以根据实际 Plan 替换）
+    # # cur_plan_md = """{
+    # # "title": "原始任务计划",
+    # # "steps": [
+    # #     {"id": "step_1", "description": "初始化环境", "status": "done", "dependencies": [], "tools_expected": ["init_tool"]},
+    # #     {"id": "step_2", "description": "检查配置文件是否存在", "status": "failed", "dependencies": ["step_1"], "tools_expected": ["read_file"]},
+    # #     {"id": "step_5", "description": "读取数据并解析", "status": "failed", "dependencies": ["step_3"], "tools_expected": ["parse_tool"]}
+    # # ]
+    # # }"""
+    # concurrency = 0;#  loop.cfg.executor.concurrency;
+    # # ----------------------------
+    # # Jinja 模板
+    # # ----------------------------
+
+    # replan_template = """
+    # # Role
+    # 你是任务规划器的重规划模块（Replanner）。
+    # 你唯一职责是根据失败步骤生成 PlanPatch，修补当前计划。
+    # 禁止执行任何操作，只输出严格 JSON。
+
+    # # JSON Output Format (PlanPatch)
+    # {
+    # "title": "可选：新标题，必填时替换旧标题",
+    # "remove_steps": [],
+    # "update_steps": [
+    # {% for step in failed_steps %}
+    #     {
+    #         "id": "{{ step.id }}",
+    #         "description": "{{ step.description }} - 修补后描述",
+    #         "dependencies": ["step_1"],
+    #         "tools_expected": ["read_file"],
+    #         "status": "pending"
+    #     }{% if not loop.last %},{% endif %}
+    # {% endfor %}
+    # ],
+    # "add_steps": [
+    # {% for step in failed_steps %}
+    #     {
+    #         "id": "{{ step.id }}_new",
+    #         "description": "新增操作步骤，依赖 {{ step.id }}",
+    #         "dependencies": ["{{ step.id }}"],
+    #         "tools_expected": ["read_file"],
+    #         "status": "pending"
+    #     }{% if not loop.last %},{% endif %}
+    # {% endfor %}
+    # ],
+    # "reason": "自动生成 PlanPatch 修复失败步骤"
+    # }
+
+    # # 当前 Plan（含状态/依赖/建议工具）：
+    # {{ cur_plan_md }}
+
+    # # 并发控制：
+    # -c {{ concurrency }}
+
+    # # Instructions for Loop Execution
+    # {% for step in failed_steps %}
+    # - 生成 PlanPatch 针对 step {{ step.id }}
+    # - 使用并发控制 {{ concurrency }}
+    # {% endfor %}
+    # """
+    # template = Template(replan_template)
+    # replan_prompt = template.render(
+    #     failed_steps=failed_steps,
+    #     cur_plan_md=cur_plan_md,
+    #     concurrency=concurrency
+    # )
+
+
+
     loop.messages.append(ChatMessage(role="user", content=replan_prompt))
     loop._trim_history(max_messages=30)
     assistant_plan = _llm_chat("replan", step.id)
@@ -398,8 +545,9 @@ def execute_plan_steps(
         step.status = "in_progress"
         loop.audit.write(trace_id=trace_id, event="plan_step_start", data={"step_id": step.id, "description": step.description})
         _ev("plan_step_start", {"step_id": step.id, "idx": step_cursor + 1, "total": len(plan.steps)})
-
+        # 执行步骤的多轮迭代
         for iteration in range(loop.cfg.orchestrator.max_step_tool_calls):
+            # 执行单步迭代
             control_signal, iter_did_modify, iter_did_use_tool = execute_single_step_iteration(
                 loop,
                 step,
@@ -422,13 +570,14 @@ def execute_plan_steps(
 
             if control_signal in ("STEP_DONE", "REPLAN"):
                 break
-
+        # 处理步骤状态
         if step.status == "done":
             step_cursor += 1
             continue
 
         if step.status in ("failed", "in_progress"):
             step.status = "failed"
+            # 处理重规划
             new_plan, replans_used = handle_replanning(loop, step, plan, replans_used, trace_id, tool_used, _ev, _llm_chat, _set_state)
             if new_plan is None:
                 return None, tool_used, did_modify_code

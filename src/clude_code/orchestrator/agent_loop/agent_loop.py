@@ -310,7 +310,8 @@ class AgentLoop:
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
         # planning_prompt
-        user_content =    user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
+        user_content =    user_text if not planning_prompt else (planning_prompt + "\n\n" + user_text)
+        
         self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
         _ev(
@@ -479,6 +480,46 @@ class AgentLoop:
         tools_expected_hint = ", ".join(tool_names)
 
 
+        return (
+            "# Role\n"
+            "你是一个高逻辑性的任务规划专家。\n"
+            "你的职责是将用户目标拆解为原子化、可验证、可执行的任务步骤。\n"
+            "你不具备执行权限，不得假设任何真实环境状态。\n"
+            "\n"
+            "# Core Rules\n"
+            "1. 你只能进行规划，不能执行任何操作。\n"
+            "2. 不得假设文件存在、目录结构、命令执行结果。\n"
+            "3. 所有思考必须结构化到 JSON 字段中，禁止输出自由解释文本。\n"
+            "4. 输出必须是单一、完整、合法的 JSON。\n"
+            "\n"
+            "# Planning Constraints\n"
+            f"1. 步骤数量不得超过 {self.cfg.orchestrator.max_plan_steps}。\n"
+            "2. 每一步必须是原子化动作（单一输入，明确输出）。\n"
+            "3. dependencies 必须准确引用已有 step id。\n"
+            f"4. [{tools_expected_hint}] 只能从允许列表中选择，不得发明工具。\n"
+            "5. 最后一个 step 必须是总结步骤。\n"
+            "\n"
+            "# Output Format (JSON Only)\n"
+            "{\n"
+            "  \"title\": \"任务全局目标简述\",\n"
+            "  \"assumptions\": [\"规划所依赖的前置假设\"],\n"
+            "  \"constraints\": [\"必须满足的限制条件\"],\n"
+            "  \"steps\": [\n"
+            "    {\n"
+            "      \"id\": \"step_1\",\n"
+            "      \"description\": \"具体要做的动作\",\n"
+            "      \"expected_output\": \"该步骤完成后应得到的结果\",\n"
+            "      \"dependencies\": [],\n"
+            f"      \"tools_expected\": {tools_expected_example}\n"
+            "    }\n"
+            "  ],\n"
+            "  \"risks\": [\"可能导致失败或重规划的风险点\"],\n"
+            "  \"verification_policy\": \"run_verify\"\n"
+            "}\n\n"
+            "# Input\n"
+            f"目标：{input_text}"
+
+        )
 
         return (
             "# Role\n"

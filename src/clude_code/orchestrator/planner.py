@@ -193,35 +193,35 @@ def _validate_dependencies_exist(plan: Plan) -> None:
     if missing:
         raise ValueError(f"存在不存在的依赖 step_id: {missing}")
 
+"""
+对 Plan 应用 PlanPatch（计划补丁），返回新计划和元数据。
 
+应用顺序：
+1. 删除步骤（remove_steps）：禁止删除 done 步骤
+2. 更新步骤（update_steps）：禁止更新 done 步骤
+3. 新增步骤（add_steps）：强制设为 pending，超限截断
+4. 校验：唯一 ID + 依赖存在
+
+Args:
+    plan: 原始计划
+    patch: 计划补丁
+    max_plan_steps: 最大步骤数限制
+    
+Returns:
+    tuple: (new_plan, meta)
+    - new_plan: 应用补丁后的新计划
+    - meta: 元数据 {"added": int, "updated": int, "removed": int, "truncated_add": bool}
+    
+Raises:
+    ValueError: 违反约束时抛出（删除/更新 done 步骤、依赖不存在等）
+"""
 def apply_plan_patch(
     plan: Plan,
     patch: PlanPatch,
     *,
     max_plan_steps: int,
 ) -> tuple[Plan, dict[str, Any]]:
-    """
-    对 Plan 应用 PlanPatch（计划补丁），返回新计划和元数据。
-    
-    应用顺序：
-    1. 删除步骤（remove_steps）：禁止删除 done 步骤
-    2. 更新步骤（update_steps）：禁止更新 done 步骤
-    3. 新增步骤（add_steps）：强制设为 pending，超限截断
-    4. 校验：唯一 ID + 依赖存在
-    
-    Args:
-        plan: 原始计划
-        patch: 计划补丁
-        max_plan_steps: 最大步骤数限制
-        
-    Returns:
-        tuple: (new_plan, meta)
-        - new_plan: 应用补丁后的新计划
-        - meta: 元数据 {"added": int, "updated": int, "removed": int, "truncated_add": bool}
-        
-    Raises:
-        ValueError: 违反约束时抛出（删除/更新 done 步骤、依赖不存在等）
-    """
+
     if max_plan_steps <= 0:
         raise ValueError("max_plan_steps 必须为正整数")
 

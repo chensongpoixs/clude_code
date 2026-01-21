@@ -22,17 +22,17 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-
+"""LSP 服务器配置。"""
 class LSPServerConfig(BaseModel):
-    """LSP 服务器配置。"""
+    
     language: str = Field(..., description="语言标识（python/typescript/go/rust）")
     command: List[str] = Field(..., description="启动命令（如 ['pylsp'] 或 ['typescript-language-server', '--stdio']）")
     root_uri: Optional[str] = Field(None, description="工作区根目录 URI")
     initialization_options: Dict[str, Any] = Field(default_factory=dict, description="初始化选项")
 
-
+"""LSP 能力枚举。"""
 class LSPCapability(str, Enum):
-    """LSP 能力枚举。"""
+    
     GO_TO_DEFINITION = "textDocument/definition"
     FIND_REFERENCES = "textDocument/references"
     HOVER = "textDocument/hover"
@@ -42,10 +42,9 @@ class LSPCapability(str, Enum):
     RENAME = "textDocument/rename"
     DIAGNOSTICS = "textDocument/publishDiagnostics"
 
-
+"""LSP 位置信息。"""
 @dataclass
 class LSPLocation:
-    """LSP 位置信息。"""
     uri: str
     start_line: int
     start_char: int
@@ -83,23 +82,24 @@ class LSPDiagnostic:
     code: Optional[str] = None
 
 
+"""
+通用 LSP 客户端。
+
+支持的操作：
+- go_to_definition: 跳转到定义
+- find_references: 查找引用
+- get_document_symbols: 获取文档符号
+- get_workspace_symbols: 搜索工作区符号
+- get_hover: 获取悬停信息
+- get_diagnostics: 获取诊断信息
+
+业界最佳实践：
+- 使用 stdio 通信（最稳定）
+- 异步消息处理（防阻塞）
+- 超时保护（防止服务器卡死）
+"""
 class LSPClient:
-    """
-    通用 LSP 客户端。
-    
-    支持的操作：
-    - go_to_definition: 跳转到定义
-    - find_references: 查找引用
-    - get_document_symbols: 获取文档符号
-    - get_workspace_symbols: 搜索工作区符号
-    - get_hover: 获取悬停信息
-    - get_diagnostics: 获取诊断信息
-    
-    业界最佳实践：
-    - 使用 stdio 通信（最稳定）
-    - 异步消息处理（防阻塞）
-    - 超时保护（防止服务器卡死）
-    """
+
     
     # 常用语言服务器命令映射
     DEFAULT_SERVERS: Dict[str, List[str]] = {
@@ -147,9 +147,9 @@ class LSPClient:
         self._process.stdin.write(header.encode("utf-8"))
         self._process.stdin.write(content.encode("utf-8"))
         self._process.stdin.flush()
-    
+    """读取一条 LSP 消息。"""
     def _read_message(self) -> Dict[str, Any] | None:
-        """读取一条 LSP 消息。"""
+        
         if self._process is None or self._process.stdout is None:
             return None
         
@@ -238,18 +238,18 @@ class LSPClient:
             raise RuntimeError(f"LSP error [{error.get('code')}]: {error.get('message')}")
         
         return response.get("result")
-    
+    """发送通知（无需响应）。"""
     def _notify(self, method: str, params: Dict[str, Any]) -> None:
-        """发送通知（无需响应）。"""
+        
         message = {
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         }
         self._send(message)
-    
+    """启动 LSP 服务器。"""
     def start(self) -> bool:
-        """启动 LSP 服务器。"""
+        
         if not self.command:
             return False
         
@@ -299,9 +299,9 @@ class LSPClient:
         except Exception:
             self.stop()
             return False
-    
+    """停止 LSP 服务器。"""
     def stop(self) -> None:
-        """停止 LSP 服务器。"""
+        
         if self._process is not None:
             try:
                 self._request("shutdown", {})
@@ -312,18 +312,19 @@ class LSPClient:
                 self._process.terminate()
                 self._process = None
                 self._initialized = False
-    
+
+    """检查服务器是否就绪。"""
     def is_ready(self) -> bool:
-        """检查服务器是否就绪。"""
+        
         return self._initialized and self._process is not None and self._process.poll() is None
-    
+    """将文件路径转换为 URI。"""
     def _uri_for_path(self, path: str) -> str:
-        """将文件路径转换为 URI。"""
+        
         p = (self.workspace_root / path).resolve()
         return p.as_uri()
-    
+    """通知服务器打开文档。"""
     def open_document(self, path: str, text: str, language_id: str | None = None) -> None:
-        """通知服务器打开文档。"""
+        
         self._notify("textDocument/didOpen", {
             "textDocument": {
                 "uri": self._uri_for_path(path),
@@ -332,9 +333,9 @@ class LSPClient:
                 "text": text,
             }
         })
-    
+    """通知服务器关闭文档。"""
     def close_document(self, path: str) -> None:
-        """通知服务器关闭文档。"""
+        
         self._notify("textDocument/didClose", {
             "textDocument": {"uri": self._uri_for_path(path)}
         })
@@ -383,9 +384,11 @@ class LSPClient:
             )
             for loc in result if loc
         ]
-    
+    """
+    获取文档中的所有符号。
+    """
     def get_document_symbols(self, path: str) -> List[LSPSymbol]:
-        """获取文档中的所有符号。"""
+        
         result = self._request("textDocument/documentSymbol", {
             "textDocument": {"uri": self._uri_for_path(path)},
         })
@@ -484,16 +487,16 @@ class LSPClient:
         uri = self._uri_for_path(path)
         return self._diagnostics.get(uri, [])
 
+"""
+LSP 服务器管理器。
 
+负责：
+- 根据文件类型自动选择/启动 LSP 服务器
+- 管理多个语言服务器的生命周期
+- 提供统一的符号查询接口
+"""
 class LSPManager:
-    """
-    LSP 服务器管理器。
-    
-    负责：
-    - 根据文件类型自动选择/启动 LSP 服务器
-    - 管理多个语言服务器的生命周期
-    - 提供统一的符号查询接口
-    """
+
     
     # 文件扩展名到语言的映射
     EXTENSION_MAP: Dict[str, str] = {

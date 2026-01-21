@@ -54,11 +54,13 @@ class LLMConfig(BaseModel):
     # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
-   # model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
+    #model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
     #model: str = Field(default="gemma-3-1b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
     #model: str = Field(default="gemma-3-4b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
     #model: str = Field(default="gemma-3-4b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
     model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
+   # model: str = Field(default="gpt-oss-20b-mxfp4")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="Qwen3-8B-Q4_K_M")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-4b-it-qat-GGUF")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     # max_tokens 是“单次输出上限”，不同后端可支持更大范围；这里不强行限制到 8k，
