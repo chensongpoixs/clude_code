@@ -104,8 +104,8 @@ class LocalTools:
     def ask_question(self, question: str, options: list[str] | None = None, multiple: bool = False, header: str | None = None) -> ToolResult:
         return _ask_question_impl(question=question, options=options, multiple=multiple, header=header)
 
-    def fetch_web_content(self, url: str, format: str = "markdown", timeout: int = 30) -> ToolResult:
-        return _fetch_web_content_impl(url=url, format=format, timeout=timeout)
+    def fetch_web_content(self, url: str, format: str = "markdown", timeout: int = 30, use_cache: bool = True, force_refresh: bool = False) -> ToolResult:
+        return _fetch_web_content_impl(url=url, format=format, timeout=timeout, workspace_root=str(self.workspace_root), use_cache=use_cache, force_refresh=force_refresh)
 
     def websearch(self, query: str, num_results: int = 8, livecrawl: str = "fallback", search_type: str = "auto", context_max_chars: int = 10000) -> ToolResult:
         return _websearch_impl(query=query, num_results=num_results, livecrawl=livecrawl, search_type=search_type, context_max_chars=context_max_chars)

@@ -747,36 +747,48 @@ def _spec_question() -> ToolSpec:
 
 
 def _h_webfetch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    """处理器：webfetch（获取网页内容）。"""
+    """处理器：webfetch（获取网页内容，支持本地 Markdown 缓存）。"""
     url = args.get("url", "")
     format = args.get("format", "markdown")
     timeout = args.get("timeout", 30)
+    use_cache = args.get("use_cache", True)
+    force_refresh = args.get("force_refresh", False)
 
-    return loop.tools.fetch_web_content(url=url, format=format, timeout=timeout)
+    return loop.tools.fetch_web_content(
+        url=url,
+        format=format,
+        timeout=timeout,
+        use_cache=use_cache,
+        force_refresh=force_refresh,
+    )
 
 
 def _spec_webfetch() -> ToolSpec:
-    """ToolSpec：webfetch（获取网页内容）。"""
+    """ToolSpec：webfetch（获取网页内容，支持本地 Markdown 缓存）。"""
     return ToolSpec(
         name="webfetch",
-        summary="抓取网页内容（支持 markdown/text/html）。",
+        summary="抓取网页内容并缓存为 Markdown（支持 7 天本地缓存）。",
         description=(
-            "用于把指定 URL 的网页内容抓取为可读文本（Web Fetch）。\n"
+            "用于把指定 URL 的网页内容抓取为 Markdown 格式（Web Fetch）。\n"
+            "- 特性：自动缓存到 .clude/markdown/ 目录，文件名以文档标题命名。\n"
+            "- 缓存有效期 7 天，优先返回本地缓存，无缓存则抓取。\n"
             "- 适合：抓官网文档/博客/FAQ，然后结合内容回答或写代码。\n"
             "- 注意：只支持 http/https；内容会按配置的 max_content_length 截断。\n"
-            "- 提示：如果只是需要“找资料”，先用 websearch 再 webfetch 关键页面。"
+            "- 提示：如果只是需要【找资料】，先用 websearch 再 webfetch 关键页面。\n"
+            "- force_refresh=true 可强制忽略缓存重新抓取。"
         ),
         args_schema=_obj_schema(
             properties={
-                "url": {"type": "string", "description": "要获取的URL"},
-                # "format": {"type": "string", "enum": ["markdown", "text", "html"], "default": "markdown", "description": "返回格式"},
-                "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown", "description": "返回格式"},
-                "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"}
+                "url": {"type": "string", "description": "要获取的 URL"},
+                "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown", "description": "返回格式（markdown 或纯文本）"},
+                "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"},
+                "use_cache": {"type": "boolean", "default": True, "description": "是否使用本地缓存（推荐 true）"},
+                "force_refresh": {"type": "boolean", "default": False, "description": "是否强制刷新（忽略缓存重新抓取）"},
             },
             required=["url"],
         ),
-        example_args={"url": "https://httpx.readthedocs.io/en/latest/", "format": "markdown", "timeout": 30},
-        side_effects={"network"},  # 网络访问
+        example_args={"url": "https://httpx.readthedocs.io/en/latest/", "format": "markdown", "timeout": 30, "use_cache": True},
+        side_effects={"network", "write"},  # 网络访问 + 写缓存文件
         external_bins_required=set(),
         external_bins_optional={"curl", "wget"},  # 可选的外部工具
         visible_in_prompt=True,

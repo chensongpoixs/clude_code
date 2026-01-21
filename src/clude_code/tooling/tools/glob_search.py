@@ -11,9 +11,6 @@ from ...config.tools_config import get_directory_config
 _logger = get_tool_logger(__name__)
 
 
-_NOISE_DIRS = {".git", ".clude", "node_modules", ".venv", "dist", "build"}
-
-
 def glob_file_search(*, workspace_root: Path, glob_pattern: str, target_directory: str = ".") -> ToolResult:
     """
     按名称模式查找文件（支持 `**/*.py` 递归）。
@@ -32,10 +29,11 @@ def glob_file_search(*, workspace_root: Path, glob_pattern: str, target_director
 
     matches: list[str] = []
     try:
+        ignore_dirs = set([str(x) for x in (getattr(config, "ignore_dirs", []) or [])])
         for p in root.glob(glob_pattern):
             if not p.is_file():
                 continue
-            if any(part in p.parts for part in _NOISE_DIRS):
+            if ignore_dirs and any(part in p.parts for part in ignore_dirs):
                 continue
             rel = str(p.resolve().relative_to(workspace_root.resolve()))
             matches.append(rel)

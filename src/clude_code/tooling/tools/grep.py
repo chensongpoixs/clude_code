@@ -34,18 +34,33 @@ from ...config.tools_config import get_search_config
 # 工具模块 logger（延迟初始化）
 _logger = get_tool_logger(__name__)
 
+def _get_lang_exts(cfg: Any) -> dict[str, list[str]]:
+    """从配置获取 language->extensions 映射（并做最小兜底）。"""
+    m = getattr(cfg, "grep_language_extensions", None)
+    if isinstance(m, dict) and m:
+        return {str(k): [str(x) for x in (v or [])] for k, v in m.items() if k}
+    return {
+        "c": [".c", ".h"],
+        "cpp": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh"],
+        "java": [".java"],
+        "python": [".py"],
+        "js": [".js", ".jsx", ".ts", ".tsx"],
+        "go": [".go"],
+        "rust": [".rs"],
+    }
 
-LANG_EXTENSIONS = {
-    "c": [".c", ".h"],
-    "cpp": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh"],
-    "java": [".java"],
-    "python": [".py"],
-    "js": [".js", ".jsx", ".ts", ".tsx"],
-    "go": [".go"],
-    "rust": [".rs"]
-}
 
-_NOISE_DIRS = {".git", ".clude", "node_modules", ".venv", "dist", "build"}
+def _get_ignore_dirs(cfg: Any) -> set[str]:
+    xs = getattr(cfg, "grep_ignore_dirs", []) or []
+    return set([str(x) for x in xs if x])
+
+
+def _get_python_max_file_bytes(cfg: Any) -> int:
+    try:
+        v = int(getattr(cfg, "grep_python_max_file_bytes", 2_000_000) or 0)
+    except Exception:
+        v = 2_000_000
+    return max(0, v)
 
 """
 优先使用 ripgrep（rg）以获得更稳定性能和结构化输出；无 rg 时回退到 Python 扫描。
@@ -74,14 +89,14 @@ def grep(*, workspace_root: Path, pattern: str, path: str = ".", language: str =
     _logger.debug(f"[Grep] 开始搜索: pattern={pattern}, path={path}, language={language}, include_glob={include_glob}, ignore_case={ignore_case}, max_hits={max_hits}")
     if shutil.which("rg"):
         _logger.debug("[Grep] 使用 ripgrep (rg)")
-        tr = _rg_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
+        tr = _rg_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits, cfg=config)
         if tr.ok:
             _logger.info(f"[Grep] ripgrep 搜索成功: 找到 {len(tr.payload.get('matches', [])) if tr.payload else 0} 个匹配")
             return tr
         _logger.warning("[Grep] ripgrep 搜索失败，回退到 Python 扫描")
     else:
         _logger.debug("[Grep] ripgrep 不可用，使用 Python 扫描")
-    return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
+    return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits, cfg=config)
 
 
 def old_rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
@@ -205,7 +220,8 @@ def _rg_grep(
     language: str,
     include_glob: str | None,
     ignore_case: bool,
-    max_hits: int
+    max_hits: int,
+    cfg: Any,
 ) -> "ToolResult":
 
     root = resolve_in_workspace(workspace_root, path)
@@ -213,14 +229,18 @@ def _rg_grep(
         return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
 
     # 获取语言后缀
-    target_exts = set(LANG_EXTENSIONS.get(language, [])) if language != "all" else None
+    lang_map = _get_lang_exts(cfg)
+    target_exts = set(lang_map.get(language, [])) if language != "all" else None
 
     # 构建 rg 参数
     args = ["rg", "--json"]
     if ignore_case:
         args.append("-i")
-    # 默认忽略噪音目录
-    args.extend(["-g", "!.clude/*", "-g", "!.git/*", "-g", "!node_modules/*", "-g", "!.venv/*"])
+    # 默认忽略噪音目录（来自配置）
+    ignore_dirs = sorted(_get_ignore_dirs(cfg))
+    for d in ignore_dirs:
+        # rg glob：!dir/* （保持与历史行为一致）
+        args.extend(["-g", f"!{d}/*"])
 
     # 语言后缀匹配
     if target_exts:
@@ -287,7 +307,7 @@ def _rg_grep(
 
     return ToolResult(True, payload={"pattern": pattern, "engine": "rg", "hits": hits, "truncated": truncated})
 
-def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
+def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int, cfg: Any) -> ToolResult:
     root = resolve_in_workspace(workspace_root, path)
     if not root.exists():
         return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
@@ -297,20 +317,23 @@ def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str
     except re.error as e:
         return ToolResult(False, error={"code": "E_INVALID_REGEX", "message": str(e)})
 
-    target_exts = set(LANG_EXTENSIONS.get(language, [])) if language != "all" else None
+    lang_map = _get_lang_exts(cfg)
+    target_exts = set(lang_map.get(language, [])) if language != "all" else None
+    ignore_dirs = _get_ignore_dirs(cfg)
+    max_bytes = _get_python_max_file_bytes(cfg)
 
     hits: list[dict[str, Any]] = []
     for fp in root.rglob("*"):
         if fp.is_dir():
             continue
-        if any(part in fp.parts for part in _NOISE_DIRS):
+        if ignore_dirs and any(part in fp.parts for part in ignore_dirs):
             continue
         if target_exts is not None and fp.suffix.lower() not in target_exts:
             continue
         if include_glob and not fnmatch.fnmatch(fp.name, include_glob):
             continue
         try:
-            if fp.stat().st_size > 2_000_000:
+            if max_bytes > 0 and fp.stat().st_size > max_bytes:
                 continue
             content = fp.read_text(encoding="utf-8", errors="ignore")
         except OSError:

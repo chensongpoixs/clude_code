@@ -49,6 +49,18 @@ class WeatherToolConfig(BaseModel):
         default=True,
         description="是否将天气模块的日志写入文件。默认 True，写入 .clude/logs/app.log。"
     )
+    base_url: str = Field(
+        default="https://api.openweathermap.org/data/2.5",
+        description="OpenWeatherMap API Base URL（默认 https://api.openweathermap.org/data/2.5）。"
+    )
+    geo_url: str = Field(
+        default="https://api.openweathermap.org/geo/1.0",
+        description="OpenWeatherMap Geo API Base URL（默认 https://api.openweathermap.org/geo/1.0）。"
+    )
+    api_key_env_name: str = Field(
+        default="OPENWEATHERMAP_API_KEY",
+        description="天气 API Key 的环境变量名（默认 OPENWEATHERMAP_API_KEY）。"
+    )
 
 
 class FileToolConfig(BaseModel):
@@ -66,6 +78,10 @@ class DirectoryToolConfig(BaseModel):
     log_to_file: bool = Field(
         default=True,
         description="是否将目录操作日志写入文件。默认 True，写入 .clude/logs/app.log。"
+    )
+    ignore_dirs: list[str] = Field(
+        default_factory=lambda: [".git", ".clude", "node_modules", ".venv", "dist", "build"],
+        description="目录/文件遍历时默认忽略的目录名（降低噪音与提升性能）。"
     )
 
 
@@ -146,6 +162,29 @@ class SearchToolConfig(BaseModel):
         default=True,
         description="是否将搜索日志写入文件。默认 True，写入 .clude/logs/app.log。"
     )
+    # grep（本地代码搜索）配置：目录过滤、语言后缀映射、Python 扫描文件上限
+    grep_ignore_dirs: list[str] = Field(
+        default_factory=lambda: [".git", ".clude", "node_modules", ".venv", "dist", "build"],
+        description="grep 搜索时默认忽略的目录名（降低噪音与提升性能）。"
+    )
+    grep_language_extensions: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "c": [".c", ".h"],
+            "cpp": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh"],
+            "java": [".java"],
+            "python": [".py"],
+            "js": [".js", ".jsx", ".ts", ".tsx"],
+            "go": [".go"],
+            "rust": [".rs"],
+        },
+        description="grep 的 language->扩展名映射（用于 language 过滤：如 cpp/python）。",
+    )
+    grep_python_max_file_bytes: int = Field(
+        default=2_000_000,
+        ge=0,
+        le=100_000_000,
+        description="当缺少 rg 时，Python 扫描单文件最大字节数（0=不限制）。默认 2,000,000（约 2MB）。"
+    )
 
 
 class WebToolConfig(BaseModel):
@@ -158,7 +197,7 @@ class WebToolConfig(BaseModel):
         description="网络请求超时时间（秒）。"
     )
     max_content_length: int = Field(
-        default=50000,
+        default=1000000,
         ge=1000,
         le=1000000,
         description="最大内容长度（字符）。"
@@ -166,6 +205,47 @@ class WebToolConfig(BaseModel):
     log_to_file: bool = Field(
         default=True,
         description="是否将网络工具日志写入文件。默认 True，写入 .clude/logs/app.log。"
+    )
+    # webfetch 缓存配置
+    cache_enabled: bool = Field(
+        default=True,
+        description="是否启用 webfetch 本地 Markdown 缓存。"
+    )
+    cache_dir: str = Field(
+        default=".clude/markdown",
+        description="webfetch 缓存目录（相对于 workspace_root）。"
+    )
+    cache_expiry_days: int = Field(
+        default=7,
+        ge=1,
+        le=365,
+        description="缓存有效期（天）。默认 7 天。"
+    )
+    cache_max_filename_length: int = Field(
+        default=100,
+        ge=16,
+        le=255,
+        description="webfetch 缓存文件名最大长度（不含扩展名）。默认 100。"
+    )
+    cache_index_enabled: bool = Field(
+        default=True,
+        description="是否启用 webfetch 缓存索引文件（加速命中）。"
+    )
+    cache_index_filename: str = Field(
+        default=".cache_index",
+        description="webfetch 缓存索引文件名（位于 cache_dir 内）。"
+    )
+    cache_scan_prefix_bytes: int = Field(
+        default=2000,
+        ge=256,
+        le=20000,
+        description="遍历缓存目录时每个文件最多读取的前缀字节数（用于解析 YAML 头部）。"
+    )
+    cache_max_collision_attempts: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="缓存落盘时处理文件名冲突的最大尝试次数。超过则放弃写缓存。"
     )
 
 
@@ -297,6 +377,9 @@ def set_tool_configs(cfg: Any) -> None:
             timeout_s=getattr(cfg.weather, "timeout_s", 10),
             cache_ttl_s=getattr(cfg.weather, "cache_ttl_s", 300),
             log_to_file=getattr(cfg.weather, "log_to_file", True),
+            base_url=getattr(cfg.weather, "base_url", "https://api.openweathermap.org/data/2.5"),
+            geo_url=getattr(cfg.weather, "geo_url", "https://api.openweathermap.org/geo/1.0"),
+            api_key_env_name=getattr(cfg.weather, "api_key_env_name", "OPENWEATHERMAP_API_KEY"),
         ),
         # 文件工具配置
         file=FileToolConfig(
@@ -307,6 +390,7 @@ def set_tool_configs(cfg: Any) -> None:
         directory=DirectoryToolConfig(
             enabled=getattr(cfg.directory, "enabled", True),
             log_to_file=getattr(cfg.directory, "log_to_file", True),
+            ignore_dirs=getattr(cfg.directory, "ignore_dirs", [".git", ".clude", "node_modules", ".venv", "dist", "build"]),
         ),
         # 命令工具配置
         command=CommandToolConfig(
@@ -331,6 +415,9 @@ def set_tool_configs(cfg: Any) -> None:
             timeout_s=getattr(cfg.search, "timeout_s", 30),
             max_results=getattr(cfg.search, "max_results", 1000),
             log_to_file=getattr(cfg.search, "log_to_file", True),
+            grep_ignore_dirs=getattr(cfg.search, "grep_ignore_dirs", [".git", ".clude", "node_modules", ".venv", "dist", "build"]),
+            grep_language_extensions=getattr(cfg.search, "grep_language_extensions", SearchToolConfig().grep_language_extensions),
+            grep_python_max_file_bytes=getattr(cfg.search, "grep_python_max_file_bytes", 2_000_000),
         ),
         # 网络工具配置
         web=WebToolConfig(
@@ -338,6 +425,14 @@ def set_tool_configs(cfg: Any) -> None:
             timeout_s=getattr(cfg.web, "timeout_s", 30),
             max_content_length=getattr(cfg.web, "max_content_length", 50000),
             log_to_file=getattr(cfg.web, "log_to_file", True),
+            cache_enabled=getattr(cfg.web, "cache_enabled", True),
+            cache_dir=getattr(cfg.web, "cache_dir", ".clude/markdown"),
+            cache_expiry_days=getattr(cfg.web, "cache_expiry_days", 7),
+            cache_max_filename_length=getattr(cfg.web, "cache_max_filename_length", 100),
+            cache_index_enabled=getattr(cfg.web, "cache_index_enabled", True),
+            cache_index_filename=getattr(cfg.web, "cache_index_filename", ".cache_index"),
+            cache_scan_prefix_bytes=getattr(cfg.web, "cache_scan_prefix_bytes", 2000),
+            cache_max_collision_attempts=getattr(cfg.web, "cache_max_collision_attempts", 100),
         ),
         # 补丁工具配置
         patch=PatchToolConfig(

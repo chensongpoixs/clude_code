@@ -277,10 +277,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
         content = str(payload.get("content") or "")
         summary["summary"] = {
             "url": payload.get("url"),
+            "title": payload.get("title"),
             "format": payload.get("format"),
             "status_code": payload.get("status_code"),
             "content_length": payload.get("content_length"),
             "truncated": bool(payload.get("truncated", False)),
+            "from_cache": bool(payload.get("from_cache", False)),
+            "cache_file": payload.get("cache_file") if payload.get("from_cache") else None,
+            "expires_at": payload.get("expires_at"),
             "content_preview": content[:MAX_WEBFETCH_PREVIEW_CHARS],
         }
         return summary

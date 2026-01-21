@@ -43,8 +43,6 @@ LEVEL_EMOJI = {
     "progress": "🔄",
 }
 
-MAX_CONTENT_LENGTH = 10000  # 最大内容长度
-
 
 def display(
     loop: "AgentLoop",
@@ -102,10 +100,16 @@ def display(
     
     # 3. 截断超长内容
     truncated = False
-    if len(content) > MAX_CONTENT_LENGTH:
-        content = content[:MAX_CONTENT_LENGTH] + "\n... (内容已截断)"
+    try:
+        max_len = int(getattr(config, "max_content_length", 10000) or 10000)
+    except Exception:
+        max_len = 10000
+    if max_len < 100:
+        max_len = 100
+    if len(content) > max_len:
+        content = content[:max_len] + "\n... (内容已截断)"
         truncated = True
-        _logger.warning(f"[Display] 内容过长，已截断: {len(content)} -> {MAX_CONTENT_LENGTH}")
+        _logger.warning(f"[Display] 内容过长，已截断: {len(content)} -> {max_len}")
     
     # 4. 构造显示数据
     # 说明：

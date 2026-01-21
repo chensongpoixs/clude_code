@@ -118,6 +118,15 @@ web:
   timeout_s: 30                         # 网络请求超时时间（秒）
   max_content_length: 50000             # 最大内容长度（字符）
   log_to_file: true                     # 是否将网络工具日志写入文件
+  # webfetch 缓存：优先读本地缓存（命中则不再网络抓取），默认保存为 Markdown
+  cache_enabled: true                   # 是否启用本地 Markdown 缓存
+  cache_dir: ".clude/markdown"          # 缓存目录（相对 workspace_root；也支持绝对路径）
+  cache_expiry_days: 7                  # 缓存有效期（天）
+  cache_max_filename_length: 100        # 文件名最大长度（不含扩展名）
+  cache_index_enabled: true             # 是否启用缓存索引（加速命中）
+  cache_index_filename: ".cache_index"  # 缓存索引文件名（位于 cache_dir 内）
+  cache_scan_prefix_bytes: 2000         # 遍历缓存目录时每个文件读取前缀字节数（解析 YAML 头部）
+  cache_max_collision_attempts: 100     # 文件名冲突最大尝试次数（超过则放弃写缓存）
 
 # 补丁工具配置（patching）
 patch:

@@ -124,15 +124,25 @@ class WeatherData:
 ⏰ 更新时间: {update_time}"""
 
 
-# OpenWeatherMap API 配置
-OPENWEATHERMAP_BASE_URL = "https://api.openweathermap.org/data/2.5"
-OPENWEATHERMAP_GEO_URL = "https://api.openweathermap.org/geo/1.0"
-
-# 环境变量名（用于无配置文件时的备用方案）
-ENV_API_KEY = "OPENWEATHERMAP_API_KEY"
-
 # 全局配置缓存（由 AgentLoop 初始化时注入）
 _config_cache: dict[str, Any] = {}
+
+
+def _get_base_url() -> str:
+    """获取 OpenWeatherMap API Base URL（可配置）。"""
+    u = str(_config_cache.get("base_url") or "https://api.openweathermap.org/data/2.5").strip()
+    return u.rstrip("/")
+
+
+def _get_geo_url() -> str:
+    """获取 OpenWeatherMap Geo API Base URL（可配置）。"""
+    u = str(_config_cache.get("geo_url") or "https://api.openweathermap.org/geo/1.0").strip()
+    return u.rstrip("/")
+
+
+def _get_api_key_env_name() -> str:
+    """获取 API Key 环境变量名（可配置）。"""
+    return str(_config_cache.get("api_key_env_name") or "OPENWEATHERMAP_API_KEY").strip() or "OPENWEATHERMAP_API_KEY"
 
 
 def _get_logger() -> logging.Logger:
@@ -184,6 +194,9 @@ def set_weather_config(cfg: Any) -> None:
         "enabled": weather_cfg.enabled,
         "cache_ttl_s": weather_cfg.cache_ttl_s,
         "log_to_file": weather_cfg.log_to_file,
+        "base_url": weather_cfg.base_url,
+        "geo_url": weather_cfg.geo_url,
+        "api_key_env_name": weather_cfg.api_key_env_name,
     }
     
     _logger.debug(f"[Weather] 开始加载天气配置, 配置类型: {type(cfg).__name__}")
@@ -208,9 +221,10 @@ def _get_api_key() -> str | None:
     2. 配置文件 (.clude/.clude.yaml 中的 weather.api_key)
     """
     # 优先使用环境变量
-    env_key = os.environ.get(ENV_API_KEY)
+    env_name = _get_api_key_env_name()
+    env_key = os.environ.get(env_name)
     if env_key:
-        _get_logger().debug(f"[Weather] API Key 来源: 环境变量 {ENV_API_KEY}")
+        _get_logger().debug(f"[Weather] API Key 来源: 环境变量 {env_name}")
         return env_key
     
     # 其次使用配置文件
@@ -346,7 +360,7 @@ def get_weather(
     # API Key 检查
     api_key = _get_api_key()
     if not api_key:
-        _get_logger().error(f"[Weather] API Key 未配置，请设置环境变量 {ENV_API_KEY} 或配置文件")
+        _get_logger().error(f"[Weather] API Key 未配置，请设置环境变量 {_get_api_key_env_name()} 或配置文件")
         return ToolResult(
             ok=False,
             error={
@@ -355,7 +369,7 @@ def get_weather(
                     "OpenWeatherMap API Key 未配置。获取方法：\n"
                     "1. 访问 https://openweathermap.org/api 注册并获取免费 API Key。\n"
                     "2. 配置方式（选其一）：\n"
-                    "   - 命令行设置环境变量：export OPENWEATHERMAP_API_KEY='你的KEY' (Linux/macOS) 或 set OPENWEATHERMAP_API_KEY='你的KEY' (Windows)\n"
+                    f"   - 命令行设置环境变量：export {_get_api_key_env_name()}='你的KEY' (Linux/macOS) 或 set {_get_api_key_env_name()}='你的KEY' (Windows)\n"
                     "   - 在 .clude/.clude.yaml 中添加：\n"
                     "     weather:\n"
                     "       api_key: \"你的KEY\"\n"
@@ -436,7 +450,7 @@ def get_weather(
             _get_logger().debug(f"[Weather] 使用直接坐标: ({lat}, {lon})")
         
         # 请求天气数据
-        url = f"{OPENWEATHERMAP_BASE_URL}/weather"
+        url = f"{_get_base_url()}/weather"
         start_time = time.time()
         _get_logger().info(f"[Weather] 发起 API 请求: {url}")
         _get_logger().info(f"[Weather] 请求参数: lat={params['lat']}, lon={params['lon']}, units={units}, lang={lang}")
@@ -590,7 +604,7 @@ def _geocode_city(city: str, api_key: str, timeout: int = 10) -> dict[str, Any]:
         {"ok": True, "lat": float, "lon": float, "name": str, "country": str}
         或 {"ok": False, "error": {...}}
     """
-    url = f"{OPENWEATHERMAP_GEO_URL}/direct"
+    url = f"{_get_geo_url()}/direct"
     params = {
         "q": city,
         "limit": 1,
@@ -735,7 +749,7 @@ def get_weather_forecast(
             ok=False,
             error={
                 "code": "E_CONFIG_MISSING",
-                "message": f"OpenWeatherMap API Key 未配置。请设置环境变量 {ENV_API_KEY}。",
+                "message": f"OpenWeatherMap API Key 未配置。请设置环境变量 {_get_api_key_env_name()}。",
             },
         )
     
@@ -777,7 +791,7 @@ def get_weather_forecast(
             params["lon"] = lon
         
 
-        url = f"{OPENWEATHERMAP_BASE_URL}/forecast"
+        url = f"{_get_base_url()}/forecast"
         start_time = time.time()
         _get_logger().debug(f"[Forecast] 发起 API 请求: {url}")
         
