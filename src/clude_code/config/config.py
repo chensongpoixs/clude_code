@@ -54,12 +54,17 @@ class LLMConfig(BaseModel):
     # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="ggml-org/gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-12b-it-GGUF"
-    model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
-    #model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
+   # model: str = Field(default="gemma-3-12b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="ggml-org/gemma-3-4b-it-qat-GGUF"
+    #model: str = Field(default="gemma-3-1b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
+    #model: str = Field(default="gemma-3-4b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
+    #model: str = Field(default="gemma-3-4b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
+    model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-4b-it-qat-GGUF")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     # max_tokens 是“单次输出上限”，不同后端可支持更大范围；这里不强行限制到 8k，
     # 避免用户在 .clude/.clude.yaml 中配置更大值时直接触发校验失败。
+    # REM  context 128K = 131072
+    # REM  context 32K  == 32768
     max_tokens: int = Field(
         default=409600,
         ge=1,

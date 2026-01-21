@@ -309,7 +309,8 @@ class AgentLoop:
         # 2) 记录用户输入（必要时把规划提示并入同一条 user 消息，避免 role 不交替）
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
-        user_content = planning_prompt  # user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
+        # planning_prompt
+        user_content =    user_text if not planning_prompt else (user_text + "\n\n" + planning_prompt)
         self.logger.info(f"[bold cyan]user input LLM [/bold cyan] user_content={user_content}");
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
         _ev(
