@@ -65,9 +65,9 @@ def execute_planning_phase(
                 "plan_generated",
                 {
                     "title": plan.title,
-                    "steps": len(plan.steps),
-                    "steps_preview": steps_preview,
-                    "steps_preview_truncated": len(plan.steps) > len(steps_preview),
+                    "steps_count": len(plan.steps),
+                    "steps": [s.model_dump() for s in plan.steps],
+                    "verification_policy": plan.verification_policy,
                 },
             )
             loop.logger.info("[green]✓ 计划生成成功[/green]")

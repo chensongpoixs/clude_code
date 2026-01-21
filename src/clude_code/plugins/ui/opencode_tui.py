@@ -128,6 +128,12 @@ def run_opencode_tui(
             self._llm_round: int = 0
             self._last_trace_id: str | None = None
             self._last_user_text: str | None = None
+            self._plan_title: str | None = None
+            self._plan_steps: list[dict[str, Any]] = []
+            self._intent_cat: str | None = None
+            self._intent_conf: float | None = None
+            self._keywords: list[str] = []
+            self._verification_policy: str | None = None
             # 本轮是否使用过工具：用于对齐 clude chat 的“无工具调用”收尾提示
             self._turn_tool_used: bool = False
             # 本轮最终回复是否已在“对话/输出”打印（避免 final_text + assistant_text 双触发导致重复输出）
@@ -1013,7 +1019,66 @@ def run_opencode_tui(
                 llm_t.add_row("LLM", f"messages={self._last_llm_messages}")
             ops.write(llm_t)
 
-            ops.write(Text(""))
+            # 新增：计划与任务摘要区域
+            if self._plan_title or self._intent_cat or self._keywords:
+                task_t = Table(show_header=False, box=None, pad_edge=False)
+                task_t.add_column(style="bold", width=10)
+                task_t.add_column()
+                
+                if self._plan_title:
+                    task_t.add_row("计划标题", self._plan_title)
+                if self._intent_cat:
+                    conf_str = f", 置信度: {self._intent_conf:.2f}" if self._intent_conf is not None else ""
+                    task_t.add_row("任务分类", f"{self._intent_cat}{conf_str}")
+                if self._keywords:
+                    task_t.add_row("分词", f"{{ {', '.join(self._keywords)} }}")
+                
+                ops.write(task_t)
+                ops.write(Text(""))
+
+            # 新增：步骤列表（实时状态）
+            if self._plan_steps:
+                for s in self._plan_steps:
+                    sid = s.get("id", "-")
+                    desc = s.get("description", "")
+                    status = s.get("status", "pending")
+                    deps = ", ".join(s.get("dependencies", [])) or "-"
+                    tools = ", ".join(s.get("tools_expected", [])) or "-"
+                    
+                    # 状态图标
+                    mark = "[ ]"
+                    style = "white"
+                    if status == "done":
+                        mark = "[x]"
+                        style = "green"
+                    elif status == "failed":
+                        mark = "[!]"
+                        style = "red"
+                    elif status == "in_progress":
+                        mark = "[>]"
+                        style = "yellow"
+                    elif status == "blocked":
+                        mark = "[#]"
+                        style = "dim"
+                    
+                    # 标识当前执行中的步骤
+                    is_current = (str(self._last_step) == sid)
+                    cur_mark = "⮕ " if is_current else "  "
+                    
+                    line = Text()
+                    line.append(cur_mark, style="bold cyan")
+                    line.append(f"{mark} ", style=style)
+                    line.append(f"{sid}  ", style="bold")
+                    line.append(desc, style="dim" if status == "done" else "white")
+                    line.append(f" (deps: {deps}; tools: {tools})", style="dim")
+                    
+                    ops.write(line)
+                
+                if self._verification_policy:
+                    ops.write(Text(""))
+                    ops.write(Text(f"验证策略: {self._verification_policy}", style="bold magenta"))
+                
+                ops.write(Text(""))
 
             # LLM 请求历史（多条）
             if self._llm_requests:
@@ -1176,6 +1241,11 @@ def run_opencode_tui(
                 elif et == "intent_classified":
                     cat = data.get("category")
                     conf = data.get("confidence")
+                    # 类型安全：确保 conf 是 float 或 None
+                    try:
+                        self._intent_conf = float(conf) if conf is not None else None
+                    except (ValueError, TypeError):
+                        self._intent_conf = None
                     # category 可能是 {value: "..."} 或字符串
                     if isinstance(cat, dict) and "value" in cat:
                         cat = cat.get("value")
@@ -1188,16 +1258,19 @@ def run_opencode_tui(
                     # 兜底：把 "IntentCategory.X" 变成 "X"
                     if isinstance(cat, str) and cat.startswith("IntentCategory."):
                         cat = cat.split(".", 1)[-1]
-                    self._push_chat_log(f"🎯 意图: {cat} (置信度: {conf})", style="dim blue")
-                elif et == "planning_skipped":
-                    self._push_chat_log("检测到能力询问或通用对话，跳过显式规划阶段。", style="dim")
-                elif et == "planning_llm_request":
-                    attempt = data.get("attempt", 1)
-                    self._push_chat_log(f"📋 进入规划阶段（attempt={attempt}）...", style="bold yellow")
+                    self._intent_cat = str(cat)
+                    # 使用类型安全的置信度值显示
+                    conf_display = f"{self._intent_conf:.2f}" if self._intent_conf is not None else "N/A"
+                    self._push_chat_log(f"🎯 意图: {cat} (置信度: {conf_display})", style="dim blue")
+                elif et == "keywords_extracted":
+                    self._keywords = data.get("keywords") or []
                 elif et == "plan_generated":
-                    title = str(data.get("title") or "").strip()
-                    steps = data.get("steps", 0)
-                    preview = data.get("steps_preview") or []
+                    self._plan_title = str(data.get("title") or "").strip()
+                    self._plan_steps = data.get("steps") or []
+                    self._verification_policy = data.get("verification_policy")
+                    title = self._plan_title
+                    steps = data.get("steps_count", len(self._plan_steps))
+                    preview = [f"{s.get('id')}: {s.get('description')}" for s in self._plan_steps]
                     self._push_chat_log(f"✓ 计划已生成: {title}（{steps} 步）", style="bold green")
                     # 显示步骤预览（最多 5 个）
                     for i, p in enumerate(preview[:5], 1):
@@ -1275,6 +1348,9 @@ def run_opencode_tui(
                     summary = self._format_tool_result_summary(tool, ok, data)
                     self._push_chat_log(f"{icon} 工具执行{'成功' if ok else '失败'}: {tool} [结果] {summary}", style=style)
                 elif et == "plan_patch_applied":
+                    self._plan_steps = data.get("steps") or self._plan_steps
+                    self._plan_title = data.get("title") or self._plan_title
+                    self._verification_policy = data.get("verification_policy") or self._verification_policy
                     meta = data.get("meta") or {}
                     if isinstance(meta, dict):
                         a = meta.get("added", 0)
@@ -1283,6 +1359,13 @@ def run_opencode_tui(
                         t = meta.get("truncated_add")
                         extra = "（新增被截断）" if t else ""
                         self._push_chat_log(f"✓ 已应用计划补丁: added={a} updated={u} removed={r}{extra}", style="bold green")
+                elif et == "plan_step_status_changed":
+                    sid = data.get("step_id")
+                    status = data.get("status")
+                    for s in self._plan_steps:
+                        if s.get("id") == sid:
+                            s["status"] = status
+                            break
                 elif et == "final_text":
                     if self._turn_final_printed:
                         return

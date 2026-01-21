@@ -251,18 +251,16 @@ class AgentLoop:
         
         流程图: 见 `agent_loop_run_turn_flow.svg`
         """
-        # P0-1: Trace ID 必须跨进程稳定且全局唯一；Python 的 hash() 会受随机种子影响
+        # 阶段 C: Trace ID 必须跨进程稳定且全局唯一
         trace_id = f"trace_{uuid.uuid4().hex}"
         self.logger.info(f"[bold cyan]开始新的一轮对话[/bold cyan] trace_id={trace_id}")
         self.logger.info(f"[dim]用户输入: {user_text[:100]}{'...' if len(user_text) > 100 else ''}[/dim]")
 
         # 阶段 C: 清空本轮修改追踪
         self._turn_modified_paths.clear()
-        # LLM 请求/返回日志：本轮只打印“本轮新增 user + 本次返回”，不输出历史轮次
-        # 说明：llm_io.py 会用这个 cursor 计算“本次请求新增消息”的切片范围
+        # LLM 请求/返回日志：本轮只打印"本轮新增 user + 本次返回"，不输出历史轮次
+        # 说明：llm_io.py 会用这个 cursor 计算"本次请求新增消息"的切片范围
         self._llm_log_cursor = len(self.messages)
-
-        keywords = self._extract_keywords(user_text)
 
         events: list[dict[str, Any]] = []
         step_idx = 0
@@ -281,8 +279,13 @@ class AgentLoop:
                 except Exception as ex:
                     self.file_only_logger.warning(f"on_event 回调异常: {ex}", exc_info=True)
 
-        # 让 live UI/TUI 能展示“默认 chat 日志”的开场行
+        # 让 live UI/TUI 能展示"默认 chat 日志"的开场行
         _ev("turn_start", {"trace_id": trace_id})
+
+        # 提取关键词并上报（用于 UI 显示"分词"）—— 必须在 _ev 定义之后调用
+        keywords = self._extract_keywords(user_text)
+        _ev("keywords_extracted", {"keywords": list(keywords)})
+
 
         # 设置运行时上下文，供 display 工具使用
         self._current_ev = _ev

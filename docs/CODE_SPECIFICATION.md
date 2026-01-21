@@ -122,6 +122,18 @@
 | **统一日志** | 工具日志必须走统一 helper（如 `tooling/logger_helper.py`），并遵循全局日志配置与工具 `log_to_file`。 |
 | **错误反馈** | 工具错误必须提供可操作信息；敏感信息禁止出现在日志明文。 |
 
+### 3.4 提示词中心化管理（Prompt Management）
+
+> **核心原则**：所有发送给 LLM 的长篇提示词（System Prompt、Planning Prompt、Step Prompt 等）必须外置到 `src/clude_code/prompts/` 目录，严禁在逻辑代码中硬编码长字符串。
+
+| 规范项 | 说明 |
+|--------|------|
+| **目录结构** | 提示词存放于 `src/clude_code/prompts/`，按功能分子目录（如 `agent_loop/`、`classifier/`）。 |
+| **加载约定** | 使用 `from clude_code.prompts import read_prompt, render_prompt` 加载。 |
+| **文件格式** | 纯文本使用 `.md` 或 `.txt`；带变量模板使用 `.j2`（即便不依赖 jinja2 也要保持扩展名一致性）。 |
+| **禁止硬编码** | 超过 3 行的 LLM 提示词禁止出现在 `.py` 逻辑文件中。 |
+| **解耦** | 逻辑代码只负责准备变量（Vars），不负责提示词的遣词造句。 |
+
 #### 3.3.1 搜索资料（WebSearch）工具：Open-WebSearch MCP 与 Serper（强制）
 
 > **目标**：支持两个“搜索资料来源”（Search Provider），可通过配置选择；默认优先使用 **Open-WebSearch MCP**，失败自动回退 **Serper**。

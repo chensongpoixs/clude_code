@@ -32,6 +32,7 @@ def check_step_dependencies(
     if unmet_deps:
         loop.logger.warning(f"[yellow]⚠ 步骤 {step.id} 有未满足的依赖: {unmet_deps}，跳过并标记为 blocked[/yellow]")
         step.status = "blocked"
+        _ev("plan_step_status_changed", {"step_id": step.id, "status": "blocked", "reason": f"unmet_deps: {unmet_deps}"})
         loop.audit.write(trace_id=trace_id, event="plan_step_blocked", data={"step_id": step.id, "unmet_deps": unmet_deps})
         _ev("plan_step_blocked", {"step_id": step.id, "unmet_deps": unmet_deps})
     return unmet_deps
@@ -90,6 +91,11 @@ def execute_single_step_iteration(
         f"[bold yellow]→ 执行步骤 {step_cursor + 1}/{len(plan.steps)}: {step.id}（轮次 {iteration + 1}/{loop.cfg.orchestrator.max_step_tool_calls}）[/bold yellow] "
         f"[描述] {step.description} [建议工具] {tools_hint}"
     )
+    # 上报步骤开始事件
+    if iteration == 0:
+        _ev("plan_step_start", {"step_id": step.id, "idx": step_cursor + 1, "total": len(plan.steps)})
+        _ev("plan_step_status_changed", {"step_id": step.id, "status": "in_progress"})
+
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
     step_prompt = render_prompt(
         "agent_loop/execute_step_prompt.j2",
@@ -116,6 +122,7 @@ def execute_single_step_iteration(
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "done"
+        _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
         loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
         _ev("plan_step_done", {"step_id": step.id})
         loop.logger.info(f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description}")
@@ -126,6 +133,7 @@ def execute_single_step_iteration(
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
         step.status = "failed"
+        _ev("plan_step_status_changed", {"step_id": step.id, "status": "failed"})
         loop.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
         _ev("plan_step_replan_requested", {"step_id": step.id})
         loop.logger.warning(f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description}")
@@ -262,7 +270,15 @@ def handle_replanning(
             )
             _ev(
                 "plan_patch_applied",
-                {"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used, "steps": len(new_plan.steps)},
+                {
+                    "step_id": step.id,
+                    "meta": meta,
+                    "reason": patch.reason,
+                    "replans_used": replans_used,
+                    "steps": [s.model_dump() for s in new_plan.steps],
+                    "title": new_plan.title,
+                    "verification_policy": new_plan.verification_policy,
+                },
             )
             loop.file_only_logger.info("计划补丁已应用:\n" + render_plan_markdown(new_plan))
             return new_plan, replans_used

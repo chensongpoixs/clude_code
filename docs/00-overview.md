@@ -72,6 +72,8 @@
 > 汇集全仓深度技术分析与决策记录，方便架构师与开发者查阅。
 
 ### 5.1 架构与决策
+*   **[项目进度与业界对齐报告 (NEW)](./PROJECT_STATUS.md)**: 当前版本功能完成度与业界主流 Code Agent (Claude Code, Aider) 的横向对比。
+*   **[工业级代码工程规范](./CODE_SPECIFICATION.md)**: 强制执行的开发准则、注释模板、配置管理与**提示词外置**约定。
 *   **[Agent 决策链路审计与评分 (P0)](./17-agent-decision-audit.md)**: 深度架构审计，包含 Trace ID/控制协议/重规划的优缺点分析。
 *   **[业界 Code Agent 技术白皮书](./technical-reports/industry-whitepaper.md)**: 包含详细的原理图、流程图和最佳路径分析。
 *   **[健壮性复盘报告](./technical-reports/robustness-review.md)**: 系统稳定性分析与关键修复点。
