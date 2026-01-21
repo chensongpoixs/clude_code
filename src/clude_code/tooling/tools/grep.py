@@ -84,9 +84,10 @@ def grep(*, workspace_root: Path, pattern: str, path: str = ".", language: str =
     return _python_grep(workspace_root=workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
 
 
-def _rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
+def old_rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
     root = resolve_in_workspace(workspace_root, path)
     if not root.exists():
+        _logger.warning(f"[Grep] 搜索路径不存在: {root}");
         return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
 
  
@@ -163,11 +164,13 @@ def _rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, in
             shell=False,
         )
     except Exception as e:
+        _logger.error(f"[Grep] rg 执行失败: {e}", exc_info=True);
         return ToolResult(False, error={"code": "E_RG_EXEC", "message": str(e)})
 
     # rg: returncode=1 表示没匹配，视为 ok
     if cp.returncode not in (0, 1):
-        return ToolResult(False, error={"code": "E_RG", "message": "rg failed", "details": {"stderr": (cp.stderr or "")[:2000]}})
+        _logger.error(f"[Grep] rg 执行失败: returncode={cp.returncode}, stderr={cp.stderr}");
+        return ToolResult(False, error={"code": "E_RG", "message": "rg failed", "details": {"stderr": (cp.stderr or "")}})
 
     hits: list[dict[str, Any]] = []
     for line in (cp.stdout or "").splitlines():
@@ -181,7 +184,7 @@ def _rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, in
         p = (((data.get("path") or {}).get("text")) if isinstance(data.get("path"), dict) else None) or ""
         ln = data.get("line_number") if "line_number" in data else None
         lines = (data.get("lines") or {}).get("text") if isinstance(data.get("lines"), dict) else ""
-        hits.append({"path": p, "line": ln, "preview": str(lines)[:300]})
+        hits.append({"path": p, "line": ln, "preview": str(lines)})
 
     truncated = False
     if len(hits) > max_hits:
@@ -190,6 +193,99 @@ def _rg_grep(*, workspace_root: Path, pattern: str, path: str, language: str, in
 
     return ToolResult(True, payload={"pattern": pattern, "engine": "rg", "hits": hits, "truncated": truncated})
 
+
+
+
+
+def _rg_grep(
+    *,
+    workspace_root: Path,
+    pattern: str,
+    path: str,
+    language: str,
+    include_glob: str | None,
+    ignore_case: bool,
+    max_hits: int
+) -> "ToolResult":
+
+    root = resolve_in_workspace(workspace_root, path)
+    if not root.exists():
+        return ToolResult(False, error={"code": "E_NOT_FOUND", "message": f"path not found: {path}"})
+
+    # 获取语言后缀
+    target_exts = set(LANG_EXTENSIONS.get(language, [])) if language != "all" else None
+
+    # 构建 rg 参数
+    args = ["rg", "--json"]
+    if ignore_case:
+        args.append("-i")
+    # 默认忽略噪音目录
+    args.extend(["-g", "!.clude/*", "-g", "!.git/*", "-g", "!node_modules/*", "-g", "!.venv/*"])
+
+    # 语言后缀匹配
+    if target_exts:
+        for ext in target_exts:
+            args.extend(["-g", f"*{ext}"])
+
+    # 额外 include_glob
+    if include_glob:
+        args.extend(["-g", include_glob])
+
+    # 搜索模式和路径
+    args.append(pattern)
+    args.append(str(root))
+
+    try:
+        cp = subprocess.Popen(
+            args,
+            cwd=str(workspace_root.resolve()),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=False,
+        )
+    except Exception as e:
+        return ToolResult(False, error={"code": "E_RG_EXEC", "message": str(e)})
+
+    hits: list[dict[str, Any]] = []
+    truncated = False
+
+    # 实时读取 stdout，严格遵守 max_hits
+    if cp.stdout:
+        for line in cp.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("type") != "match":
+                continue
+
+            data = obj.get("data") or {}
+            p = (((data.get("path") or {}).get("text")) if isinstance(data.get("path"), dict) else "") or ""
+            ln = data.get("line_number")
+            lines = (data.get("lines") or {}).get("text") if isinstance(data.get("lines"), dict) else ""
+            hits.append({"path": p, "line": ln, "preview": (lines or "")})
+
+            if len(hits) >= max_hits:
+                truncated = True
+                cp.terminate()
+                break
+
+    # 等待进程结束，获取 stderr
+    _, stderr = cp.communicate()
+    if cp.returncode not in (0, 1):
+        return ToolResult(False, error={
+            "code": "E_RG",
+            "message": "rg failed",
+            "details": {"stderr": (stderr or "")}
+        })
+
+    return ToolResult(True, payload={"pattern": pattern, "engine": "rg", "hits": hits, "truncated": truncated})
 
 def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str, include_glob: str | None, ignore_case: bool, max_hits: int) -> ToolResult:
     root = resolve_in_workspace(workspace_root, path)
@@ -222,7 +318,7 @@ def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str
         for i, line in enumerate(content.splitlines(), start=1):
             if rx.search(line):
                 rel = str(fp.resolve().relative_to(workspace_root.resolve()))
-                hits.append({"path": rel, "line": i, "preview": line[:300]})
+                hits.append({"path": rel, "line": i, "preview": line})
                 if len(hits) >= max_hits:
                     return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": True})
 

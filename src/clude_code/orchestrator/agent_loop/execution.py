@@ -220,7 +220,10 @@ def handle_replanning(
     replan_prompt = render_prompt(
         "agent_loop/replan_prompt.j2",
         max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
-        step=step,
+        step_id=step.id,
+        step_description=step.description,
+        step_status=step.status,
+        step_dependencies=step.dependencies,
         cur_plan_md=cur_plan_md,
     ).strip()
 
