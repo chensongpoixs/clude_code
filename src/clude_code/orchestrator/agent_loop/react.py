@@ -79,6 +79,14 @@ def execute_react_fallback_loop(
 
         name = tool_call["tool"]
         args = tool_call["args"]
+        if name == "none" or name.lower() == "no_tool":
+            loop.logger.error(f"[red]✗ 未知工具调用: {name}，跳过并继续下一轮[/red]")
+            loop.file_only_logger.error(f"未知工具调用 [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]")
+            _ev("unknown_tool", {"tool": name, "args": args})
+            clean_assistant = json.dumps(tool_call, ensure_ascii=False) 
+            loop.messages.append(ChatMessage(role="assistant", content=clean_assistant)) 
+            loop._trim_history(max_messages=30)
+            return AgentTurn(assistant_text=f"工具调用失败：未知工具 {name}，请使用其他可用工具。", tool_used=tool_used, trace_id=trace_id, events=events)
         args_summary = loop._format_args_summary(name, args)
         loop.logger.info(f"[bold blue]🔧 解析到工具调用: {name}[/bold blue] [轮次] {iteration + 1}/20 [参数] {args_summary}")
         loop.file_only_logger.info(f"工具调用详情 [iteration={iteration + 1}] [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]")

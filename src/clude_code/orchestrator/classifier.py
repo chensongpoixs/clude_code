@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-
+from clude_code.prompts import render_prompt as _render_prompt
 
 # class UserIntent:
 #     # 核心功能类
@@ -47,12 +47,13 @@ class IntentClassifier:
     规范化：这是决策门（Decision Gate）的前置步骤。
     """
     
-    from clude_code.prompts import read_prompt as _read_prompt
-    CLASSIFY_PROMPT = _read_prompt("classifier/intent_classify_prompt.txt")
+    
+   
 
     def __init__(self, llm_client: Any, file_only_logger: Any = None):
         self.llm = llm_client
         self.file_only_logger = file_only_logger
+        # self.CLASSIFY_PROMPT = _read_prompt("classifier/intent_classify_prompt.j2")
 
     @staticmethod
     def _escape_for_format(s: str) -> str:
@@ -90,8 +91,11 @@ class IntentClassifier:
         from clude_code.llm.llama_cpp_http import ChatMessage
         try:
             # 转义用户输入中的花括号，避免 format() 解析错误
-            safe_user_text = self._escape_for_format(user_text)
-            prompt = self.CLASSIFY_PROMPT.format(user_text=safe_user_text)
+            # safe_user_text = self._escape_for_format(user_text)
+            prompt = _render_prompt(
+                                "classifier/intent_classify_prompt.j2", 
+                                user_text=user_text,
+                                ) #$self.CLASSIFY_PROMPT.format(user_text=safe_user_text)
             if self.file_only_logger:   
                 self.file_only_logger.info("====>意图分类器输入 Prompt: %s", prompt)
 
