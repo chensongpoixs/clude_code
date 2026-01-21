@@ -26,7 +26,7 @@ from __future__ import annotations
 """
 
 import json
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -63,6 +63,7 @@ class Plan(BaseModel):
         verification_policy: 验证策略（如 run_pytest / npm_test）
     """
 
+    type: Literal["FullPlan"] = Field(default="FullPlan", description="输出类型标识：FullPlan")
     title: str = Field(..., description="任务全局目标")
     steps: List[PlanStep] = Field(..., min_length=1, description="步骤列表")
     verification_policy: Optional[str] = Field(
@@ -133,6 +134,7 @@ class PlanPatch(BaseModel):
 
     model_config = {"extra": "forbid"}  # 禁止额外字段，防止误解析 full Plan
 
+    type: Literal["PlanPatch"] = Field(default="PlanPatch", description="输出类型标识：PlanPatch")
     title: Optional[str] = Field(default=None, description="可选：更新计划标题")
     remove_steps: List[str] = Field(default_factory=list, description="要删除的 step_id 列表（禁止删除 done）")
     update_steps: List[PlanStepUpdate] = Field(default_factory=list, description="要更新的步骤列表（禁止更新 done）")
@@ -227,6 +229,19 @@ def apply_plan_patch(
 
     new_plan = plan.model_copy(deep=True)
     meta: dict[str, Any] = {"added": 0, "updated": 0, "removed": 0, "truncated_add": False}
+
+    # P0-3: 防御性校验——避免出现“同一步骤既删除又更新/新增”的冲突补丁
+    rm_ids = set([str(x).strip() for x in (patch.remove_steps or []) if str(x).strip()])
+    up_ids = set([str(u.id).strip() for u in (patch.update_steps or []) if str(getattr(u, "id", "")).strip()])
+    add_ids = set([str(s.id).strip() for s in (patch.add_steps or []) if str(getattr(s, "id", "")).strip()])
+    conflict_rm_up = sorted(list(rm_ids & up_ids))
+    conflict_rm_add = sorted(list(rm_ids & add_ids))
+    conflict_up_add = sorted(list(up_ids & add_ids))
+    if conflict_rm_up or conflict_rm_add or conflict_up_add:
+        raise ValueError(
+            "PlanPatch 内部冲突：同一步骤不能同时出现在 remove_steps/update_steps/add_steps 中。"
+            f" rm∩update={conflict_rm_up} rm∩add={conflict_rm_add} update∩add={conflict_up_add}"
+        )
 
     if patch.title is not None and str(patch.title).strip():
         new_plan.title = str(patch.title).strip()

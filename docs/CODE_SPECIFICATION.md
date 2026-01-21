@@ -134,6 +134,38 @@
 | **禁止硬编码** | 超过 3 行的 LLM 提示词禁止出现在 `.py` 逻辑文件中。 |
 | **解耦** | 逻辑代码只负责准备变量（Vars），不负责提示词的遣词造句。 |
 
+#### 3.4.1 提示词管理检查清单（Prompt Checklist，每次改动必查）
+
+> **强制要求**：每次新增/修改涉及 LLM 交互的代码时，必须检查以下事项：
+
+| 检查项 | 通过标准 |
+|--------|----------|
+| **新增提示词是否外置** | 新增的任何 LLM 提示词（包括重试提示、纠错提示、反馈模板等）必须创建对应的 `.md` 或 `.j2` 文件到 `prompts/` 目录。 |
+| **硬编码检查** | 代码中不得出现超过 3 行的字符串字面量用于 LLM 交互（含拼接的多行字符串）。 |
+| **变量传递** | 提示词中的动态内容（如 `error_message`、`step_id`）必须通过 `render_prompt()` 的关键字参数传入，不得在 `.py` 中拼接。 |
+| **命名规范** | 提示词文件命名必须体现用途（如 `plan_patch_retry.j2`、`invalid_step_output_retry.md`），不得使用 `prompt1.md` 等无意义命名。 |
+| **目录归属** | 提示词文件必须放到对应功能子目录（`agent_loop/`、`classifier/`、`tools/` 等），不得直接放在 `prompts/` 根目录。 |
+
+#### 3.4.2 现有提示词文件清单（参考）
+
+```
+src/clude_code/prompts/
+├── __init__.py              # 导出 read_prompt, render_prompt
+├── loader.py                # 加载逻辑
+├── README.md                # 目录说明
+├── agent_loop/
+│   ├── system_base.md                 # Agent 基础系统提示词
+│   ├── local_agent_runtime_system.md  # 本地运行时系统提示词
+│   ├── planning_prompt.j2             # 规划阶段提示词模板
+│   ├── execute_step_prompt.j2         # 步骤执行提示词模板
+│   ├── replan_prompt.j2               # 重规划提示词模板
+│   ├── plan_patch_retry.j2            # PlanPatch 纠错重试提示词
+│   ├── plan_parse_retry.md            # Plan 解析重试提示词
+│   └── invalid_step_output_retry.md   # 无效步骤输出重试提示词
+└── classifier/
+    └── intent_classify_prompt.txt     # 意图分类提示词
+```
+
 #### 3.3.1 搜索资料（WebSearch）工具：Open-WebSearch MCP 与 Serper（强制）
 
 > **目标**：支持两个“搜索资料来源”（Search Provider），可通过配置选择；默认优先使用 **Open-WebSearch MCP**，失败自动回退 **Serper**。

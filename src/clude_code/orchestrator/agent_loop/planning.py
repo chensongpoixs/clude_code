@@ -64,6 +64,7 @@ def execute_planning_phase(
             _ev(
                 "plan_generated",
                 {
+                    "type": "FullPlan",  # 初始规划类型
                     "title": plan.title,
                     "steps_count": len(plan.steps),
                     "steps": [s.model_dump() for s in plan.steps],

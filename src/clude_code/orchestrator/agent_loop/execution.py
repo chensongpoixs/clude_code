@@ -235,69 +235,102 @@ def handle_replanning(
         cur_plan_md=cur_plan_md,
     ).strip()
 
-    loop.messages.append(ChatMessage(role="user", content=replan_prompt))
-    loop._trim_history(max_messages=30)
-    assistant_plan = _llm_chat("replan", step.id)
-    _ev("planning_llm_response", {"text": assistant_plan[:4000], "truncated": len(assistant_plan) > 4000})
-    loop.messages.append(ChatMessage(role="assistant", content=assistant_plan))
-    loop._trim_history(max_messages=30)
+    # 允许一次“补丁纠错重试”：常见失败原因是补丁内部冲突（例如同一步骤既 remove 又 update）
+    from clude_code.orchestrator.planner import (
+        apply_plan_patch,
+        carry_over_done_status,
+        parse_plan_from_text,
+        parse_plan_patch_from_text,
+        render_plan_markdown,
+    )
 
-    try:
-        from clude_code.orchestrator.planner import (
-            apply_plan_patch,
-            carry_over_done_status,
-            parse_plan_from_text,
-            parse_plan_patch_from_text,
-            render_plan_markdown,
+    def _apply_patch_or_raise(assistant_text: str) -> Plan:
+        # P0: 预检 type 字段——如果 LLM 明确输出 FullPlan，直接跳过 PlanPatch 解析
+        import json as _json
+        import re as _re
+        _json_match = _re.search(r'\{[\s\S]*\}', assistant_text)
+        if _json_match:
+            try:
+                _obj = _json.loads(_json_match.group())
+                if isinstance(_obj, dict) and _obj.get("type") == "FullPlan":
+                    raise ValueError("LLM 输出 type='FullPlan'，应走 full Plan 解析路径")
+            except _json.JSONDecodeError:
+                pass  # 交给后续 parse_plan_patch_from_text 处理
+        
+        patch = parse_plan_patch_from_text(assistant_text)
+        new_plan, meta = apply_plan_patch(plan, patch, max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps))
+        # 防止误判：如果补丁是"空操作"，视为无效
+        title_changed = bool((patch.title or "").strip())
+        if (meta.get("added", 0) + meta.get("updated", 0) + meta.get("removed", 0)) == 0 and not title_changed:
+            raise ValueError("PlanPatch 是空操作（无新增/更新/删除/标题更新），拒绝应用")
+        loop.audit.write(
+            trace_id=trace_id,
+            event="plan_patch_applied",
+            data={"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used},
         )
+        _ev(
+            "plan_patch_applied",
+            {
+                "type": "PlanPatch",  # 标识重规划类型
+                "step_id": step.id,
+                "meta": meta,
+                "reason": patch.reason,
+                "replans_used": replans_used,
+                "steps": [s.model_dump() for s in new_plan.steps],
+                "title": new_plan.title,
+                "verification_policy": new_plan.verification_policy,
+            },
+        )
+        loop.file_only_logger.info("计划补丁已应用:\n" + render_plan_markdown(new_plan))
+        return new_plan
 
-        # 1) 优先解析/应用 PlanPatch（P0-3）
+    last_assistant_plan: str | None = None
+    last_patch_error: Exception | None = None
+    retry_prompt: str | None = None
+
+    for attempt in range(2):  # 第 0 次正常；第 1 次补丁纠错重试
+        prompt = replan_prompt if attempt == 0 else (retry_prompt or replan_prompt)
+        loop.messages.append(ChatMessage(role="user", content=prompt))
+        loop._trim_history(max_messages=30)
+        assistant_plan = _llm_chat("replan", step.id)
+        last_assistant_plan = assistant_plan
+        _ev("planning_llm_response", {"text": assistant_plan[:4000], "truncated": len(assistant_plan) > 4000, "attempt": attempt + 1})
+        loop.messages.append(ChatMessage(role="assistant", content=assistant_plan))
+        loop._trim_history(max_messages=30)
+
         try:
-            patch = parse_plan_patch_from_text(assistant_plan)
-            new_plan, meta = apply_plan_patch(
-                plan,
-                patch,
-                max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
-            )
-            # 防止误判：如果补丁是“空操作”，视为无效，回退 full Plan
-            title_changed = bool((patch.title or "").strip())
-            if (meta.get("added", 0) + meta.get("updated", 0) + meta.get("removed", 0)) == 0 and not title_changed:
-                raise ValueError("PlanPatch 是空操作（无新增/更新/删除/标题更新），拒绝应用并回退 full Plan")
-            loop.audit.write(
-                trace_id=trace_id,
-                event="plan_patch_applied",
-                data={"step_id": step.id, "meta": meta, "reason": patch.reason, "replans_used": replans_used},
-            )
-            _ev(
-                "plan_patch_applied",
-                {
-                    "step_id": step.id,
-                    "meta": meta,
-                    "reason": patch.reason,
-                    "replans_used": replans_used,
-                    "steps": [s.model_dump() for s in new_plan.steps],
-                    "title": new_plan.title,
-                    "verification_policy": new_plan.verification_policy,
-                },
-            )
-            loop.file_only_logger.info("计划补丁已应用:\n" + render_plan_markdown(new_plan))
+            # 1) 优先尝试 PlanPatch
+            new_plan = _apply_patch_or_raise(assistant_plan)
             return new_plan, replans_used
         except Exception as e:
-            # patch 失败：回退全量 Plan（兼容迁移期）
-            loop.file_only_logger.warning(f"PlanPatch assistant_plan:{assistant_plan}, 解析/应用失败，回退 full Plan: {e}", exc_info=True)
+            last_patch_error = e
+            # 第一次失败则准备 retry prompt（从 prompts/ 目录加载）
+            retry_prompt = render_prompt(
+                "agent_loop/plan_patch_retry.j2",
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            if attempt == 0:
+                continue
 
-        # 2) 回退：解析 full Plan（旧协议）
-        new_plan = parse_plan_from_text(assistant_plan)
+    # 2) 两次 PlanPatch 都失败：才回退 full Plan（旧协议）
+    try:
+        assistant_text = last_assistant_plan or ""
+        new_plan = parse_plan_from_text(assistant_text)
         new_plan = carry_over_done_status(plan, new_plan)
         if len(new_plan.steps) > loop.cfg.orchestrator.max_plan_steps:
             new_plan.steps = new_plan.steps[: loop.cfg.orchestrator.max_plan_steps]
-        loop.audit.write(trace_id=trace_id, event="replan_generated", data={"title": new_plan.title, "steps": [s.model_dump() for s in new_plan.steps]})
-        _ev("replan_generated", {"title": new_plan.title, "steps": len(new_plan.steps), "replans_used": replans_used})
+        loop.audit.write(trace_id=trace_id, event="replan_generated", data={"type": "FullPlan", "title": new_plan.title, "steps": [s.model_dump() for s in new_plan.steps]})
+        _ev("replan_generated", {"type": "FullPlan", "title": new_plan.title, "steps": len(new_plan.steps), "replans_used": replans_used})
         loop.file_only_logger.info("重规划计划:\n" + render_plan_markdown(new_plan))
         return new_plan, replans_used
-    except Exception as e:
-        loop.logger.error(f"[red]✗ 重规划计划解析失败: {e}[/red]", exc_info=True)
-        _ev("stop_reason", {"reason": "replan_parse_failed"})
+    except Exception as e2:
+        # 若模型给的是 PlanPatch（缺少 steps），这里的报错会非常误导；统一报更明确的错误
+        loop.logger.error(
+            f"[red]✗ 重规划解析失败[/red] patch_error={last_patch_error} full_plan_error={e2}",
+            exc_info=True,
+        )
+        _ev("stop_reason", {"reason": "replan_parse_failed", "patch_error": str(last_patch_error or ""), "full_plan_error": str(e2)})
         return None, replans_used
 
 

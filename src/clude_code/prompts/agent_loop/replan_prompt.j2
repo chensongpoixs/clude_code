@@ -2,6 +2,7 @@
 
 优先输出 PlanPatch JSON（严格 JSON，不要解释，不要调用工具）：
 {
+  "type": "PlanPatch",
   "title": "可选：新标题",
   "remove_steps": ["step_x"],
   "update_steps": [{"id":"step_3","description":"...","dependencies":["step_1"],"tools_expected":["grep"]}],
@@ -27,3 +28,4 @@
  
 # 说明：
 如果你确实无法用 PlanPatch 表达（极少数情况），才允许输出完整 Plan JSON（严格 JSON）。
+此时 type 必须为 "FullPlan"。
