@@ -17,6 +17,7 @@ def select_model_interactively(cfg: CludeConfig, logger: logging.Logger) -> None
         temperature=0.0,
         max_tokens=8,
         timeout_s=cfg.llm.timeout_s,
+        api_key=cfg.llm.api_key,  # 支持 OpenAI 等需要认证的 API
     )
     
     try:

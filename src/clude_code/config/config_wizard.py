@@ -779,7 +779,7 @@ class ConfigWizard:
         
         client = openai.OpenAI(
             base_url=self.config.llm.base_url,
-            api_key=os.environ.get("OPENAI_API_KEY", "no-key")
+            api_key=os.environ.get("OPENAI_API_KEY", "sk-HWtp4KMBc3NNFt9WMOLEIKCSeMB1sEsXBZxc9TzqPdX1uUOy")
         )
         
         response = client.chat.completions.create(

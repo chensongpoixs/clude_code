@@ -50,6 +50,7 @@ class LLMConfig(BaseModel):
     provider: str = Field(default="llama_cpp_http")
     base_url: str = Field(default="http://127.0.0.1:8899")
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion
+    api_key: str = Field(default="sk-HWtp4KMBc3NNFt9WMOLEIKCSeMB1sEsXBZxc9TzqPdX1uUOy")
     # Aider（代码助手）对接 llama.cpp OpenAI 兼容接口（OpenAI Compatible API）示例：
     # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
@@ -58,7 +59,10 @@ class LLMConfig(BaseModel):
     #model: str = Field(default="gemma-3-1b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
     #model: str = Field(default="gemma-3-4b-it-f16")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
     #model: str = Field(default="gemma-3-4b-it-Q4_K_M")  # llama.cpp may ignore; keep for compatibility   $env:AIDER_MODEL="gemma-3-4b-it-qat-GGUF"
-    model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="gemma-3-27b-it-iq3_m")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="gpt-5.2")  # llama.cpp may ignore; keep for compatibility
+    model: str = Field(default="gpt-4.1-mini")  # llama.cpp may ignore; keep for compatibility
    # model: str = Field(default="gpt-oss-20b-mxfp4")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="Qwen3-8B-Q4_K_M")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-4b-it-qat-GGUF")  # llama.cpp may ignore; keep for compatibility

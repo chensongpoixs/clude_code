@@ -151,6 +151,7 @@ class AgentLoop:
             temperature=cfg.llm.temperature,
             max_tokens=cfg.llm.max_tokens,
             timeout_s=cfg.llm.timeout_s,
+            api_key=cfg.llm.api_key,  # 支持 OpenAI/Azure 等需要认证的 API
         )
         self.tools = LocalTools(
             cfg.workspace_root,

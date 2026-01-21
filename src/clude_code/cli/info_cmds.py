@@ -158,7 +158,7 @@ def run_tools_audit() -> None:
 
 
 def run_models_list(logger: logging.Logger) -> None:
-    """列出 llama.cpp 的模型列表。"""
+    """列出 LLM 服务的可用模型列表（支持 OpenAI / llama.cpp / Ollama 等）。"""
     cfg = CludeConfig()
     client = LlamaCppHttpClient(
         base_url=cfg.llm.base_url,
@@ -167,12 +167,13 @@ def run_models_list(logger: logging.Logger) -> None:
         temperature=0.0,
         max_tokens=8,
         timeout_s=cfg.llm.timeout_s,
+        api_key=cfg.llm.api_key,  # 支持 OpenAI 等需要认证的 API
     )
     ids = client.list_model_ids()
     if not ids:
-        logger.error("未获取到模型列表。")
+        logger.error("未获取到模型列表（可能是 API Key 无效或服务不支持 /v1/models 端点）。")
         raise typer.Exit(code=2)
-    logger.info("[bold]可用模型列表[/bold]")
+    logger.info(f"[bold]可用模型列表（来源: {cfg.llm.base_url}）[/bold]")
     for mid in ids:
         logger.info(f"- {mid}")
 

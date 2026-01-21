@@ -83,7 +83,7 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
         logger.error(f"workspace 写入失败: {e}", exc_info=True)
         raise typer.Exit(code=2)
 
-    # 3) 检查 Llama.cpp 连通性
+    # 3) 检查 LLM 服务连通性（支持 OpenAI / llama.cpp / Ollama 等）
     try:
         client = LlamaCppHttpClient(
             base_url=cfg.llm.base_url,
@@ -92,12 +92,14 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
             temperature=0.0,
             max_tokens=32,
             timeout_s=cfg.llm.timeout_s,
+            api_key=cfg.llm.api_key,  # 支持 OpenAI 等需要认证的 API
         )
         out = client.chat([
             ChatMessage(role="system", content="你是诊断助手，只输出 OK。"),
             ChatMessage(role="user", content="ping"),
         ]).strip()
-        logger.info(f"[green]llama.cpp 连通 OK[/green] response={out!r}")
+        provider = cfg.llm.provider or "openai_compat"
+        logger.info(f"[green]LLM 服务连通 OK ({provider})[/green] response={out!r}")
     except Exception as e:
         logger.error(f"llama.cpp 连通失败: {e}", exc_info=True)
         raise typer.Exit(code=3)

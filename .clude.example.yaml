@@ -7,14 +7,60 @@
 # 3. 默认值
 
 # LLM 配置
+# 支持多种 Provider：llama_cpp_http / openai / anthropic / ollama / azure_openai
 llm:
-  provider: llama_cpp_http
+  provider: llama_cpp_http    # 默认使用本地 llama.cpp 服务
   base_url: http://127.0.0.1:8899
-  api_mode: openai_compat
+  api_mode: openai_compat     # openai_compat（推荐）/ completion（llama.cpp 原生）
   model: gemma-3-12b-it-Q4_K_M
   temperature: 0.2
   max_tokens: 204800
   timeout_s: 120
+  api_key: ""                 # API 密钥（OpenAI/Azure 等需要认证的服务填写）
+
+# ================ OpenAI 接入示例 ================
+# llm:
+#   provider: openai
+#   base_url: https://api.openai.com/v1
+#   api_mode: openai_compat
+#   model: gpt-4o              # 可选: gpt-4o / gpt-4-turbo / gpt-3.5-turbo
+#   temperature: 0.2
+#   max_tokens: 16384
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 OPENAI_API_KEY 代替明文配置
+
+# ================ Azure OpenAI 接入示例 ================
+# llm:
+#   provider: azure_openai
+#   base_url: https://your-resource.openai.azure.com/openai/deployments/your-deployment
+#   api_mode: openai_compat
+#   model: gpt-4o              # Azure 部署名称
+#   temperature: 0.2
+#   max_tokens: 16384
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 AZURE_OPENAI_API_KEY 代替明文配置
+
+# ================ Anthropic Claude 接入示例 ================
+# llm:
+#   provider: anthropic
+#   base_url: https://api.anthropic.com/v1
+#   api_mode: openai_compat
+#   model: claude-3-5-sonnet-20241022  # 可选: claude-3-opus / claude-3-5-sonnet / claude-3-haiku
+#   temperature: 0.2
+#   max_tokens: 8192
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 ANTHROPIC_API_KEY 代替明文配置
+
+# ================ Ollama 本地接入示例 ================
+# llm:
+#   provider: ollama
+#   base_url: http://127.0.0.1:11434/v1
+#   api_mode: openai_compat
+#   model: llama3.1:8b          # ollama pull llama3.1:8b
+#   temperature: 0.2
+#   max_tokens: 8192
+#   timeout_s: 120
+#   api_key: ""                 # Ollama 本地不需要 API Key
 
 # 策略配置
 policy:

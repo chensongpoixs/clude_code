@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 import httpx
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,24 @@ class ChatMessage:
     content: str
 
 
+# 支持的 LLM Provider（供文档和类型提示）
+LLMProvider = Literal["llama_cpp_http", "openai", "anthropic", "ollama", "azure_openai"]
+
+
 class LlamaCppHttpClient:
     """
-    Minimal llama.cpp HTTP client.
+    通用 OpenAI 兼容 HTTP 客户端（Universal OpenAI-Compatible HTTP Client）。
 
-    Supports:
-    - OpenAI-compatible: POST {base_url}/v1/chat/completions
-    - Legacy completion: POST {base_url}/completion
+    支持（Supports）：
+    - llama.cpp / Ollama / vLLM 等本地 LLM（Local LLM）
+    - OpenAI API（需 api_key）
+    - Azure OpenAI（需 api_key + 特殊 base_url）
+    - Anthropic（需 api_key，通过 OpenAI 兼容层）
+    - 其他 OpenAI 兼容 API（Other OpenAI-Compatible APIs）
+
+    API 模式（API Modes）：
+    - openai_compat: POST {base_url}/v1/chat/completions（推荐）
+    - completion: POST {base_url}/completion（llama.cpp 原生）
     """
 
     def __init__(
@@ -40,6 +52,7 @@ class LlamaCppHttpClient:
         temperature: float = 0.2,
         max_tokens: int = 1024,
         timeout_s: int = 120,
+        api_key: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_mode = api_mode
@@ -47,6 +60,8 @@ class LlamaCppHttpClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout_s = timeout_s
+        # API Key 优先级：参数 > 环境变量 OPENAI_API_KEY > 空
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
 
     def chat(self, messages: list[ChatMessage]) -> str:
         if self.api_mode == "openai_compat":
@@ -55,15 +70,16 @@ class LlamaCppHttpClient:
 
     def try_get_first_model_id(self) -> str | None:
         """
-        Best-effort helper for llama.cpp OpenAI-compatible servers.
+        Best-effort helper for OpenAI-compatible servers.
 
         Many servers validate the `model` field; if you pass an unknown model id,
         `/v1/chat/completions` can return 400.
         """
         url = f"{self.base_url}/v1/models"
+        headers = self._build_headers()
         try:
             with httpx.Client(timeout=min(self.timeout_s, 10)) as client:
-                r = client.get(url)
+                r = client.get(url, headers=headers)
                 r.raise_for_status()
                 data = r.json()
         except Exception as e:
@@ -82,13 +98,17 @@ class LlamaCppHttpClient:
 
     def list_model_ids(self) -> list[str]:
         """
-        List model ids from OpenAI-compatible endpoint: GET {base_url}/v1/models
-        Returns [] if not supported/unavailable.
+        获取可用模型列表（List Available Models）。
+
+        从 OpenAI 兼容端点获取：GET {base_url}/v1/models
+        支持：OpenAI、Azure OpenAI、llama.cpp、Ollama 等。
+        返回空列表如果不支持或不可用。
         """
         url = f"{self.base_url}/v1/models"
+        headers = self._build_headers()
         try:
             with httpx.Client(timeout=min(self.timeout_s, 10)) as client:
-                r = client.get(url)
+                r = client.get(url, headers=headers)
                 r.raise_for_status()
                 data = r.json()
         except Exception as e:
@@ -107,6 +127,15 @@ class LlamaCppHttpClient:
             return []
         return out
 
+    def _build_headers(self) -> dict[str, str]:
+        """构建 HTTP 请求头（包含 API Key 认证）。"""
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
     def _chat_openai_compat(self, messages: list[ChatMessage]) -> str:
         url = f"{self.base_url}/v1/chat/completions"
         model = self.model
@@ -119,9 +148,10 @@ class LlamaCppHttpClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
+        headers = self._build_headers()
         try:
             with httpx.Client(timeout=self.timeout_s) as client:
-                r = client.post(url, json=payload)
+                r = client.post(url, json=payload, headers=headers)
                 if r.status_code >= 400:
                     logger.warning(f"llama.cpp OpenAI-compatible request failed: status={r.status_code} url={url} payload={payload} body={r.text}");
                     # Surface response body — llama.cpp often explains which field is invalid.
