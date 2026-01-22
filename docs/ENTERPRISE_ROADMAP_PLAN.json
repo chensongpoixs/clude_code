@@ -1,0 +1,121 @@
+{
+  "type": "FullPlan",
+  "title": "合并型 Agent（企业落地增强版）落地任务拆分（Roadmap Plan）",
+  "steps": [
+    {
+      "id": "step_1",
+      "description": "盘点当前企业落地相关模块的入口与调用链（project_id/registry/prompt_manager/approval/sandbox/audit_encryption），形成“代码入口索引表”写入 docs/ENTERPRISE_IMPLEMENTATION_INDEX.md。",
+      "expected_output": "生成一份入口索引文档（含关键文件路径、关键函数、调用关系），后续每个改动都能定位到落点。",
+      "dependencies": [],
+      "tools_expected": ["grep", "list_dir", "read_file", "write_file"],
+      "status": "pending"
+    },
+    {
+      "id": "step_2a",
+      "description": "CLI 层增加 --project-id 参数：修改 main.py/chat.py 等入口，增加 click option，默认值为 'default'。",
+      "expected_output": "clude chat --project-id=myproj 能正确传参到 AgentLoop；clude chat（无参）使用 project_id='default'。",
+      "dependencies": ["step_1"],
+      "tools_expected": ["grep", "read_file", "apply_patch"],
+      "status": "pending"
+    },
+    {
+      "id": "step_2b",
+      "description": "AgentLoop 增加 project_id 属性：在构造函数中接收 project_id，并在 audit/trace 事件中写入该字段。",
+      "expected_output": "audit.jsonl 和 trace 事件中均能看到 project_id 字段；单测验证事件包含正确 project_id。",
+      "dependencies": ["step_2a"],
+      "tools_expected": ["apply_patch", "read_file", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_2c",
+      "description": "存储路径隔离：修改 logger/audit/session/cache 的路径生成逻辑，支持 .clude/projects/{project_id}/... 目录结构。",
+      "expected_output": "不同 project_id 的日志/审计/会话/缓存文件物理隔离；旧数据（无 project_id）自动归入 'default' 目录（向后兼容）。",
+      "dependencies": ["step_2b"],
+      "tools_expected": ["grep", "apply_patch", "write_file", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_3",
+      "description": "抽象 ProjectPaths：新增一个统一的路径计算模块（例如 src/clude_code/core/project_paths.py），集中管理 .clude/projects/{project_id}/... 的目录结构，并替换散落的路径拼接逻辑。",
+      "expected_output": "所有与 .clude 相关的写入路径可通过 ProjectPaths 统一计算；新增单元/烟测脚本验证路径一致性。",
+      "dependencies": ["step_2c"],
+      "tools_expected": ["apply_patch", "grep", "read_file", "write_file", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_4",
+      "description": "实现 Intent Registry（YAML）MVP：定义 Pydantic Schema（ProjectConfig/IntentSpec），支持 .clude/registry/intents.yaml 加载与 mtime 热加载；提供 IntentRouter.get_intent(user_text, project_id, context)。",
+      "expected_output": "可以通过 YAML 为不同 project_id 定义 intents（mode/risk_level/prompt_ref/version/tools），并在运行时生效；无 registry 时自动回退现有 IntentClassifier。",
+      "dependencies": ["step_2c"],
+      "tools_expected": ["write_file", "apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_5",
+      "description": "实现冲突消解（Conflict Resolver）MVP：当多个 intent 匹配时，使用规则（权重/关键词命中数/最近使用）选择最优，并把选择原因写入 audit/trace。",
+      "expected_output": "在“模糊意图/多 intent 命中”场景下输出确定性选择结果，并能在审计日志中看到选择原因。",
+      "dependencies": ["step_4"],
+      "tools_expected": ["apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_6",
+      "description": "Prompt 三层继承（Base/Domain/Task）与版本体系：新增 PromptManager，支持组合渲染与语义版本（SemVer）选择；提示词元数据建议使用 YAML front matter（title/version/tools_expected/constraints）。",
+      "expected_output": "能通过 registry 指定 base/domain/task + version，并渲染为最终 prompt；支持回滚到上一稳定版本；对现有 prompts/ 完全兼容不破坏。",
+      "dependencies": ["step_4"],
+      "tools_expected": ["write_file", "apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_7",
+      "description": "把 registry + prompt_manager 接入 Orchestrator：在 planning/unified 分支组装最终 prompt（继承 + 版本），并根据 intent.tools 动态收敛 allowed_tools（工具暴露面最小化）。",
+      "expected_output": "同一 CLI 可运行多个 project_id，且每个项目根据 registry 的 prompt/tools/risk_level 实际生效；工具可用集合可被审计。",
+      "dependencies": ["step_5", "step_6"],
+      "tools_expected": ["apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_8",
+      "description": "风险等级贯穿与审批流（HITL）MVP：根据 intent.risk_level 决定是否进入 WAITING_FOR_APPROVAL；实现 ApprovalStore（文件存储）+ approve/deny CLI 命令；UI/TUI 展示待审批队列。",
+      "expected_output": "HIGH/CRITICAL 任务默认不自动执行，必须人工批准；批准/拒绝均写入 audit/trace，且 UI 可实时显示状态。",
+      "dependencies": ["step_7"],
+      "tools_expected": ["apply_patch", "write_file", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_9",
+      "description": "把 PolicyEngine/RBAC 接入 ToolLifecycle：在工具调用前做权限与路径/命令规则校验，统一输出可操作的拒绝原因；将决策写入 audit。",
+      "expected_output": "同一套工具，在不同用户/角色/项目下有不同允许范围；敏感路径/命令会被稳定拦截，并能在审计中回放。",
+      "dependencies": ["step_3", "step_8"],
+      "tools_expected": ["apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_10",
+      "description": "沙箱预演（Sandbox）MVP：对 CRITICAL 操作默认在沙箱 workspace 执行（git worktree 优先，fallback 临时复制）；验证通过后再合并回主 workspace。",
+      "expected_output": "CRITICAL 任务不会直接污染主 workspace；失败可一键丢弃沙箱；成功可合并，并记录合并前后差异摘要。",
+      "dependencies": ["step_8", "step_9"],
+      "tools_expected": ["apply_patch", "run_cmd", "write_file", "read_file", "grep"],
+      "status": "pending"
+    },
+    {
+      "id": "step_11",
+      "description": "事务回滚与恢复策略：对写操作/patch 建立“事务边界”，失败自动触发 undo_patch 或回滚策略；对 plan 级别提供回滚策略摘要与可执行动作。",
+      "expected_output": "在失败/中断时可以恢复到可工作的状态（至少保证不留半成品）；审计中记录回滚策略与执行结果。",
+      "dependencies": ["step_10"],
+      "tools_expected": ["apply_patch", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    },
+    {
+      "id": "step_12",
+      "description": "审计加密与合规导出（MVP）：为 audit.jsonl 增加可选加密层（如 AES-GCM），提供脱敏规则与导出命令（clude audit export/report），并补齐 docs 与示例配置。",
+      "expected_output": "审计可加密存储、可控导出（不泄露敏感信息）、可按 trace_id/project_id 检索；文档齐全可交付企业环境。",
+      "dependencies": ["step_9"],
+      "tools_expected": ["apply_patch", "write_file", "read_file", "grep", "run_cmd"],
+      "status": "pending"
+    }
+  ],
+  "verification_policy": "run_verify"
+}
+
+
