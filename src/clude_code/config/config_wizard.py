@@ -368,17 +368,24 @@ class ConfigWizard:
         console.print("\n[bold]配置 LLM:[/bold]")
         
         # 选择提供商
-        providers = ["llama_cpp_http", "openai", "anthropic", "ollama"]
+        providers = ["llama_cpp_http", "openai", "anthropic", "ollama", "siliconflow"]
         console.print("可用 LLM 提供商:")
         for i, provider in enumerate(providers, 1):
-            console.print(f"{i}. {provider}")
+            desc = {
+                "llama_cpp_http": "本地 llama.cpp 服务",
+                "openai": "OpenAI API",
+                "anthropic": "Anthropic Claude",
+                "ollama": "Ollama 本地服务",
+                "siliconflow": "硅基流动 SiliconFlow（国内）",
+            }.get(provider, provider)
+            console.print(f"{i}. {provider} - {desc}")
         
         while True:
-            choice = Prompt.ask("选择 LLM 提供商 (1-4)", default="1")
-            if choice in ("1", "2", "3", "4"):
+            choice = Prompt.ask("选择 LLM 提供商 (1-5)", default="1")
+            if choice in ("1", "2", "3", "4", "5"):
                 self.config.llm.provider = providers[int(choice) - 1]
                 break
-            console.print("[red]无效选择，请输入 1-4。[/red]")
+            console.print("[red]无效选择，请输入 1-5。[/red]")
         
         # 根据提供商配置不同参数
         if self.config.llm.provider == "llama_cpp_http":
@@ -389,6 +396,8 @@ class ConfigWizard:
             self._configure_anthropic()
         elif self.config.llm.provider == "ollama":
             self._configure_ollama()
+        elif self.config.llm.provider == "siliconflow":
+            self._configure_siliconflow()
         
         # 测试连接
         if Confirm.ask("测试 LLM 连接?", default=True):
@@ -486,6 +495,48 @@ class ConfigWizard:
                 self.config.llm.model = models[int(choice) - 1]
                 break
             console.print("[red]无效选择，请输入 1-4。[/red]")
+    
+    def _configure_siliconflow(self) -> None:
+        """配置硅基流动 SiliconFlow"""
+        console.print("\n[bold cyan]硅基流动 SiliconFlow 配置[/bold cyan]")
+        console.print("[dim]官网: https://siliconflow.cn  获取 API Key: https://cloud.siliconflow.cn/account/ak[/dim]")
+        
+        # API 密钥
+        api_key = Prompt.ask("SiliconFlow API 密钥", password=True)
+        os.environ["SILICONFLOW_API_KEY"] = api_key
+        self.config.llm.api_key = api_key
+        
+        # 基础 URL（固定）
+        self.config.llm.base_url = "https://api.siliconflow.cn/v1"
+        console.print(f"[dim]API Base URL: {self.config.llm.base_url}[/dim]")
+        
+        # 模型选择
+        models = [
+            ("deepseek-ai/DeepSeek-V3", "DeepSeek V3 - 推荐，性价比最高"),
+            ("deepseek-ai/DeepSeek-V2.5", "DeepSeek V2.5"),
+            ("Qwen/Qwen2.5-72B-Instruct", "通义千问 72B"),
+            ("Qwen/Qwen2.5-Coder-32B-Instruct", "通义千问 Coder 32B（代码专用）"),
+            ("THUDM/glm-4-9b-chat", "智谱 GLM-4 9B"),
+            ("meta-llama/Meta-Llama-3.1-70B-Instruct", "Llama 3.1 70B"),
+            ("01-ai/Yi-1.5-34B-Chat", "零一万物 Yi 34B"),
+        ]
+        console.print("\n可用模型:")
+        for i, (model_id, desc) in enumerate(models, 1):
+            console.print(f"{i}. {model_id}")
+            console.print(f"   [dim]{desc}[/dim]")
+        
+        while True:
+            choice = Prompt.ask(f"选择模型 (1-{len(models)})", default="1")
+            try:
+                idx = int(choice)
+                if 1 <= idx <= len(models):
+                    self.config.llm.model = models[idx - 1][0]
+                    break
+            except ValueError:
+                pass
+            console.print(f"[red]无效选择，请输入 1-{len(models)}。[/red]")
+        
+        console.print(f"[green]已选择模型: {self.config.llm.model}[/green]")
     
     def _configure_workspace(self) -> None:
         """配置工作区"""

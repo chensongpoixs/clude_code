@@ -50,7 +50,7 @@ class LLMConfig(BaseModel):
     provider: str = Field(default="llama_cpp_http")
     base_url: str = Field(default="http://127.0.0.1:8899")
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion
-    api_key: str = Field(default="sk-HWtp4KMBc3NNFt9WMOLEIKCSeMB1sEsXBZxc9TzqPdX1uUOy")
+    api_key: str = Field(default="sk-dyckqqvdemtemktluddtnefeqrepoqdoyvyjaqbwcysuidom")
     # Aider（代码助手）对接 llama.cpp OpenAI 兼容接口（OpenAI Compatible API）示例：
     # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
@@ -62,10 +62,11 @@ class LLMConfig(BaseModel):
     #model: str = Field(default="gemma-3-12b-it-GGUF")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-27b-it-iq3_m")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gpt-5.2")  # llama.cpp may ignore; keep for compatibility
-    model: str = Field(default="gpt-4.1-mini")  # llama.cpp may ignore; keep for compatibility
+    #model: str = Field(default="gpt-4.1-mini")  # llama.cpp may ignore; keep for compatibility
    # model: str = Field(default="gpt-oss-20b-mxfp4")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="Qwen3-8B-Q4_K_M")  # llama.cpp may ignore; keep for compatibility
     #model: str = Field(default="gemma-3-4b-it-qat-GGUF")  # llama.cpp may ignore; keep for compatibility
+    model: str = Field(default="deepseek-ai/DeepSeek-V3")  # llama.cpp may ignore; keep for compatibility
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     # max_tokens 是“单次输出上限”，不同后端可支持更大范围；这里不强行限制到 8k，
     # 避免用户在 .clude/.clude.yaml 中配置更大值时直接触发校验失败。

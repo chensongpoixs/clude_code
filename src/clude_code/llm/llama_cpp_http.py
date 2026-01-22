@@ -24,7 +24,7 @@ class ChatMessage:
 
 
 # 支持的 LLM Provider（供文档和类型提示）
-LLMProvider = Literal["llama_cpp_http", "openai", "anthropic", "ollama", "azure_openai"]
+LLMProvider = Literal["llama_cpp_http", "openai", "anthropic", "ollama", "azure_openai", "siliconflow"]
 
 
 class LlamaCppHttpClient:
@@ -60,8 +60,22 @@ class LlamaCppHttpClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout_s = timeout_s
-        # API Key 优先级：参数 > 环境变量 OPENAI_API_KEY > 空
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        # API Key 优先级：参数 > 环境变量（按 provider 检测）> 空
+        # 支持的环境变量：OPENAI_API_KEY / SILICONFLOW_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_API_KEY
+        self.api_key = api_key or self._detect_api_key_from_env(base_url)
+    
+    def _detect_api_key_from_env(self, base_url: str) -> str:
+        """根据 base_url 自动检测对应的 API Key 环境变量。"""
+        url_lower = base_url.lower()
+        # 按 provider 优先级检测
+        if "siliconflow" in url_lower:
+            return os.environ.get("SILICONFLOW_API_KEY", "")
+        if "anthropic" in url_lower:
+            return os.environ.get("ANTHROPIC_API_KEY", "")
+        if "azure" in url_lower:
+            return os.environ.get("AZURE_OPENAI_API_KEY", "")
+        # 默认使用 OPENAI_API_KEY（兼容大多数 OpenAI 兼容服务）
+        return os.environ.get("OPENAI_API_KEY", "")
 
     def chat(self, messages: list[ChatMessage]) -> str:
         if self.api_mode == "openai_compat":
