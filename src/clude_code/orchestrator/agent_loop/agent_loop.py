@@ -318,7 +318,7 @@ class AgentLoop:
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
         # planning_prompt：将规划提示并入同一条 user 消息（保持 role 交替 + 便于审计）
-        user_content = user_text if not planning_prompt else planning_prompt
+        user_content = user_text if planning_prompt is None else planning_prompt
 
         self.logger.info(f"[bold cyan]发送给 LLM 的 user_content[/bold cyan] len={len(user_content)}")
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
