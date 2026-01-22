@@ -13,9 +13,69 @@ import httpx
 from clude_code.tooling.types import ToolResult, ToolError
 from ..logger_helper import get_tool_logger
 from ...config.tools_config import get_search_config
+from clude_code.core.project_paths import ProjectPaths, DEFAULT_PROJECT_ID
+from pathlib import Path
+from clude_code.tooling.tools.grep import grep as _local_grep
 
 # 工具模块 logger（延迟初始化）
 _logger = get_tool_logger(__name__)
+
+_WEBSEARCH_CACHE_MEM: dict[str, dict[str, Any]] = {}
+
+def _cache_key(query: str, num_results: int) -> str:
+    return f"{query.strip()}|{int(num_results)}"
+
+def _websearch_cache_file(workspace_root: Path, project_id: str | None) -> Path:
+    pid = project_id or DEFAULT_PROJECT_ID
+    paths = ProjectPaths(str(workspace_root), pid, auto_create=True)
+    return paths.cache_dir("websearch") / "cache.json"
+
+def _read_websearch_cache(workspace_root: Path, project_id: str | None, key: str, ttl_s: int) -> dict[str, Any] | None:
+    now = time.time()
+    item = _WEBSEARCH_CACHE_MEM.get(key)
+    if isinstance(item, dict) and (now - float(item.get("ts", 0) or 0) <= ttl_s):
+        return item.get("payload")
+
+    p = _websearch_cache_file(workspace_root, project_id)
+    try:
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace") or "{}")
+        it = (data.get("items") or {}).get(key) if isinstance(data, dict) else None
+        if isinstance(it, dict) and (now - float(it.get("ts", 0) or 0) <= ttl_s):
+            payload = it.get("payload")
+            if isinstance(payload, dict):
+                _WEBSEARCH_CACHE_MEM[key] = {"ts": it.get("ts", now), "payload": payload}
+                return payload
+    except Exception:
+        return None
+    return None
+
+def _write_websearch_cache(workspace_root: Path, project_id: str | None, key: str, payload: dict[str, Any], max_items: int = 200) -> None:
+    now = time.time()
+    _WEBSEARCH_CACHE_MEM[key] = {"ts": now, "payload": payload}
+
+    p = _websearch_cache_file(workspace_root, project_id)
+    try:
+        data: dict[str, Any] = {}
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8", errors="replace") or "{}")
+            except Exception:
+                data = {}
+        items = data.get("items") if isinstance(data.get("items"), dict) else {}
+        if not isinstance(items, dict):
+            items = {}
+        items[key] = {"ts": now, "payload": payload}
+        # 简单裁剪：按 ts 排序保留最近 max_items
+        if len(items) > max_items:
+            sorted_items = sorted(items.items(), key=lambda kv: float((kv[1] or {}).get("ts", 0) or 0), reverse=True)
+            items = dict(sorted_items[:max_items])
+        data = {"version": 1, "items": items}
+        p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        # 缓存失败不影响主流程
+        return
 
 def _normalize_results(query: str, items: list[dict[str, Any]], num_results: int) -> ToolResult:
     results: list[dict[str, Any]] = []
@@ -111,6 +171,9 @@ def _websearch_via_serper(
 - 日志只写摘要，敏感信息（API Key）不得输出明文。
 """
 def websearch(
+    *,
+    workspace_root: Path,
+    project_id: str | None = None,
     query: str,
     num_results: int = 8,
     livecrawl: Literal["fallback", "preferred"] = "fallback",
@@ -127,6 +190,8 @@ def websearch(
     providers = getattr(config, "websearch_providers", None) or ["open_websearch_mcp", "serper"]
     timeout_s = int(getattr(config, "timeout_s", 30) or 30)
     last_error: dict[str, Any] | None = None
+    cache_ttl_s = 6 * 3600
+    key = _cache_key(query, num_results)
 
     for p in providers:
         try:
@@ -150,6 +215,10 @@ def websearch(
                     }
                 )
                 _logger.info(f"[WebSearch] 搜索完成: provider={p}, query={query}, 返回 {len(r.payload.get('results', []) or [])} 个结果")
+                try:
+                    _write_websearch_cache(workspace_root, project_id, key, dict(r.payload or {}))
+                except Exception:
+                    pass
                 return r
 
             last_error = r.error
@@ -159,10 +228,20 @@ def websearch(
             # 规范要求：控制台只输出可读摘要，避免 traceback 刷屏；详细堆栈交由 file-only/更高层处理。
             _logger.warning(f"[WebSearch] provider 异常，将回退: provider={p}, error={e}")
 
-    return ToolResult(ok=False, error=last_error or {"code": "WEBSEARCH_FAILED", "message": "all providers failed"})
+    # provider 全失败：回退缓存
+    cached = _read_websearch_cache(workspace_root, project_id, key, cache_ttl_s)
+    if isinstance(cached, dict) and (cached.get("results") or []):
+        cached_out = dict(cached)
+        cached_out["provider"] = "cache"
+        cached_out["cache_hit"] = True
+        return ToolResult(ok=True, payload=cached_out)
+
+    return ToolResult(ok=False, error=last_error or {"code": "WEBSEARCH_FAILED", "message": "all providers failed; no cache"})
 
 
 def codesearch(
+    *,
+    workspace_root: Path,
     query: str,
     tokens_num: int = 5000
 ) -> ToolResult:
@@ -190,6 +269,34 @@ def codesearch(
         if r.payload is None:
             r.payload = {}
         r.payload["provider"] = "grep_app"
+        return r
+
+    # 降级策略：Grep.app 失败 → 回退本地 ripgrep
+    try:
+        gr = _local_grep(workspace_root=workspace_root, pattern=query, path=".", language="all", include_glob=None, ignore_case=False, max_hits=20)
+        hits = (gr.payload or {}).get("hits") if gr.ok else None
+        if isinstance(hits, list) and hits:
+            results: list[dict[str, Any]] = []
+            for h in hits[:20]:
+                if not isinstance(h, dict):
+                    continue
+                pth = str(h.get("path") or "")
+                preview = str(h.get("preview") or "")
+                results.append(
+                    {
+                        "repo": "local",
+                        "path": pth,
+                        "language": "",
+                        "code": preview,
+                        "explanation": "Grep.app 不可用时回退到本地 ripgrep 结果（仅供定位本仓库内容）。",
+                        "relevance_score": None,
+                        "url": "",
+                    }
+                )
+            return ToolResult(ok=True, payload={"query": query, "results": results, "total_results": len(results), "provider": "local_ripgrep_fallback", "fallback_from": "grep_app", "fallback_error": r.error})
+    except Exception as e:
+        return r
+
     return r
 
 

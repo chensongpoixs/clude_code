@@ -92,11 +92,20 @@ def _url_to_cache_key(url: str) -> str:
     return hashlib.md5(url.encode('utf-8')).hexdigest()[:16]
 
 
-def _get_cache_dir(workspace_root: str | None, *, cache_dir: str) -> Path:
-    """获取缓存目录路径。"""
+def _get_cache_dir(workspace_root: str | None, *, cache_dir: str, project_id: str | None = None) -> Path:
+    """获取缓存目录路径（支持 {project_id} 占位符与默认映射）。"""
+    from clude_code.core.project_paths import resolve_path_template
+
     p = (cache_dir or "").strip()
     if not p:
         p = ".clude/markdown"
+
+    # 解析模板与默认映射
+    if workspace_root:
+        resolved = resolve_path_template(p, workspace_root=workspace_root, project_id=project_id)
+        if resolved:
+            p = resolved
+
     try:
         # 支持绝对路径
         cp = Path(p)
@@ -311,6 +320,7 @@ def fetch_web_content(
     workspace_root: str | None = None,
     use_cache: bool = True,
     force_refresh: bool = False,
+    project_id: str | None = None,
 ) -> ToolResult:
     """
     获取网页内容（支持本地 Markdown 缓存）。
@@ -349,7 +359,11 @@ def fetch_web_content(
     cache_key = _url_to_cache_key(url)
     cfg = config
     effective_use_cache = bool(use_cache) and bool(getattr(cfg, "cache_enabled", True))
-    cache_dir = _get_cache_dir(workspace_root, cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"))
+    cache_dir = _get_cache_dir(
+        workspace_root,
+        cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"),
+        project_id=project_id,
+    )
     cached_file: Path | None = None
     from_cache = False
     
@@ -532,7 +546,7 @@ def fetch_web_content(
     return ToolResult(ok=True, payload=result_data)
 
 
-def clear_expired_cache(workspace_root: str | None = None) -> ToolResult:
+def clear_expired_cache(workspace_root: str | None = None, *, project_id: str | None = None) -> ToolResult:
     """
     清理过期的缓存文件。
     
@@ -543,7 +557,11 @@ def clear_expired_cache(workspace_root: str | None = None) -> ToolResult:
         ToolResult 包含清理结果
     """
     cfg = get_web_config()
-    cache_dir = _get_cache_dir(workspace_root, cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"))
+    cache_dir = _get_cache_dir(
+        workspace_root,
+        cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"),
+        project_id=project_id,
+    )
     if not cache_dir.exists():
         return ToolResult(ok=True, payload={"cleared": 0, "message": "缓存目录不存在"})
     
@@ -579,7 +597,7 @@ def clear_expired_cache(workspace_root: str | None = None) -> ToolResult:
     )
 
 
-def list_cache(workspace_root: str | None = None) -> ToolResult:
+def list_cache(workspace_root: str | None = None, *, project_id: str | None = None) -> ToolResult:
     """
     列出所有缓存文件。
     
@@ -590,7 +608,11 @@ def list_cache(workspace_root: str | None = None) -> ToolResult:
         ToolResult 包含缓存列表
     """
     cfg = get_web_config()
-    cache_dir = _get_cache_dir(workspace_root, cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"))
+    cache_dir = _get_cache_dir(
+        workspace_root,
+        cache_dir=str(getattr(cfg, "cache_dir", ".clude/markdown") or ".clude/markdown"),
+        project_id=project_id,
+    )
     if not cache_dir.exists():
         return ToolResult(ok=True, payload={"files": [], "total": 0, "message": "缓存目录不存在"})
     

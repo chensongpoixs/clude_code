@@ -1,0 +1,18 @@
+---
+title: "User Prompt: Technical Consulting (current)"
+version: "1.0.0"
+layer: "task"
+---
+
+## 任务类型：技术咨询（TECHNICAL_CONSULTING）
+project_id={{ project_id }} intent={{ intent_name }} risk={{ risk_level }}
+
+## 用户输入
+{{ user_text }}
+
+## 要求
+- 给出对比表：选项、优缺点、适用场景、风险与建议。
+- 若涉及该仓库现状，先用 read_file/grep 获取事实再结论。
+
+
+

@@ -6,6 +6,8 @@ from typing import Any, Literal
 import httpx
 import logging
 import os
+import random
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -152,42 +154,81 @@ class LlamaCppHttpClient:
 
     def _chat_openai_compat(self, messages: list[ChatMessage]) -> str:
         url = f"{self.base_url}/v1/chat/completions"
-        model = self.model
-        if not model:
-            model = self.try_get_first_model_id() or "llama.cpp"
-        payload: dict[str, Any] = {
-            "model": model,
+        model = self.model or (self.try_get_first_model_id() or "llama.cpp")
+        base_payload: dict[str, Any] = {
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": False,
         }
         headers = self._build_headers()
-        try:
-            with httpx.Client(timeout=self.timeout_s) as client:
-                r = client.post(url, json=payload, headers=headers)
+
+        # 降级策略：指数退避重试（超时/网络错误/429/5xx）
+        max_attempts = 3
+        last_err: str = ""
+        last_status: int | None = None
+        for attempt in range(max_attempts):
+            payload = {**base_payload, "model": model}
+            try:
+                with httpx.Client(timeout=self.timeout_s) as client:
+                    r = client.post(url, json=payload, headers=headers)
+                last_status = r.status_code
+
+                # transient retry
+                if r.status_code in (429, 502, 503, 504) and attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
+
                 if r.status_code >= 400:
-                    logger.warning(f"llama.cpp OpenAI-compatible request failed: status={r.status_code} url={url} payload={payload} body={r.text}");
-                    # Surface response body — llama.cpp often explains which field is invalid.
                     body = r.text
+                    # 典型：模型 id 不被识别 → 允许自动切换一次模型（只在显式 model 失败时）
+                    if r.status_code == 400 and self.model and attempt == 0:
+                        auto = self.try_get_first_model_id()
+                        if auto and auto != model:
+                            logger.warning(f"model rejected by server, fallback to first model id: {auto}")
+                            model = auto
+                            continue
                     raise RuntimeError(
                         "llama.cpp OpenAI-compatible request failed: "
                         f"status={r.status_code} url={url} body={body}"
                     )
+
                 data = r.json()
-        except httpx.TimeoutException as e:
-            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload},  request timed out: {e}");
-            raise RuntimeError(
-                "llama.cpp OpenAI-compatible request failed: "
-                f"timeout url={url} (timeout_s={self.timeout_s})"
-            ) from e
-        except httpx.RequestError as e:
-            # 业界常见：代理/证书/连接失败。这里把根因抛给上层用于友好提示。
-            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload}, request error: {e}");
-            raise RuntimeError(
-                "llama.cpp OpenAI-compatible request failed: "
-                f"request_error url={url} err={type(e).__name__}: {e}"
-            ) from e
+                # OpenAI style
+                try:
+                    return data["choices"][0]["message"]["content"]
+                except Exception:
+                    try:
+                        return data["choices"][0]["text"]
+                    except Exception as e:
+                        raise RuntimeError(f"unexpected response format: {data}") from e
+
+            except httpx.TimeoutException as e:
+                last_err = f"timeout url={url} (timeout_s={self.timeout_s})"
+                if attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
+                raise RuntimeError(
+                    "llama.cpp OpenAI-compatible request failed: "
+                    f"{last_err}"
+                ) from e
+            except httpx.RequestError as e:
+                last_err = f"request_error url={url} err={type(e).__name__}: {e}"
+                if attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
+                raise RuntimeError(
+                    "llama.cpp OpenAI-compatible request failed: "
+                    f"{last_err}"
+                ) from e
+            except Exception as e:
+                # 非 httpx 异常：不做重试（避免重复触发非幂等错误）
+                raise
+
+        raise RuntimeError(f"llama.cpp OpenAI-compatible request failed: status={last_status} err={last_err}")
 
         # OpenAI style
         try:
@@ -213,14 +254,40 @@ class LlamaCppHttpClient:
             "temperature": self.temperature,
             "n_predict": self.max_tokens,
         }
-        with httpx.Client(timeout=self.timeout_s) as client:
-            r = client.post(url, json=payload)
-            if r.status_code >= 400:
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                with httpx.Client(timeout=self.timeout_s) as client:
+                    r = client.post(url, json=payload)
+                if r.status_code in (429, 502, 503, 504) and attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
+                if r.status_code >= 400:
+                    raise RuntimeError(
+                        "llama.cpp completion request failed: "
+                        f"status={r.status_code} url={url} body={r.text[:2000]}"
+                    )
+                data = r.json()
+                break
+            except httpx.TimeoutException as e:
+                if attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
                 raise RuntimeError(
                     "llama.cpp completion request failed: "
-                    f"status={r.status_code} url={url} body={r.text[:2000]}"
-                )
-            data = r.json()
+                    f"timeout url={url} (timeout_s={self.timeout_s})"
+                ) from e
+            except httpx.RequestError as e:
+                if attempt < max_attempts - 1:
+                    backoff = 0.5 * (2 ** attempt) + random.uniform(0, 0.2)
+                    time.sleep(backoff)
+                    continue
+                raise RuntimeError(
+                    "llama.cpp completion request failed: "
+                    f"request_error url={url} err={type(e).__name__}: {e}"
+                ) from e
         # llama.cpp typically returns {"content": "..."} for /completion
         return data.get("content") or data.get("completion") or ""
 

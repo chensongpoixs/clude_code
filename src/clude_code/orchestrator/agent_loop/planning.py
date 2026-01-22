@@ -79,7 +79,8 @@ def execute_planning_phase(
             loop.logger.error(f"[red]✗ 计划解析失败 (尝试 {plan_attempts}/{loop.cfg.orchestrator.planning_retry + 1}): {e}[/red]", exc_info=True)
             loop.audit.write(trace_id=trace_id, event="plan_parse_failed", data={"attempt": plan_attempts, "error": str(e)})
             _ev("plan_parse_failed", {"attempt": plan_attempts, "error": str(e)})
-            loop.messages.append(ChatMessage(role="user", content=read_prompt("agent_loop/plan_parse_retry.md").strip()))
+            retry_text = loop._compose_stage_prompt(stage="plan_parse_retry", vars={}).strip() or read_prompt("user/stage/plan_parse_retry.md").strip()
+            loop.messages.append(ChatMessage(role="user", content=retry_text))
             loop._trim_history(max_messages=30)
 
     return None

@@ -2,7 +2,10 @@
 高级上下文管理器
 参考Claude Code，实现智能的token预算管理和上下文优化
 """
-import tiktoken
+try:
+    import tiktoken  # type: ignore
+except Exception:  # optional dependency
+    tiktoken = None  # type: ignore
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,6 +38,8 @@ class ContextItem:
             return self.token_count
 
         try:
+            if tiktoken is None:
+                raise RuntimeError("tiktoken_missing")
             encoding = tiktoken.get_encoding(encoding_name)
             self.token_count = len(encoding.encode(self.content))
         except Exception:
@@ -218,6 +223,8 @@ class AdvancedContextManager:
     def _truncate_content(self, content: str, max_tokens: int) -> str:
         """智能截断内容"""
         try:
+            if tiktoken is None:
+                raise RuntimeError("tiktoken_missing")
             encoding = tiktoken.get_encoding(self.encoding_name)
             tokens = encoding.encode(content)
 

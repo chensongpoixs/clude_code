@@ -9,6 +9,7 @@ from typing import Optional
 
 from clude_code.config.config import CludeConfig
 from clude_code.cli.cli_logging import get_cli_logger
+from clude_code.core.project_paths import ProjectPaths, DEFAULT_PROJECT_ID
 
 # 创建observability子应用
 observability_app = typer.Typer(help="可观测性相关命令（监控、指标、追踪）")
@@ -123,6 +124,7 @@ def traces(
     limit: int = typer.Option(50, "--limit", "-l", help="显示的追踪记录数量限制"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="过滤特定会话ID"),
     format: str = typer.Option("text", "--format", "-f", help="输出格式 (text/json)"),
+    project_id: str = typer.Option(DEFAULT_PROJECT_ID, "--project-id", help="项目ID（用于隔离 trace/audit 路径）"),
     workspace: Optional[str] = typer.Option(None, "--workspace", help="指定工作区路径")
 ):
     """
@@ -140,7 +142,7 @@ def traces(
         try:
             from clude_code.observability.trace import TraceLogger
 
-            trace_logger = TraceLogger(str(cfg.workspace_root), "read_session")
+            trace_logger = TraceLogger(str(cfg.workspace_root), "read_session", project_id=project_id)
             traces = trace_logger.read_traces(limit=limit, session_id=session)
 
             if format == "json":
@@ -208,6 +210,93 @@ def traces(
     except Exception as e:
         typer.echo(f"❌ 获取追踪记录失败: {str(e)}", err=True)
         raise typer.Exit(1)
+
+
+@observability_app.command("audit-export")
+def audit_export(
+    limit: int = typer.Option(500, "--limit", "-l", help="最多读取的审计行数（从文件末尾开始统计并输出摘要）"),
+    format: str = typer.Option("text", "--format", "-f", help="输出格式 (text/json)"),
+    project_id: str = typer.Option(DEFAULT_PROJECT_ID, "--project-id", help="项目ID（用于隔离 audit 路径）"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", help="指定工作区路径"),
+):
+    """
+    导出审计摘要报表（MVP）
+
+    - 默认只依赖 audit.jsonl 的明文字段（timestamp/trace_id/session_id/project_id/event）
+    - 如 data 被加密（data_enc），仍可统计 event 计数与时间范围
+    """
+    cfg = CludeConfig()
+    if workspace:
+        cfg.workspace_root = workspace
+
+    paths = ProjectPaths(cfg.workspace_root, project_id, auto_create=False)
+    audit_file = paths.audit_file()
+    if not audit_file.exists():
+        typer.echo(f"ℹ️  未找到审计文件: {audit_file}")
+        raise typer.Exit(0)
+
+    # 从末尾读取（简化：直接全读再截断；后续可优化为 seek）
+    try:
+        lines = audit_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as e:
+        typer.echo(f"❌ 读取审计文件失败: {type(e).__name__}: {e}", err=True)
+        raise typer.Exit(1)
+
+    if limit > 0:
+        lines = lines[-limit:]
+
+    total = 0
+    parse_errors = 0
+    encrypted = 0
+    by_event: dict[str, int] = {}
+    min_ts: int | None = None
+    max_ts: int | None = None
+
+    import json as _json
+
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            obj = _json.loads(line)
+            total += 1
+            ev = str(obj.get("event") or "")
+            by_event[ev] = by_event.get(ev, 0) + 1
+            ts = obj.get("timestamp")
+            if isinstance(ts, int):
+                min_ts = ts if min_ts is None else min(min_ts, ts)
+                max_ts = ts if max_ts is None else max(max_ts, ts)
+            if "data_enc" in obj:
+                encrypted += 1
+        except Exception:
+            parse_errors += 1
+
+    report = {
+        "audit_file": str(audit_file),
+        "project_id": project_id,
+        "scanned_lines": len(lines),
+        "parsed_events": total,
+        "parse_errors": parse_errors,
+        "encrypted_events": encrypted,
+        "time_range": {"min_ts": min_ts, "max_ts": max_ts},
+        "by_event": dict(sorted(by_event.items(), key=lambda kv: kv[1], reverse=True)),
+    }
+
+    if format == "json":
+        typer.echo(_json.dumps(report, ensure_ascii=False, indent=2))
+        return
+
+    typer.echo("📋 审计摘要报表")
+    typer.echo("=" * 60)
+    typer.echo(f"项目ID: {project_id}")
+    typer.echo(f"审计文件: {audit_file}")
+    typer.echo(f"扫描行数: {len(lines)}")
+    typer.echo(f"解析事件: {total}  解析失败: {parse_errors}  加密事件: {encrypted}")
+    if min_ts and max_ts:
+        typer.echo(f"时间范围: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(min_ts))}  ~  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(max_ts))}")
+    typer.echo("\n按事件类型计数（Top）：")
+    for k, v in list(report["by_event"].items())[:30]:
+        typer.echo(f"- {k or '<EMPTY>'}: {v}")
 
 
 @observability_app.command("dashboard")

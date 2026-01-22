@@ -9,13 +9,14 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 from clude_code.config.config import CludeConfig
+from clude_code.core.project_paths import ProjectPaths, DEFAULT_PROJECT_ID
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
 from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
 from clude_code.cli.utils import select_model_interactively
 
 console = Console()
 
-def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger) -> None:
+def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger, *, project_id: str | None = None) -> None:
     """执行环境诊断。"""
     cfg = CludeConfig()
     if model:
@@ -65,7 +66,9 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
     if missing_tools and not fix:
         logger.warning("\n提示: 使用 `clude doctor --fix` 可尝试自动修复缺失工具。")
 
+    effective_project_id = (project_id or "").strip() or DEFAULT_PROJECT_ID
     logger.info(f"\n- workspace_root: {cfg.workspace_root}")
+    logger.info(f"- project_id: {effective_project_id}")
     logger.info(f"- llama base_url: {cfg.llm.base_url}")
 
     # 2) 检查工作区读写
@@ -74,7 +77,8 @@ def run_doctor(fix: bool, model: str, select_model: bool, logger: logging.Logger
         logger.error("workspace_root 不存在")
         raise typer.Exit(code=2)
     try:
-        p = wr / ".clude" / "doctor.tmp"
+        paths = ProjectPaths(cfg.workspace_root, effective_project_id, auto_create=True)
+        p = paths.temp_dir() / "doctor.tmp"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("ok", encoding="utf-8")
         p.unlink(missing_ok=True)

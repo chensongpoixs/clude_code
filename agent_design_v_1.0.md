@@ -1,208 +1,236 @@
-# 合并型 Agent 工程设计文档 (企业落地增强版)
+# 合并型 Agent 工程设计文档（企业级落地增强版 · Prompt Profile 架构融合）
 
-## 设计目标
-
-\> \*\*适用对象\*\*：自动执行型 Agent、复杂工程任务、生产级 AI 系统&#x20;
-
-\> \*\*设计目标\*\*：解决「自动执行不可控」「Prompt 职责混乱」「任务不可审计」等核心问题
-
-
-
-异常管理、版本控制、审计合规和多项目隔离增强，支持跨项目、多场景的 Agent 快速平替与安全运行。
+> **文档定位**：公司级 Agent / Prompt Engineering / Orchestrator 统一设计规范
+> **适用对象**：自动执行型 Agent、规划 + 执行分离型 Agent、生产级 AI 系统
+> **目标读者**：平台架构师、AI 工程负责人、安全与合规负责人
 
 ---
 
-## 一、核心架构升级：配置驱动流 + 异常管理
+## 0. 设计目标与核心原则
+
+### 0.1 设计目标
+
+解决企业级 Agent 系统中以下核心问题：
+
+* 不同用户意图共用同一 Prompt，行为不可控
+* System Prompt / User Prompt 职责混乱
+* 高风险任务无法审计与人工介入
+* 多项目并行下 Prompt 难以治理
+
+### 0.2 设计原则（强制）
+
+1. **意图决定行为类型，而非 Prompt 内容**
+2. **Prompt 必须资产化、版本化、可回滚**
+3. **风险前置，执行后置**
+4. **模型不参与策略决策**
+5. **多项目强隔离，最小权限运行**
+
+---
+
+## 1. 总体架构：意图驱动的合并型 Agent
+
+### 1.1 架构总览
+
+系统采用「合并型 Agent + 条件分流」架构：
 
 ```text
-用户输入 (Project_ID: A)
+用户输入（Project_ID）
    │
    ▼
-意图识别 (限定项目范围 + 多轮上下文) ───┐
-   │                                     │
-   ▼                                 [Registry 映射]
-意图路由 (Intent Router) <────────────────┘
- ├─ 简单任务 (Unified) ─> 加载 Base + Task Prompt ─> 执行 + 异常处理
- └─ 复杂任务 (Split)   ─> 加载 Base + Domain + Task Prompt ─> Planner ─> 审批/执行
+意图识别（多轮上下文 + 项目限定）
+   │
+   ▼
+Intent Registry
+   │
+   ▼
+Prompt Profile Selector
+   │
+   ├─ Unified Mode  ──> Prompt 组装 ──> 执行 ──> 审计
+   │
+   └─ Split Mode
+        ├─ Planner（Plan + Risk）
+        ├─ Review / Approval
+        └─ Executor（受控执行）
 ```
-
-**增强点**：
-
-- 异常管理：Executor/Planner 支持自动重试、限次数回退、失败告警
-- 上下文管理：支持多轮对话意图识别、模糊匹配冲突解决
 
 ---
 
-## 二、提示词工程体系 (Prompt Engineering)
+## 2. Prompt Profile 设计（公司级核心抽象）
 
-### 2.1 三层继承模型 + 版本管理
+### 2.1 Prompt Profile 定义
 
-1. **Base Layer (全局层)**：AI 基础价值观、输出格式规范、通用禁令。
-2. **Domain Layer (领域层)**：注入项目/行业知识库。
-3. **Task Layer (任务层)**：工具调用逻辑和 SOP 步骤。
+> **Prompt Profile 是 Intent 与 Prompt 资产之间的唯一中间抽象层。**
 
-**增强点**：
+形式化定义：
 
-- Prompt 支持 Semantic Versioning
-- Prompt ID + 版本号绑定 Orchestrator
-- 可回滚到前一稳定版本
+```text
+Prompt Profile = System Prompt 组合 + User Prompt 模板
+```
 
-### 2.2 目录结构规范
+### 2.2 Prompt Profile 职责边界
+
+| 能做            | 不能做      |
+| ------------- | -------- |
+| 决定 Agent 行为边界 | 承载具体业务逻辑 |
+| 控制风险与权限       | 动态生成规则   |
+| 组合 Prompt 资产  | 由模型选择    |
+
+---
+
+## 3. Prompt 工程体系（分层 + 继承）
+
+### 3.1 System Prompt 四层模型（强制）
+
+| 层级      | 职责           | 是否必选 |
+| ------- | ------------ | ---- |
+| Core    | 全局规范 / 价值观   | 必选   |
+| Role    | Agent 角色能力   | 必选   |
+| Policy  | 风险 / 合规 / 权限 | 按需   |
+| Context | 阶段 / 环境增强    | 可选   |
+
+**System Prompt 只能收紧权限，禁止放权。**
+
+---
+
+### 3.2 User Prompt 模板规范
+
+User Prompt 模板用于：
+
+* 结构化用户输入
+* 明确输出格式与边界
+* 收敛自然语言差异
+
+**禁止直接使用原始用户输入作为最终 User Prompt。**
+
+---
+
+### 3.3 Prompt 目录结构（统一规范）
 
 ```text
 prompts/
-├── base/
-│   └── global_core_v2.j2
-├── domains/
-│   ├── cloud_ops/
-│   └── fintech/
-└── tasks/
-    ├── project_alpha/
-    │   ├── query_balance_v1.2.j2
-    │   └── transfer_money_v1.3.j2
-    └── project_beta/
-        └── restart_node_v1.0.j2
+├── system/
+│   ├── core/
+│   │   └── global.md
+│   ├── role/
+│   │   ├── analyst.md
+│   │   ├── developer.md
+│   │   └── operator.md
+│   └── policy/
+│       ├── readonly.md
+│       ├── safe_code.md
+│       ├── high_risk.md
+│       └── prod_guard.md
+└── user/
+    ├── query.j2
+    ├── code_generate.j2
+    └── prod_action.j2
 ```
 
 ---
 
-## 三、意图注册表 (Intent Registry)
-
-使用 YAML 管理，实现“代码与逻辑分离”。
+## 4. Prompt Profile Registry（配置中心）
 
 ```yaml
-projects:
-  - project_id: "fintech_app"
-    domain: "fintech"
-    intents:
-      - name: "transfer"
-        mode: "split"
-        risk_level: "CRITICAL"
-        prompt_ref: "tasks/project_alpha/transfer_money_v1.3.j2"
-        tools: ["bank_api", "sms_verify"]
-        version: "1.3"
-      - name: "get_rate"
-        mode: "unified"
-        risk_level: "LOW"
-        prompt_ref: "tasks/project_alpha/query_balance_v1.2.j2"
-        version: "1.2"
+prompt_profiles:
+  readonly_query:
+    description: 只读查询
+    system_prompts:
+      - system/core/global.md
+      - system/role/analyst.md
+      - system/policy/readonly.md
+    user_prompt_template: user/query.j2
+    risk_level: LOW
+
+  prod_operation_guarded:
+    description: 高风险生产操作
+    system_prompts:
+      - system/core/global.md
+      - system/role/operator.md
+      - system/policy/high_risk.md
+      - system/policy/prod_guard.md
+    user_prompt_template: user/prod_action.j2
+    risk_level: CRITICAL
 ```
 
-**增强点**：
+---
 
-- Prompt 版本绑定
-- 支持动态热加载 Intent
-- 支持上下文追踪多轮对话
+## 5. Intent Registry（意图注册表）
+
+```yaml
+intents:
+  - intent: query_balance
+    project_id: fintech_app
+    prompt_profile: readonly_query
+
+  - intent: deploy_prod
+    project_id: infra_platform
+    prompt_profile: prod_operation_guarded
+```
+
+**Intent 不得直接引用 Prompt 文件。**
 
 ---
 
-## 四、风险控制与审批流 (Human-in-the-loop)
+## 6. Orchestrator 核心逻辑（增强版）
 
-| 风险等级     | 处理策略         | 审计要求                       |
-| -------- | ------------ | -------------------------- |
-| LOW      | 自动执行         | 记录 Trace + Input/Output    |
-| MEDIUM   | 自动执行 + 延迟回滚  | 记录 Input/Output + Snapshot |
-| HIGH     | 预执行检查 + 异步通知 | 执行前后 Snapshot + 审计日志       |
-| CRITICAL | 强制人工点击「批准」   | 全过程日志 + 操作者签名 + 多因素认证      |
+### 6.1 执行流程
 
-**增强点**：
+1. 意图识别
+2. 选择 Prompt Profile
+3. 装配 System Prompt
+4. 渲染 User Prompt
+5. 执行 / 规划 / 审批
 
-- CRITICAL 操作支持事务回滚和沙箱预演
-- 审计日志加密存储，访问控制严格
-- 多项目隔离：数据库、缓存、Token 完全独立
-
----
-
-## 五、Orchestrator 核心逻辑 (增强版)
+### 6.2 伪代码示例
 
 ```python
-class Orchestrator:
-    def handle_request(self, user_input, project_id, context=None):
-        try:
-            # 1. 意图识别 (限定项目 + 多轮上下文)
-            intent_info = self.router.get_intent(user_input, project_id, context)
-            
-            # 2. 组装 Prompt (继承 + 版本)
-            final_prompt = self.prompt_manager.build(
-                base="global_core_v2",
-                domain=intent_info.domain,
-                task=intent_info.prompt_ref,
-                version=intent_info.version
-            )
+profile = profile_registry.get(intent.prompt_profile)
 
-            # 3. 路由分支
-            if intent_info.mode == "unified":
-                return self.unified_agent.run(final_prompt, user_input)
+messages = []
+for sp in profile.system_prompts:
+    messages.append({"role": "system", "content": load(sp)})
 
-            plan = self.planner.generate_plan(final_prompt, user_input)
-
-            if self.security_gate.needs_approval(plan, intent_info.risk_level):
-                self.security_gate.request_human_approval(plan)
-                return "WAITING_FOR_APPROVAL"
-
-            return self.executor.execute(plan)
-        except ExternalAPIError as e:
-            self.logger.error(f"API调用失败: {e}")
-            return "API_ERROR"
-        except Exception as e:
-            self.logger.error(f"系统异常: {e}")
-            return "SYSTEM_ERROR"
-```
-
-**增强点**：
-
-- 异常处理与自动告警
-- 多轮上下文传递
-- Prompt 版本管理绑定
-- 安全与审计接口集成
-
----
-
-## 六、多项目隔离与安全增强
-
-1. **环境隔离**：不同项目分配独立 API Key、Docker 容器、数据库实例。
-2. **访问控制**：审计日志加密 + 访问权限严格控制。
-3. **操作安全**：CRITICAL 任务支持多因素认证 + 沙箱预演 + 事务回滚。
-4. **资源隔离**：限流策略 + 项目级缓存分离。
-
----
-
-## 七、落地建议与工具推荐
-
-1. **版本控制**：Git + Semantic Versioning，支持回滚和热加载。
-2. **调试与追踪**：LangSmith / Arize Phoenix + Trace ID 打点
-3. **异常监控**：集成 Sentry / Prometheus 告警
-4. **沙箱模拟**：Executor 在沙箱中预演高风险任务
-5. **Prompt 回滚**：与 Orchestrator 绑定版本，实现稳定回退
-
----
-
-## 八、增强后的模块结构建议
-
-```text
-Orchestrator Enhancements:
-├── router/
-│   ├── intent_classifier.py        # 支持多项目 + 多轮上下文
-│   └── conflict_resolver.py        # 模糊匹配 & 冲突处理
-├── prompt_manager/
-│   ├── renderer.py                 # Jinja2 + 参数模板渲染
-│   └── version_control.py          # Prompt 版本管理 & 回滚
-├── executor/
-│   ├── api_caller.py               # 支持限流 / 失败重试
-│   ├── transaction_manager.py      # CRITICAL 任务事务保护
-│   └── sandbox_simulator.py        # 高风险任务沙箱预演
-├── security_gate/
-│   ├── risk_evaluator.py           # 风险分级计算
-│   ├── approval_workflow.py        # 审批流接口
-│   └── audit_logger.py             # 日志 + Snapshot + 加密存储
+user_prompt = render(profile.user_prompt_template, user_input)
+messages.append({"role": "user", "content": user_prompt})
 ```
 
 ---
 
-**总结**：  基础上实现企业级落地：
+## 7. 风险控制与 Human-in-the-Loop
 
-- 异常可控、日志可审计、任务安全隔离
-- Prompt 版本管理、回滚机制、动态热加载
-- 高风险操作沙箱预演 + 多因素审批
-- 多项目扩展、上下文多轮支持
+| 风险等级     | 执行策略        |
+| -------- | ----------- |
+| LOW      | 自动执行        |
+| MEDIUM   | 自动执行 + 回滚   |
+| HIGH     | Plan Review |
+| CRITICAL | 人工审批 + 沙箱   |
 
+风险等级来源：**Prompt Profile + Intent 联合约束**。
+
+---
+
+## 8. 多项目隔离与审计
+
+* Project 级 Token / 数据隔离
+* Prompt / Profile 变更审计
+* 全链路 Trace ID
+
+---
+
+## 9. 企业级落地建议
+
+* Prompt Profile 作为平台级配置
+* 新项目强制接入
+* 老项目按风险迁移
+
+---
+
+## 10. 总结
+
+本设计实现：
+
+* 根据用户意图动态选择 System Prompt 与 User Prompt
+* Prompt 行为工程化、可治理
+* Agent 行为可控、可审计、可扩展
+
+ 

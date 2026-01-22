@@ -1,0 +1,173 @@
+# ========================================
+# Clude Code - Prompt Profile 注册表示例
+# ========================================
+#
+# 文件位置: .clude/registry/prompt_profiles.yaml
+# 功能说明:
+# - Prompt Profile 是 Intent 与 Prompt 资产之间的唯一中间抽象层
+# - Intent 通过 prompt_profile 引用 profile，profile 决定 system/user prompt 的组合
+#
+# 说明（MVP）：
+# - 复用现有 StagePrompts（三层 base/domain/task）机制，避免引入新的渲染引擎
+#
+version: "1.0"
+
+prompt_profiles:
+  # ====== 按 classifier 五类意图的默认 Profile（当 intent 未指定 prompt_profile 时使用）======
+  classifier_coding_task:
+    name: classifier_coding_task
+    description: "分类器：代码任务（默认）"
+    risk_level: MEDIUM
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/developer.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/dev/coding_task.j2", version: "1.0.0" }
+
+  classifier_error_diagnosis:
+    name: classifier_error_diagnosis
+    description: "分类器：错误诊断（默认）"
+    risk_level: MEDIUM
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/developer.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/dev/error_diagnosis.j2", version: "1.0.0" }
+
+  classifier_repo_analysis:
+    name: classifier_repo_analysis
+    description: "分类器：仓库分析（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/analysis/repo_analysis.j2", version: "1.0.0" }
+
+  classifier_documentation_task:
+    name: classifier_documentation_task
+    description: "分类器：文档任务（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/analysis/documentation_task.j2", version: "1.0.0" }
+
+  classifier_technical_consulting:
+    name: classifier_technical_consulting
+    description: "分类器：技术咨询（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/analysis/technical_consulting.j2", version: "1.0.0" }
+
+  classifier_project_design:
+    name: classifier_project_design
+    description: "分类器：架构设计（默认）"
+    risk_level: MEDIUM
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/architect.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/design/project_design.j2", version: "1.0.0" }
+
+  classifier_security_consulting:
+    name: classifier_security_consulting
+    description: "分类器：安全咨询（默认）"
+    risk_level: HIGH
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/security_high_risk.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/security/security_consulting.j2", version: "1.0.0" }
+
+  classifier_capability_query:
+    name: classifier_capability_query
+    description: "分类器：能力询问（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/meta/capability_query.j2", version: "1.0.0" }
+
+  classifier_general_chat:
+    name: classifier_general_chat
+    description: "分类器：通用对话（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/chat/general_chat.j2", version: "1.0.0" }
+
+  classifier_casual_chat:
+    name: classifier_casual_chat
+    description: "分类器：开放式闲聊（默认）"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/chat/casual_chat.j2", version: "1.0.0" }
+
+  classifier_uncertain:
+    name: classifier_uncertain
+    description: "分类器：意图不明确（默认）"
+    risk_level: MEDIUM
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/meta/query.j2", version: "1.0.0" }
+
+  readonly_query:
+    name: readonly_query
+    description: "只读查询/解释"
+    risk_level: LOW
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/developer_readonly.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/meta/query.j2", version: "1.0.0" }
+
+  prod_operation_guarded:
+    name: prod_operation_guarded
+    description: "高风险生产操作（强约束）"
+    risk_level: CRITICAL
+    prompts:
+      system:
+        base: { ref: "system/core/global.md", version: "1.0.0" }
+        domain: { ref: "system/role/operator_high_risk.md", version: "1.0.0" }
+        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+      user_prompt:
+        task: { ref: "user/intent/meta/query.j2", version: "1.0.0" }
+
+

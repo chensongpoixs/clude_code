@@ -1,0 +1,19 @@
+---
+title: "User Prompt: Security Consulting (current)"
+version: "1.0.0"
+layer: "task"
+---
+
+## 任务类型：安全咨询（SECURITY_CONSULTING）
+project_id={{ project_id }} intent={{ intent_name }} risk={{ risk_level }}
+
+## 用户输入
+{{ user_text }}
+
+## 输出要求
+- 先做威胁建模（资产/入口/攻击面/影响）。
+- 给出分级建议：立即修复 / 中期优化 / 长期治理。
+- 若建议涉及运行命令或改文件，必须遵守审批/策略/沙箱要求。
+
+
+

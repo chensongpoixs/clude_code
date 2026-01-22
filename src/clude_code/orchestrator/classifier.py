@@ -29,11 +29,29 @@ from clude_code.prompts import render_prompt as _render_prompt
 
 class IntentCategory(str, Enum):
     """用户意图分类标签。"""
-    CODING_TASK = "CODING_TASK"           # 代码任务：修改、重构、写代码、跑测试、修复 bug
-    CAPABILITY_QUERY = "CAPABILITY_QUERY" # 能力询问：你可以干嘛、怎么用、有哪些工具、你能帮我吗
-    REPO_ANALYSIS = "REPO_ANALYSIS"       # 仓库分析：代码结构、逻辑解释、寻找入口、RAG 搜索
-    GENERAL_CHAT = "GENERAL_CHAT"         # 通用对话：你好、谢谢、你是谁
-    UNCERTAIN = "UNCERTAIN"               # 意图模糊
+    # CODING_TASK = "CODING_TASK"           # 代码任务：修改、重构、写代码、跑测试、修复 bug
+    # CAPABILITY_QUERY = "CAPABILITY_QUERY" # 能力询问：你可以干嘛、怎么用、有哪些工具、你能帮我吗
+    # REPO_ANALYSIS = "REPO_ANALYSIS"       # 仓库分析：代码结构、逻辑解释、寻找入口、RAG 搜索
+    # GENERAL_CHAT = "GENERAL_CHAT"         # 通用对话：你好、谢谢、你是谁
+    # UNCERTAIN = "UNCERTAIN"               # 意图模糊
+    # 核心功能类
+    CODING_TASK = "CODING_TASK"           # 写、改、重构、测试代码
+    ERROR_DIAGNOSIS = "ERROR_DIAGNOSIS"   # 分析错误信息，调试
+    REPO_ANALYSIS = "REPO_ANALYSIS"       # 分析用户代码仓库：解释、搜素、找入口
+    DOCUMENTATION_TASK = "DOCUMENTATION_TASK" # 生成或解释文档、注释
+
+    # 咨询与规划类
+    TECHNICAL_CONSULTING = "TECHNICAL_CONSULTING" # 解释概念、原理、最佳实践
+    PROJECT_DESIGN = "PROJECT_DESIGN"     # 架构设计、技术选型
+    SECURITY_CONSULTING = "SECURITY_CONSULTING" # 安全相关咨询
+
+    # 元交互类
+    CAPABILITY_QUERY = "CAPABILITY_QUERY" # 询问助手能力、使用方法
+    GENERAL_CHAT = "GENERAL_CHAT"         # 问候、致谢等基础社交
+    CASUAL_CHAT = "CASUAL_CHAT"           # 开放式闲聊、征求意见
+
+    # 兜底类
+    UNCERTAIN = "UNCERTAIN"               # 意图模糊，无法归类
 
 class ClassificationResult(BaseModel):
     """分类结果。"""
@@ -53,7 +71,7 @@ class IntentClassifier:
     def __init__(self, llm_client: Any, file_only_logger: Any = None):
         self.llm = llm_client
         self.file_only_logger = file_only_logger
-        # self.CLASSIFY_PROMPT = _read_prompt("classifier/intent_classify_prompt.j2")
+        # 提示词工程：已迁移到 prompts/base|domains|tasks（非兼容旧 classifier/ 目录）
 
     @staticmethod
     def _escape_for_format(s: str) -> str:
@@ -90,12 +108,7 @@ class IntentClassifier:
         # 走 LLM 深度语义分类
         from clude_code.llm.llama_cpp_http import ChatMessage
         try:
-            # 转义用户输入中的花括号，避免 format() 解析错误
-            # safe_user_text = self._escape_for_format(user_text)
-            prompt = _render_prompt(
-                                "classifier/intent_classify_prompt.j2", 
-                                user_text=user_text,
-                                ) #$self.CLASSIFY_PROMPT.format(user_text=safe_user_text)
+            prompt = _render_prompt("user/stage/intent_classify.j2", user_text=user_text)
             if self.file_only_logger:   
                 self.file_only_logger.info("====>意图分类器输入 Prompt: %s", prompt)
 
@@ -122,5 +135,29 @@ class IntentClassifier:
                     exc_info=True,
                 )
             
+        return ClassificationResult(category=IntentCategory.UNCERTAIN, reason="Fallback to default")
+
+    def classify_with_prompt(self, prompt: str, *, user_text_for_log: str = "") -> ClassificationResult:
+        """
+        使用外部提供的 prompt 执行分类（用于与 Intent Registry 的 prompts.intent_classify 对齐）。
+        """
+        from clude_code.llm.llama_cpp_http import ChatMessage
+        try:
+            if self.file_only_logger:
+                self.file_only_logger.info("====>意图分类器输入 Prompt: %s", prompt)
+            response = self.llm.chat([ChatMessage(role="user", content=prompt)])
+            if self.file_only_logger:
+                self.file_only_logger.info("====>意图分类器返回数据 Response: %s", response)
+            json_match = re.search(r"(\{.*?\})", response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(1))
+                return ClassificationResult.model_validate(data)
+        except Exception:
+            if self.file_only_logger:
+                self.file_only_logger.exception(
+                    "IntentClassifier LLM 分类失败（将返回 UNCERTAIN）。user_text=%r ",
+                    (user_text_for_log[:500] + "…") if len(user_text_for_log) > 500 else user_text_for_log,
+                    exc_info=True,
+                )
         return ClassificationResult(category=IntentCategory.UNCERTAIN, reason="Fallback to default")
 

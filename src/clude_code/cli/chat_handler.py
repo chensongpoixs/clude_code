@@ -27,9 +27,17 @@ class ChatHandler:
     负责处理交互式聊天循环与 AgentLoop 的集成。
     支持动画界面、快捷键和配置管理。
     """
-    def __init__(self, cfg: CludeConfig, *, session_id: str | None = None, history: list[Any] | None = None):
+    def __init__(
+        self,
+        cfg: CludeConfig,
+        *,
+        session_id: str | None = None,
+        history: list[Any] | None = None,
+        project_id: str | None = None,
+    ):
         self.cfg = cfg
-        self.agent = AgentLoop(cfg, session_id=session_id)
+        self.project_id = project_id or "default"
+        self.agent = AgentLoop(cfg, session_id=session_id, project_id=self.project_id)
         if history:
             # 只追加 user/assistant 历史，system 由本轮最新 repo map/CLUDE.md 生成
             self.agent.messages.extend(history)  # type: ignore[arg-type]

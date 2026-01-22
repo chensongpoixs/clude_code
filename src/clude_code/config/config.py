@@ -81,6 +81,22 @@ class LLMConfig(BaseModel):
     timeout_s: int = Field(default=120, ge=1)
 
 """
+LLM 请求限流配置（LLM Rate Limit Configuration）
+@author chensong（chensong）
+@date 2026-01-22
+@brief 限制 LLM 请求“流量”（并发）与“每秒请求数”（QPS），用于保护本地/远端服务与控制成本。
+"""
+class LLMRateLimitConfig(BaseModel):
+    enabled: bool = Field(default=False, description="是否启用 LLM 请求限流。")
+    # “每秒的参数”：QPS
+    requests_per_second: float = Field(default=2.0, ge=0.0, description="每秒允许的 LLM 请求数（0=不限制 QPS，仅限制并发）。")
+    burst: int = Field(default=2, ge=0, description="突发容量（token bucket 容量，0=不限制 QPS）。")
+    # “流量”：并发在途请求数
+    max_concurrent: int = Field(default=1, ge=1, description="最大同时在途 LLM 请求数（并发）。")
+    wait_timeout_s: float = Field(default=30.0, ge=0.0, description="等待令牌/并发槽位的最大时间（秒）。0=无限等待。")
+    on_limit: str = Field(default="sleep", description="触发限流时策略：sleep=等待；error=直接失败。")
+
+"""
 策略配置（Policy Configuration）
 @author chensong（chensong）
 @date 2026-01-19
@@ -90,6 +106,11 @@ class PolicyConfig(BaseModel):
     allow_network: bool = False
     confirm_write: bool = True
     confirm_exec: bool = True
+    # Phase 2：企业策略（PolicyEngine / RBAC）开关
+    enterprise_enabled: bool = Field(default=False, description="是否启用 enterprise_policy.PolicyEngine（RBAC + 路径/命令规则）")
+    enterprise_user_id: str = Field(default="default", description="当前用户 ID（用于 RBAC 计算）")
+    enterprise_policy_server_url: str = Field(default="", description="可选：远程策略服务器 URL（空=禁用远程拉取）")
+    enterprise_policy_cache_ttl_s: int = Field(default=3600, ge=60, description="远程策略缓存 TTL（秒）")
     allowed_tools: list[str] = Field(
         default_factory=list,
         description="允许的工具名单（空=不限制）。对标 Claude Code 的 allowedTools。",
@@ -145,6 +166,41 @@ class LoggingConfig(BaseModel):
     date_format: str = Field(
         default="%Y-%m-%d %H:%M:%S",
         description="日志时间格式。"
+    )
+
+"""
+审计安全配置（Audit Security Configuration）
+@author chensong（chensong）
+@date 2026-01-22
+@brief 审计日志脱敏/加密（可选）配置。默认不启用加密，但建议启用脱敏。
+"""
+class AuditSecurityConfig(BaseModel):
+    redact_enabled: bool = Field(default=True, description="是否对审计事件 data 做递归脱敏。")
+    redact_keys: list[str] = Field(
+        default_factory=lambda: [
+            "api_key",
+            "token",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "password",
+            "secret",
+            "cookie",
+            "set-cookie",
+        ],
+        description="命中这些 key（不区分大小写）时将值替换为 ******。",
+    )
+    redact_text_enabled: bool = Field(default=True, description="是否对字符串字段做轻量模式脱敏（Bearer/sk- 等）。")
+
+    encrypt_enabled: bool = Field(default=False, description="是否启用审计 data 的 AES-GCM 加密落盘。")
+    encrypt_key_env: str = Field(
+        default="CLUDE_AUDIT_AESGCM_KEY_B64",
+        description="环境变量名：Base64 编码的 AES-GCM key（16/24/32 bytes）。",
+    )
+    encrypt_kid: str = Field(default="env:CLUDE_AUDIT_AESGCM_KEY_B64", description="写入日志的 key id（便于轮换与定位）。")
+    encrypt_fail_closed: bool = Field(
+        default=False,
+        description="加密开启但依赖/key 不可用时：True=拒绝写入并抛错；False=降级明文（默认）。",
     )
 
 """
@@ -362,10 +418,12 @@ class CludeConfig(BaseSettings):
 
     workspace_root: str = "."
     llm: LLMConfig = LLMConfig()
+    llm_rate_limit: LLMRateLimitConfig = LLMRateLimitConfig()
     policy: PolicyConfig = PolicyConfig()
     limits: LimitsConfig = LimitsConfig()
     logging: LoggingConfig = LoggingConfig()
     llm_detail_logging: LLMDetailLoggingConfig = LLMDetailLoggingConfig()
+    audit_security: AuditSecurityConfig = AuditSecurityConfig()
     orchestrator: OrchestratorConfig = OrchestratorConfig()
     rag: RAGConfig = RAGConfig()
 
@@ -737,10 +795,12 @@ def _order_top_level_keys_for_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
         "workspace_root",
         # 与示例文件一致的顺序
         "llm",
+        "llm_rate_limit",
         "policy",
         "limits",
         "logging",
         "llm_detail_logging",
+        "audit_security",
         "orchestrator",
         "rag",
         # 工具模块配置（与示例一致）

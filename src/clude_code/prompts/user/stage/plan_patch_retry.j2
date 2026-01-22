@@ -1,0 +1,32 @@
+---
+title: "User Prompt: PlanPatch Retry (current)"
+version: "1.0.0"
+layer: "task"
+---
+
+你的 PlanPatch 无法应用，需要你立刻纠正并重输出。
+
+只输出 PlanPatch JSON（严格 JSON），不要解释、不要代码围栏。
+
+## 必须包含字段
+{
+  "type": "PlanPatch",
+  "title": "可选：新标题",
+  "remove_steps": [],
+  "update_steps": [],
+  "add_steps": [],
+  "reason": "可选：解释为何这样 patch"
+}
+
+## 关键约束
+
+- 同一个 step_id 不能同时出现在 remove_steps / update_steps / add_steps 中。
+- 若目的是"修改 step_3 的描述/依赖/工具"，请只用 update_steps，不要 remove_steps。
+- 禁止删除/修改 status=done 的步骤。
+
+## 上次失败原因
+
+{{ error_type }}: {{ error_message }}
+
+
+

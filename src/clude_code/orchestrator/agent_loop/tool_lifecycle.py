@@ -27,6 +27,39 @@ def run_tool_lifecycle(
     spec = TOOL_REGISTRY.get(name)
     side_effects = spec.side_effects if spec is not None else set()
 
+    # Phase 2：企业策略引擎（RBAC + 路径/命令规则）
+    engine = getattr(loop, "enterprise_policy_engine", None)
+    if engine is not None:
+        try:
+            # 文件路径检查（MVP：仅对 read_file/write_file/delete_file 做硬拦截）
+            if name in {"read_file"}:
+                p = str(args.get("path") or args.get("target_file") or "")
+                if p:
+                    d = engine.check_file_access(p, "read")
+                    if not d.allowed:
+                        loop.audit.write(trace_id=trace_id, event="policy_deny_file", data={"op": "read", "path": p, "reason": d.reason})
+                        _ev("policy_deny_file", {"op": "read", "path": p, "reason": d.reason})
+                        return ToolResult(ok=False, error={"code": "E_POLICY", "message": d.reason})
+            if name in {"write_file", "apply_patch", "undo_patch"}:
+                p = str(args.get("path") or args.get("target_file") or "")
+                if p:
+                    d = engine.check_file_access(p, "write")
+                    if not d.allowed:
+                        loop.audit.write(trace_id=trace_id, event="policy_deny_file", data={"op": "write", "path": p, "reason": d.reason})
+                        _ev("policy_deny_file", {"op": "write", "path": p, "reason": d.reason})
+                        return ToolResult(ok=False, error={"code": "E_POLICY", "message": d.reason})
+            if name in {"delete_file"}:
+                p = str(args.get("target_file") or args.get("path") or "")
+                if p:
+                    d = engine.check_file_access(p, "delete")
+                    if not d.allowed:
+                        loop.audit.write(trace_id=trace_id, event="policy_deny_file", data={"op": "delete", "path": p, "reason": d.reason})
+                        _ev("policy_deny_file", {"op": "delete", "path": p, "reason": d.reason})
+                        return ToolResult(ok=False, error={"code": "E_POLICY", "message": d.reason})
+        except Exception:
+            # 不阻塞主流程，写 file-only 便于排查
+            loop.file_only_logger.warning("enterprise policy file check failed", exc_info=True)
+
     # 0) 工具权限（对标 Claude Code：allowedTools/disallowedTools）
     allowed = list(getattr(loop.cfg.policy, "allowed_tools", []) or [])
     denied = set(getattr(loop.cfg.policy, "disallowed_tools", []) or [])
@@ -56,6 +89,17 @@ def run_tool_lifecycle(
         cmd = str(args.get(cmd_key, ""))
         if not cmd.strip():
             return ToolResult(ok=False, error={"code": "E_INVALID_ARGS", "message": f"missing arg: {cmd_key}"})
+        # Phase 2：企业策略命令规则
+        if engine is not None:
+            try:
+                d = engine.check_command(cmd)
+                if not d.allowed:
+                    loop.logger.warning(f"[red]✗ 企业策略拒绝命令: {cmd} (原因: {d.reason})[/red]")
+                    loop.audit.write(trace_id=trace_id, event="policy_deny_cmd", data={"command": cmd, "reason": d.reason})
+                    _ev("policy_deny_cmd", {"command": cmd, "reason": d.reason})
+                    return ToolResult(ok=False, error={"code": "E_POLICY", "message": d.reason})
+            except Exception:
+                loop.file_only_logger.warning("enterprise policy command check failed", exc_info=True)
         # 内部安全评估（黑名单）
         decision = evaluate_command(cmd, allow_network=loop.cfg.policy.allow_network)
         if not decision.ok:

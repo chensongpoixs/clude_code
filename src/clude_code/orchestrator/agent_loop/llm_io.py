@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, TYPE_CHECKING
 
 from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.rate_limiter import RateLimiter
 from clude_code.observability.usage import estimate_tokens
 
 if TYPE_CHECKING:
@@ -146,9 +147,83 @@ def llm_chat(
         # P1-1: 打印失败不影响主流程，但写入 file-only 日志便于排查
         loop.file_only_logger.warning(f"LLM 请求参数记录失败: {ex}", exc_info=True)
 
-    # 2) 发起请求
+    # 2) 发起请求（带降级：失败时保存上下文并返回友好提示）
+    # 2.0) 限流：保护 LLM 服务（QPS/并发）
+    release = None
+    try:
+        rl_cfg = getattr(getattr(loop, "cfg", None), "llm_rate_limit", None)
+        if rl_cfg is not None:
+            limiter = getattr(loop, "_llm_rate_limiter", None)
+            if limiter is None:
+                limiter = RateLimiter(
+                    enabled=bool(getattr(rl_cfg, "enabled", False)),
+                    requests_per_second=float(getattr(rl_cfg, "requests_per_second", 0.0) or 0.0),
+                    burst=int(getattr(rl_cfg, "burst", 0) or 0),
+                    max_concurrent=int(getattr(rl_cfg, "max_concurrent", 1) or 1),
+                    wait_timeout_s=float(getattr(rl_cfg, "wait_timeout_s", 0.0) or 0.0),
+                    on_limit=("error" if str(getattr(rl_cfg, "on_limit", "sleep")).lower() == "error" else "sleep"),
+                )
+                loop._llm_rate_limiter = limiter
+
+            res, release_fn = limiter.acquire()
+            release = release_fn
+            if not res.ok:
+                if _ev:
+                    _ev("llm_rate_limited", {"stage": stage, "step_id": step_id, "ok": False, "error": res.error, "waited_ms": res.waited_ms})
+                # 触发限流时，直接返回友好提示（不调用 LLM）
+                trace_id = str(getattr(loop, "_current_trace_id", "") or "")
+                loop.audit.write(
+                    trace_id=trace_id or "trace_unknown",
+                    event="llm_rate_limited",
+                    data={"stage": stage, "step_id": step_id, "error": res.error, "waited_ms": res.waited_ms},
+                )
+                return f"LLM 请求被限流（{res.error}，waited_ms={res.waited_ms}）。请降低并发或调整 llm_rate_limit。trace_id={trace_id or 'trace_unknown'}"
+
+            if res.waited_ms > 0 and _ev:
+                _ev("llm_rate_limited", {"stage": stage, "step_id": step_id, "ok": True, "waited_ms": res.waited_ms})
+    except Exception as ex:
+        # 限流器异常不阻塞主流程
+        loop.file_only_logger.warning(f"LLM RateLimiter 异常（忽略并继续）：{ex}", exc_info=True)
+
     t0 = time.time()
-    assistant_text = loop.llm.chat(loop.messages)
+    try:
+        assistant_text = loop.llm.chat(loop.messages)
+    except Exception as ex:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        err = f"{type(ex).__name__}: {ex}"
+        # 保存上下文（审计/追踪），避免用户反馈无法复盘
+        try:
+            trace_id = str(getattr(loop, "_current_trace_id", "") or "")
+            loop.audit.write(
+                trace_id=trace_id or "trace_unknown",
+                event="llm_call_failed",
+                data={
+                    "stage": stage,
+                    "step_id": step_id,
+                    "base_url": getattr(loop.llm, "base_url", ""),
+                    "api_mode": getattr(loop.llm, "api_mode", ""),
+                    "model": getattr(loop.llm, "model", "") or "auto",
+                    "messages_count": len(loop.messages or []),
+                    "elapsed_ms": elapsed_ms,
+                    "error": err,
+                },
+            )
+            if _ev:
+                _ev("llm_call_failed", {"stage": stage, "step_id": step_id, "elapsed_ms": elapsed_ms, "error": err})
+        except Exception:
+            loop.file_only_logger.warning(f"写入 llm_call_failed 审计失败: {err}", exc_info=True)
+
+        loop.logger.warning(f"[red]LLM 调用失败（已记录审计/trace）: {err}[/red]")
+        # 返回用户可理解的消息（并带 trace_id 便于排查）
+        hint_trace = str(getattr(loop, "_current_trace_id", "") or "")
+        return f"LLM 服务暂时不可用（{err}）。请稍后重试，或检查网络/模型服务。trace_id={hint_trace or 'trace_unknown'}"
+    finally:
+        try:
+            if callable(release):
+                release()
+        except Exception:
+            pass
+
     elapsed_ms = int((time.time() - t0) * 1000)
 
     # 3) 记录/打印返回数据摘要（不依赖 tool_call，tool_call 在上层解析后另行落盘）

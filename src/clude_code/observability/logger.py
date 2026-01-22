@@ -132,6 +132,7 @@ def get_logger(
     backup_count: int = 5,
     log_format: Optional[str] = None,
     date_format: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> logging.Logger:
 
     logger = logging.getLogger(name)
@@ -180,10 +181,24 @@ def get_logger(
 
     # 先确定日志文件路径，再做创建/exists 检查（避免 log_file=None 崩溃）
     effective_log_file = log_file
-    if not effective_log_file and workspace_root:
-        log_dir = Path(workspace_root) / ".clude" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        effective_log_file = str(log_dir / "app.log")
+    if workspace_root:
+        try:
+            from clude_code.core.project_paths import resolve_path_template, ProjectPaths
+            if effective_log_file:
+                effective_log_file = resolve_path_template(
+                    effective_log_file,
+                    workspace_root=workspace_root,
+                    project_id=project_id,
+                )
+            else:
+                paths = ProjectPaths(workspace_root, project_id, auto_create=True)
+                effective_log_file = str(paths.app_log_file())
+        except Exception:
+            # 兜底：旧逻辑
+            if not effective_log_file:
+                log_dir = Path(workspace_root) / ".clude" / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                effective_log_file = str(log_dir / "app.log")
 
     # 如果指定了日志文件，确保目录存在并添加文件处理器
     if effective_log_file:

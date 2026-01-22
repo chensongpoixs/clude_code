@@ -19,6 +19,7 @@ class AgentState(str, Enum):
     VERIFYING = "VERIFYING"        # 最终验证阶段
     RECOVERING = "RECOVERING"      # 从失败中恢复（重规划前）
     BLOCKED = "BLOCKED"            # 依赖未满足，等待
+    WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"  # 等待审批（HIGH/CRITICAL）
     DONE = "DONE"                  # 任务完成
 
 

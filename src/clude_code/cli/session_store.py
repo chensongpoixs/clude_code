@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.core.project_paths import ProjectPaths, DEFAULT_PROJECT_ID
 
 
 @dataclass(frozen=True)
@@ -16,8 +17,24 @@ class SessionLoadResult:
     meta: dict[str, Any]
 
 
-def _sessions_dir(workspace_root: str) -> Path:
-    return Path(workspace_root) / ".clude" / "sessions"
+def _sessions_dir(workspace_root: str, project_id: str | None = None) -> Path:
+    """
+    获取会话存储目录。
+    
+    Args:
+        workspace_root: 工作区根目录
+        project_id: 项目 ID（默认 "default"）
+    
+    Returns:
+        会话目录路径（支持新旧结构自动检测）
+    """
+    paths = ProjectPaths(workspace_root, project_id or DEFAULT_PROJECT_ID, auto_create=True)
+    # 检测旧结构：如果旧路径存在且新路径不存在，使用旧路径
+    old_path = Path(workspace_root) / ".clude" / "sessions"
+    new_path = paths.sessions_dir()
+    if old_path.exists() and not new_path.exists() and (project_id or DEFAULT_PROJECT_ID) == DEFAULT_PROJECT_ID:
+        return old_path
+    return new_path
 
 
 def save_session(
@@ -26,15 +43,17 @@ def save_session(
     session_id: str,
     messages: list[ChatMessage],
     last_trace_id: str | None,
+    project_id: str | None = None,
 ) -> Path:
     """
     保存会话（只保存 history，不保存 system）。
 
     说明：
-    - system prompt 会动态包含 repo map / CLUDE.md，恢复时应以“当前仓库最新状态”为准；
+    - system prompt 会动态包含 repo map / CLUDE.md，恢复时应以"当前仓库最新状态"为准；
       因此只保存非 system 的历史对话，恢复时追加到新 system 之后。
+    - 会话按 project_id 隔离存储
     """
-    d = _sessions_dir(workspace_root)
+    d = _sessions_dir(workspace_root, project_id)
     d.mkdir(parents=True, exist_ok=True)
 
     history = [{"role": m.role, "content": m.content} for m in (messages[1:] if len(messages) > 0 else [])]
@@ -58,15 +77,15 @@ def save_session(
     return p
 
 
-def load_latest_session(workspace_root: str) -> SessionLoadResult | None:
-    d = _sessions_dir(workspace_root)
+def load_latest_session(workspace_root: str, project_id: str | None = None) -> SessionLoadResult | None:
+    d = _sessions_dir(workspace_root, project_id)
     latest = d / "latest.json"
     if latest.exists():
         try:
             data = json.loads(latest.read_text(encoding="utf-8"))
             sid = str(data.get("session_id", "")).strip()
             if sid:
-                return load_session(workspace_root, sid)
+                return load_session(workspace_root, sid, project_id=project_id)
         except Exception:
             pass
 
@@ -76,14 +95,14 @@ def load_latest_session(workspace_root: str) -> SessionLoadResult | None:
     candidates = sorted([p for p in d.glob("*.json") if p.name != "latest.json"], key=lambda p: p.stat().st_mtime, reverse=True)
     for p in candidates:
         sid = p.stem
-        r = load_session(workspace_root, sid)
+        r = load_session(workspace_root, sid, project_id=project_id)
         if r is not None:
             return r
     return None
 
 
-def load_session(workspace_root: str, session_id: str) -> SessionLoadResult | None:
-    d = _sessions_dir(workspace_root)
+def load_session(workspace_root: str, session_id: str, project_id: str | None = None) -> SessionLoadResult | None:
+    d = _sessions_dir(workspace_root, project_id)
     p = d / f"{session_id}.json"
     if not p.exists():
         return None

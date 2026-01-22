@@ -23,11 +23,24 @@ class VectorStore:
     围绕 LanceDB 和 fastembed 的包装器，用于存储和搜索代码嵌入向量。
     大文件治理说明：支持从 CludeConfig 动态配置计算设备和模型路径。
     """
-    def __init__(self, cfg: CludeConfig):
+    def __init__(self, cfg: CludeConfig, *, project_id: str | None = None):
         self.cfg = cfg
         self.workspace_root = Path(cfg.workspace_root)
-        # 使用配置中的 db_path
-        self.db_dir = Path(cfg.rag.db_path) if os.path.isabs(cfg.rag.db_path) else self.workspace_root / cfg.rag.db_path
+        db_path = str(getattr(cfg.rag, "db_path", "") or ".clude/vector_db")
+
+        # 仅在用户显式使用 {project_id} 时做模板替换；否则保持历史行为，避免隐式迁移目录
+        if "{project_id}" in db_path:
+            from clude_code.core.project_paths import resolve_path_template
+
+            resolved = resolve_path_template(
+                db_path,
+                workspace_root=cfg.workspace_root,
+                project_id=project_id,
+            )
+            if resolved:
+                db_path = resolved
+
+        self.db_dir = Path(db_path) if os.path.isabs(db_path) else self.workspace_root / db_path
         self.db_dir.parent.mkdir(parents=True, exist_ok=True)
         
         self.table_name = str(getattr(cfg.rag, "table_name", "") or "code_chunks")

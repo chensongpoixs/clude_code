@@ -1,0 +1,19 @@
+---
+title: "User Prompt: Error Diagnosis (current)"
+version: "1.0.0"
+layer: "task"
+---
+
+## 任务类型：错误诊断（ERROR_DIAGNOSIS）
+project_id={{ project_id }} intent={{ intent_name }} risk={{ risk_level }}
+
+## 用户输入（可能包含日志/堆栈/报错）
+{{ user_text }}
+
+## 要求
+- 先复述你看到的关键错误线索（报错类型/文件/行号/调用链）。
+- 给出 1) 根因假设 2) 验证步骤 3) 修复方案（优先最小改动）。
+- 需要证据时优先用 read_file/grep 定位，不要猜。
+
+
+

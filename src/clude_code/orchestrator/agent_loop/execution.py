@@ -97,11 +97,13 @@ def execute_single_step_iteration(
         _ev("plan_step_status_changed", {"step_id": step.id, "status": "in_progress"})
 
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
-    step_prompt = render_prompt(
-        "agent_loop/execute_step_prompt.j2",
-        step_id=step.id,
-        step_description=step.description,
-        tools_expected=(", ".join(step.tools_expected) if step.tools_expected else "根据需求自主选择"),
+    step_prompt = loop._compose_stage_prompt(
+        stage="execute_step",
+        vars={
+            "step_id": step.id,
+            "step_description": step.description,
+            "tools_expected_hint": (", ".join(step.tools_expected) if step.tools_expected else "根据需求自主选择"),
+        },
     ).strip()
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)
@@ -173,7 +175,11 @@ def execute_single_step_iteration(
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
-        loop.messages.append(ChatMessage(role="user", content=read_prompt("agent_loop/invalid_step_output_retry.md").strip()))
+        retry_text = loop._compose_stage_prompt(
+            stage="invalid_step_output_retry",
+            vars={},
+        ).strip() or read_prompt("user/stage/invalid_step_output_retry.md").strip()
+        loop.messages.append(ChatMessage(role="user", content=retry_text))
         loop._trim_history(max_messages=30)
         return None, False, False
 
@@ -225,14 +231,16 @@ def handle_replanning(
         loop.file_only_logger.warning(f"render_plan_markdown 失败: {e}", exc_info=True)
         cur_plan_md = "(render_plan_markdown 失败，略)"
     #  从新规划提示生成重规划提示
-    replan_prompt = render_prompt(
-        "agent_loop/replan_prompt.j2",
-        max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
-        step_id=step.id,
-        step_description=step.description,
-        step_status=step.status,
-        step_dependencies=step.dependencies,
-        cur_plan_md=cur_plan_md,
+    replan_prompt = loop._compose_stage_prompt(
+        stage="replan",
+        vars={
+            "max_plan_steps": int(loop.cfg.orchestrator.max_plan_steps),
+            "step_id": step.id,
+            "step_description": step.description,
+            "step_status": step.status,
+            "step_dependencies": step.dependencies,
+            "cur_plan_md": cur_plan_md,
+        },
     ).strip()
 
     # 允许一次“补丁纠错重试”：常见失败原因是补丁内部冲突（例如同一步骤既 remove 又 update）
@@ -305,10 +313,9 @@ def handle_replanning(
         except Exception as e:
             last_patch_error = e
             # 第一次失败则准备 retry prompt（从 prompts/ 目录加载）
-            retry_prompt = render_prompt(
-                "agent_loop/plan_patch_retry.j2",
-                error_type=type(e).__name__,
-                error_message=str(e),
+            retry_prompt = loop._compose_stage_prompt(
+                stage="plan_patch_retry",
+                vars={"error_type": type(e).__name__, "error_message": str(e)},
             )
             if attempt == 0:
                 continue

@@ -1,26 +1,9 @@
 """
-集中管理 AgentLoop 的系统提示词（SYSTEM_PROMPT）。
+AgentLoop prompts helpers
 
-大文件治理说明：
-- 把长字符串/模板从主逻辑文件拆出，避免 `agent_loop.py` 充斥大段文本。
+当前版本：system prompt 的拼接与渲染已迁移到 `AgentLoop._build_system_prompt()`，
+此模块仅保留“项目记忆读取”等与 prompt 内容无关的辅助函数。
 """
-
-from clude_code.prompts import read_prompt
-from .tool_dispatch import render_tools_for_system_prompt
-
-
-_TOOLS_SECTION = render_tools_for_system_prompt(include_schema=False)
-
-
-_BASE_SYSTEM_PROMPT = read_prompt("agent_loop/system_base.md")
-
-
-
-# Agent 自己的大模型
-_LOCAL_AGENT_RUNTIME_SYSTEM_PROMPT_ = read_prompt("agent_loop/local_agent_runtime_system.md")
-
-
-SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT + "\n\n# 可用工具清单\n" + _TOOLS_SECTION + "\n"
 
 
 def load_project_memory(workspace_root: str) -> tuple[str, dict[str, object]]:

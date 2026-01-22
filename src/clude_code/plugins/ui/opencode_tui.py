@@ -134,6 +134,9 @@ def run_opencode_tui(
             self._intent_conf: float | None = None
             self._keywords: list[str] = []
             self._verification_policy: str | None = None
+            self._approval_id: str | None = None
+            self._approval_status: str | None = None
+            self._approval_risk: str | None = None
             # 本轮是否使用过工具：用于对齐 clude chat 的“无工具调用”收尾提示
             self._turn_tool_used: bool = False
             # 本轮最终回复是否已在“对话/输出”打印（避免 final_text + assistant_text 双触发导致重复输出）
@@ -1077,6 +1080,12 @@ def run_opencode_tui(
                 if self._verification_policy:
                     ops.write(Text(""))
                     ops.write(Text(f"验证策略: {self._verification_policy}", style="bold magenta"))
+
+                if self._approval_id:
+                    ops.write(Text(""))
+                    s = self._approval_status or "pending"
+                    r = self._approval_risk or ""
+                    ops.write(Text(f"审批: {s}  {('risk=' + r + '  ') if r else ''}id={self._approval_id}", style="bold yellow"))
                 
                 ops.write(Text(""))
 
@@ -1351,6 +1360,13 @@ def run_opencode_tui(
                     self._plan_steps = data.get("steps") or self._plan_steps
                     self._plan_title = data.get("title") or self._plan_title
                     self._verification_policy = data.get("verification_policy") or self._verification_policy
+                elif et == "approval_required":
+                    self._approval_id = str(data.get("id") or "").strip() or self._approval_id
+                    self._approval_status = str(data.get("status") or "pending")
+                    self._approval_risk = str(data.get("risk_level") or "")
+                elif et == "approval_status_changed":
+                    self._approval_id = str(data.get("id") or "").strip() or self._approval_id
+                    self._approval_status = str(data.get("status") or self._approval_status or "")
                     meta = data.get("meta") or {}
                     if isinstance(meta, dict):
                         a = meta.get("added", 0)

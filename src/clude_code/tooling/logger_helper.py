@@ -15,17 +15,19 @@ import logging
 from typing import Any
 
 from clude_code.observability.logger import get_logger
+from clude_code.core.project_paths import resolve_path_template, DEFAULT_PROJECT_ID
 from clude_code.config.config import LoggingConfig
 
 
-# 全局 logger 缓存（模块名 -> Logger）
-_logger_cache: dict[str, logging.Logger] = {}
+# 全局 logger 缓存（(module_name, project_id, log_to_file) -> Logger）
+_logger_cache: dict[tuple[str, str, bool], logging.Logger] = {}
 
 
 def get_tool_logger(
     module_name: str,
     log_to_file: bool = True,
     cfg: Any | None = None,
+    project_id: str | None = None,
 ) -> logging.Logger:
     """
     获取工具模块的 logger（延迟初始化，统一配置）。
@@ -53,9 +55,12 @@ def get_tool_logger(
     """
     global _logger_cache
     
-    # 如果已缓存，直接返回
-    if module_name in _logger_cache:
-        return _logger_cache[module_name]
+    # 规范化 project_id（用于隔离缓存与日志落点）
+    effective_project_id = (project_id or "").strip() or DEFAULT_PROJECT_ID
+
+    cache_key = (module_name, effective_project_id, bool(log_to_file))
+    if cache_key in _logger_cache:
+        return _logger_cache[cache_key]
     
     # 确定 workspace_root
     workspace_root = "."
@@ -76,7 +81,11 @@ def get_tool_logger(
     # 创建并配置 logger
     logger_file_path = None
     if log_to_file and hasattr(logging_cfg, "file_path") and logging_cfg.file_path:
-        logger_file_path = logging_cfg.file_path
+        logger_file_path = resolve_path_template(
+            logging_cfg.file_path,
+            workspace_root=workspace_root,
+            project_id=effective_project_id,
+        )
     
     logger = get_logger(
         module_name,
@@ -86,10 +95,11 @@ def get_tool_logger(
         level=logging_cfg.level,
         log_format=logging_cfg.log_format,
         date_format=logging_cfg.date_format,
+        project_id=effective_project_id,
     )
     
     # 缓存 logger
-    _logger_cache[module_name] = logger
+    _logger_cache[cache_key] = logger
     
     return logger
 

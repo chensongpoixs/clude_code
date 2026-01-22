@@ -1,0 +1,216 @@
+# ========================================
+# Clude Code - 意图注册表配置示例
+# ========================================
+# 
+# 文件位置: .clude/registry/intents.yaml
+# 功能说明: 定义项目级意图配置，用于精确控制 Agent 行为
+#
+# 配置热加载: 修改此文件后无需重启，Agent 会自动检测并重载配置
+#
+
+version: "1.0"
+
+# 默认风险等级（LOW/MEDIUM/HIGH/CRITICAL）
+default_risk_level: MEDIUM
+
+# 默认执行模式（unified=统一规划 / split=分步执行）
+default_mode: unified
+
+# ========== Prompt 工程（可运营版本切换）==========
+# 说明：
+# - prompts 按 stage 配置三层(base/domain/task)的 ref + 可选 version
+# - version 为空时：会读取 `.clude/registry/prompt_versions.json` 的 current 指针（支持运营切换/回滚）
+prompts:
+  system:
+    base: { ref: "system/core/global.md", version: "1.0.0" }
+    domain: { ref: "system/role/developer.md", version: "1.0.0" }
+    task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+  planning:
+    task: { ref: "user/planning.j2", version: "1.0.0" }
+  execute_step:
+    task: { ref: "user/execute_step.j2", version: "1.0.0" }
+  replan:
+    task: { ref: "user/replan.j2", version: "1.0.0" }
+  plan_patch_retry:
+    task: { ref: "user/plan_patch_retry.j2", version: "1.0.0" }
+  plan_parse_retry:
+    task: { ref: "user/plan_parse_retry.md", version: "1.0.0" }
+  invalid_step_output_retry:
+    task: { ref: "user/invalid_step_output_retry.md", version: "1.0.0" }
+  intent_classify:
+    task: { ref: "user/intent_classify.j2", version: "1.0.0" }
+
+# 项目级工具限制（为空则不限制）
+# allowed_tools: []      # 允许的工具白名单
+# blocked_tools:         # 禁用的工具黑名单
+#   - run_cmd            # 禁止执行命令
+
+# 意图列表
+intents:
+  # ========== 代码阅读类 ==========
+  - name: code_review
+    description: "代码审查任务"
+    # Prompt Profile（推荐）：按意图选择 system/user prompts（Intent 不直接引用 prompt 文件）
+    # prompt_profile: readonly_query
+    keywords:
+      - "review"
+      - "审查"
+      - "code review"
+      - "检查代码"
+      - "代码检查"
+    mode: unified
+    risk_level: LOW
+    # 意图级覆盖（可选）：只覆盖需要差异化的 stage
+    # prompts:
+    #   planning:
+    #     task: { ref: "tasks/planning_code_review.j2", version: "1.0.0" }
+    tools:
+      - read_file
+      - grep
+      - list_dir
+      - glob_file_search
+    priority: 10
+
+  - name: code_explanation
+    description: "代码解释任务"
+    keywords:
+      - "explain"
+      - "解释"
+      - "什么意思"
+      - "这段代码"
+      - "这个函数"
+    mode: unified
+    risk_level: LOW
+    tools:
+      - read_file
+      - grep
+      - list_dir
+    priority: 5
+
+  # ========== 文件修改类 ==========
+  - name: file_modification
+    description: "文件修改任务"
+    keywords:
+      - "修改"
+      - "write"
+      - "创建文件"
+      - "新建"
+      - "添加"
+      - "删除"
+    mode: unified
+    risk_level: MEDIUM
+    tools:
+      - read_file
+      - write_file
+      - apply_patch
+      - undo_patch
+      - list_dir
+      - grep
+    priority: 8
+
+  - name: refactoring
+    description: "代码重构任务"
+    keywords:
+      - "重构"
+      - "refactor"
+      - "重命名"
+      - "rename"
+      - "提取"
+      - "extract"
+    mode: unified
+    risk_level: MEDIUM
+    tools:
+      - read_file
+      - write_file
+      - apply_patch
+      - grep
+      - list_dir
+    priority: 7
+
+  # ========== 高风险操作类 ==========
+  - name: system_command
+    description: "系统命令执行"
+    keywords:
+      - "run"
+      - "执行"
+      - "命令"
+      - "terminal"
+      - "shell"
+      - "npm"
+      - "pip"
+      - "git"
+    mode: unified
+    risk_level: HIGH
+    tools:
+      - run_cmd
+      - read_file
+      - list_dir
+    priority: 3
+
+  - name: batch_modification
+    description: "批量修改任务"
+    keywords:
+      - "批量"
+      - "所有"
+      - "全部"
+      - "整个项目"
+      - "all files"
+    mode: unified
+    risk_level: HIGH
+    tools:
+      - read_file
+      - write_file
+      - apply_patch
+      - grep
+      - glob_file_search
+    priority: 6
+
+  # ========== 搜索类 ==========
+  - name: code_search
+    description: "代码搜索任务"
+    keywords:
+      - "搜索"
+      - "search"
+      - "找"
+      - "查找"
+      - "在哪"
+      - "grep"
+    mode: unified
+    risk_level: LOW
+    tools:
+      - grep
+      - glob_file_search
+      - read_file
+      - list_dir
+    priority: 9
+
+  - name: web_search
+    description: "网络搜索任务"
+    keywords:
+      - "websearch"
+      - "网上"
+      - "搜一下"
+      - "查一下"
+      - "最新"
+      - "资料"
+    mode: unified
+    risk_level: LOW
+    tools:
+      - websearch
+      - webfetch
+    priority: 4
+
+  # ========== 问答类（默认） ==========
+  - name: general_qa
+    description: "通用问答"
+    keywords:
+      - "是什么"
+      - "怎么"
+      - "如何"
+      - "为什么"
+      - "什么是"
+    mode: unified
+    risk_level: LOW
+    tools: []  # 不限制工具
+    priority: 1
+

@@ -10,8 +10,8 @@
 
 - **总体可行**：当前工程已经具备“企业落地增强版”的关键骨架：**显式规划（Plan）+ 增量重规划（PlanPatch）+ 控制协议（Control Protocol）+ 工具注册表（Tool Registry）+ 全链路可观测（Audit/Trace/LLM detail）+ 基础风险控制（confirm_write/confirm_exec + 命令黑名单）**。
 - **主要缺口集中在企业交付能力**：
-  - **多项目隔离（Project/Tenant Isolation）**：目前以 `workspace_root` 为隔离边界，尚未引入显式 `project_id` 的目录隔离/资源隔离。
-  - **意图注册表（Intent Registry, YAML）**：目前是通用意图分类（CODING_TASK 等），尚无“按项目映射 intent → prompt_ref/version/tools/risk_level”的注册表与热加载。
+  - **多项目隔离（Project/Tenant Isolation）**：已引入 `project_id` 与 ProjectPaths，并完成 audit/trace/session 路径隔离，但日志路径、webfetch 缓存、doctor/config 等仍未贯穿。
+  - **意图注册表（Intent Registry, YAML）**：已实现 schema/loader/router 与示例配置，但尚未接入 AgentLoop（未影响 prompt/tools/risk_level）。
   - **Prompt 三层继承 + 语义版本 + 回滚/热加载**：已实现 prompts 目录中心化与模板渲染，但缺少 **Base/Domain/Task 三层继承**、版本元数据、版本回滚、灰度切换。
   - **Human-in-the-loop（审批流）**：已有“写/执行确认”，但缺少“按风险等级触发审批、异步批准、审计签名、多因素”等企业流程化能力。
   - **沙箱预演/事务回滚**：已有 patch/undo 基础，但缺少“高风险任务先在沙箱预演、通过后再落盘”的执行模式与事务边界。
@@ -34,7 +34,7 @@
 | Prompt 中心化 | prompts/ 统一管理、模板渲染 | ✅ | `src/clude_code/prompts/`、`src/clude_code/prompts/loader.py`、`docs/CODE_SPECIFICATION.md` | 缺三层继承与版本体系 |
 | Prompt 三层继承 | Base/Domain/Task 组合 | ⛔ | — | 需新增 PromptManager + prompt 元数据 |
 | Prompt 版本管理 | SemVer、绑定 orchestrator、回滚 | ⛔ | — | 需新增版本索引与回滚策略 |
-| Intent Registry | YAML 管理 intent → prompt_ref/version/tools/risk_level | ⛔ | — | 需新增 registry schema + loader + router |
+| Intent Registry | YAML 管理 intent → prompt_ref/version/tools/risk_level | ⚠️ | `src/clude_code/orchestrator/registry/`、`.clude/registry/intents.example.yaml` | 未接入 AgentLoop / ToolRegistry，尚未影响实际执行 |
 | 意图识别（决策门） | 项目范围 + 多轮上下文意图识别 | ⚠️ | `src/clude_code/orchestrator/classifier.py` | 缺 project_id 维度与冲突消解（conflict resolver） |
 | Planner | 复杂任务拆解步骤 | ✅ | `src/clude_code/orchestrator/agent_loop/planning.py`、`src/clude_code/orchestrator/planner.py` | 尚未对齐“企业 SOP/流程模板库” |
 | PlanPatch | 失败时局部修补计划 | ✅ | `src/clude_code/orchestrator/planner.py`、`src/clude_code/orchestrator/agent_loop/execution.py` | 可增强：将 type 用于路由与更清晰的错误分类 |
@@ -81,6 +81,16 @@
 - **风险/依赖**：中；关键在“匹配准确性与冲突消解（conflict resolver）”，但可先用规则/关键词做 MVP。
 
 ### 3.3 P1：Prompt 三层继承 + SemVer + 回滚/热加载
+
+
+
+核心原理一：LLM 的注意力稀释 (Attention Dilution)
+
+LLM 的 Context Window（上下文窗口）虽然在变大，但其注意力中心是有限的。
+
+原理：随着层级增加，Prompt 会变得冗长。如果层级过多（如 5-6 层），模型会产生“首尾效应”丢失，导致位于中间层的关键约束失效。
+
+结论：3 层是性能最优解。它保证了模型能同时处理“我是谁（Base）”、“我在哪（Domain）”和“我该做什么（Task）”，这符合人类认知的基本逻辑。
 
 - **目标**：把 prompts 进一步结构化为 `base/ domains/ tasks/`，并支持：
   - 版本化：`task_x_v1.3.j2`
@@ -139,6 +149,9 @@
 - 验收：
   - 同一 workspace 下两个 project_id 的日志/会话/缓存完全隔离
   - registry 能正确路由到不同 prompt 与工具集合
+ - 完成情况（当前仓库）：
+   - 已完成：`chat` CLI 的 `project_id`、Audit/Trace/Session 隔离、ProjectPaths、Intent Registry 模块与示例配置。
+   - 待补齐：`doctor/models/config` 命令透传、日志与 webfetch 缓存路径统一、配置占位符 `{project_id}` 解析、Intent Registry 接入 AgentLoop。
 
 ### Phase 1（1~2 周）：Prompt 三层继承与版本体系
 - 交付：

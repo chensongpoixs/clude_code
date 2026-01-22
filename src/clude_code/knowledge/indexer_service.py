@@ -24,6 +24,8 @@ class IndexerService:
         from clude_code.observability.logger import get_logger
         self.cfg = cfg
         self.workspace_root = Path(cfg.workspace_root)
+        # 索引器是“仓库级”后台服务：默认使用 cfg.rag.db_path，不强制按 project_id 分库。
+        # 若用户在 cfg.rag.db_path 中显式使用了 {project_id}，会自动替换为 default（project_id=None）。
         self.store = VectorStore(cfg)
         self.embedder = CodeEmbedder(cfg)
         self.chunker = build_chunker(cfg)

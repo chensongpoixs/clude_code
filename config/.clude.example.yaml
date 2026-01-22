@@ -1,0 +1,252 @@
+# Clude Code 配置文件示例
+# 复制此文件为 clude.yaml 并根据需要修改
+# 
+# 配置优先级（从高到低）：
+# 1. 环境变量（前缀 CLUDE_）
+# 2. 配置文件（clude.yaml / clude.toml）
+# 3. 默认值
+
+# LLM 配置
+# 支持多种 Provider：llama_cpp_http / openai / anthropic / ollama / azure_openai
+llm:
+  provider: llama_cpp_http    # 默认使用本地 llama.cpp 服务
+  base_url: http://127.0.0.1:8899
+  api_mode: openai_compat     # openai_compat（推荐）/ completion（llama.cpp 原生）
+  model: gemma-3-12b-it-Q4_K_M
+  temperature: 0.2
+  max_tokens: 204800
+  timeout_s: 120
+  api_key: ""                 # API 密钥（OpenAI/Azure 等需要认证的服务填写）
+
+# LLM 请求限流（全局）
+# - 用于限制“流量”（并发在途请求）和“每秒请求数”（QPS），保护本地/远端服务并控制成本
+# - enabled=false 时不生效
+llm_rate_limit:
+  enabled: false
+  requests_per_second: 2.0    # 每秒允许的请求数（0=不限制 QPS，仅限制并发）
+  burst: 2                    # 突发容量（0=不限制 QPS）
+  max_concurrent: 1           # 最大并发在途请求数
+  wait_timeout_s: 30          # 等待令牌/并发槽位的最大时间（秒；0=无限等待）
+  on_limit: "sleep"           # sleep=等待；error=直接失败
+
+# ================ OpenAI 接入示例 ================
+# llm:
+#   provider: openai
+#   base_url: https://api.openai.com/v1
+#   api_mode: openai_compat
+#   model: gpt-4o              # 可选: gpt-4o / gpt-4-turbo / gpt-3.5-turbo
+#   temperature: 0.2
+#   max_tokens: 16384
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 OPENAI_API_KEY 代替明文配置
+
+# ================ Azure OpenAI 接入示例 ================
+# llm:
+#   provider: azure_openai
+#   base_url: https://your-resource.openai.azure.com/openai/deployments/your-deployment
+#   api_mode: openai_compat
+#   model: gpt-4o              # Azure 部署名称
+#   temperature: 0.2
+#   max_tokens: 16384
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 AZURE_OPENAI_API_KEY 代替明文配置
+
+# ================ Anthropic Claude 接入示例 ================
+# llm:
+#   provider: anthropic
+#   base_url: https://api.anthropic.com/v1
+#   api_mode: openai_compat
+#   model: claude-3-5-sonnet-20241022  # 可选: claude-3-opus / claude-3-5-sonnet / claude-3-haiku
+#   temperature: 0.2
+#   max_tokens: 8192
+#   timeout_s: 120
+#   api_key: ""                # 建议使用环境变量 ANTHROPIC_API_KEY 代替明文配置
+
+# ================ Ollama 本地接入示例 ================
+# llm:
+#   provider: ollama
+#   base_url: http://127.0.0.1:11434/v1
+#   api_mode: openai_compat
+#   model: llama3.1:8b          # ollama pull llama3.1:8b
+#   temperature: 0.2
+#   max_tokens: 8192
+#   timeout_s: 120
+#   api_key: ""                 # Ollama 本地不需要 API Key
+
+# ================ 硅基流动 SiliconFlow 接入示例 ================
+# 硅基流动是国内领先的 AI 模型服务平台，提供多种开源大模型
+# 官网：https://siliconflow.cn  控制台获取 API Key
+# llm:
+#   provider: siliconflow
+#   base_url: https://api.siliconflow.cn/v1
+#   api_mode: openai_compat
+#   model: deepseek-ai/DeepSeek-V3           # 推荐：性价比最高
+#   # 其他可选模型：
+#   # - deepseek-ai/DeepSeek-V2.5            # DeepSeek V2.5
+#   # - Qwen/Qwen2.5-72B-Instruct            # 通义千问 72B
+#   # - Qwen/Qwen2.5-32B-Instruct            # 通义千问 32B
+#   # - Qwen/Qwen2.5-Coder-32B-Instruct      # 通义千问 Coder 32B（代码专用）
+#   # - THUDM/glm-4-9b-chat                  # 智谱 GLM-4 9B
+#   # - meta-llama/Meta-Llama-3.1-405B-Instruct  # Llama 3.1 405B
+#   # - meta-llama/Meta-Llama-3.1-70B-Instruct   # Llama 3.1 70B
+#   # - 01-ai/Yi-1.5-34B-Chat                # 零一万物 Yi 34B
+#   temperature: 0.2
+#   max_tokens: 16384
+#   timeout_s: 120
+#   api_key: ""                 # 建议使用环境变量 SILICONFLOW_API_KEY 代替明文配置
+
+# 策略配置
+policy:
+  allow_network: false
+  confirm_write: true
+  confirm_exec: true
+  allowed_tools: []      # 空=不限制；否则仅允许列出的工具
+  disallowed_tools: []   # 禁止的工具名单
+
+# 资源限制
+limits:
+  max_output_bytes: 1000000
+  max_file_read_bytes: 1000000
+
+# 日志配置
+logging:
+  log_to_console: true
+  level: INFO
+  file_path: .clude/logs/clude.log
+  max_bytes: 10485760
+  backup_count: 5
+  log_format: "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+# 审计安全（Phase 4 MVP）
+# - 脱敏：建议开启，避免 audit.jsonl 记录 API Key/Token 等敏感信息
+# - 加密：可选，启用后将把 data 加密写入 data_enc（AES-GCM）；key 建议只放环境变量
+audit_security:
+  redact_enabled: true
+  redact_keys: ["api_key", "token", "access_token", "refresh_token", "authorization", "password", "secret", "cookie", "set-cookie"]
+  redact_text_enabled: true
+  encrypt_enabled: false
+  encrypt_key_env: "CLUDE_AUDIT_AESGCM_KEY_B64"   # Base64 AES-GCM key（16/24/32 bytes）
+  encrypt_kid: "env:CLUDE_AUDIT_AESGCM_KEY_B64"
+  encrypt_fail_closed: false                      # true=缺 key/依赖时拒绝写入（更严格）
+
+# 编排器配置
+orchestrator:
+  enable_planning: true
+  max_plan_steps: 12
+  max_step_tool_calls: 100
+  max_replans: 2
+  planning_retry: 1
+
+# RAG 配置
+rag:
+  enabled: true
+  device: cpu                           # cpu / cuda / mps
+  embedding_model: BAAI/bge-small-zh-v1.5
+  model_cache_dir: D:/LLM/llm/Embedding/                 # null = 使用默认路径
+  db_path: .clude/vector_db
+  table_name: code_chunks_v2
+  chunk_size: 500
+  chunk_overlap: 50
+  chunker: heuristic                    # heuristic / tree_sitter
+
+# 工具模块配置
+# 天气 API 配置（OpenWeatherMap）
+# 获取免费 API Key: https://openweathermap.org/api
+weather:
+  enabled: true
+  api_key: "1959a5732178d790d56e0d313d1fe2e6"                            # 必填：你的 OpenWeatherMap API Key（建议用环境变量 OPENWEATHERMAP_API_KEY）
+  default_units: metric                 # metric=摄氏度 / imperial=华氏度 / standard=开尔文
+  default_lang: zh_cn                   # 默认返回中文
+  timeout_s: 10                         # 请求超时时间
+  cache_ttl_s: 300                      # 缓存时间（秒），避免频繁请求
+  log_to_file: true                     # 是否将天气模块日志写入文件（默认 true，写入 .clude/logs/app.log）
+
+# 文件操作工具配置（read_file, write_file）
+file:
+  enabled: true                         # 是否启用文件操作工具
+  log_to_file: true                     # 是否将文件操作日志写入文件
+
+# 目录操作工具配置（list_dir, glob_search）
+directory:
+  enabled: true                         # 是否启用目录操作工具
+  log_to_file: true                     # 是否将目录操作日志写入文件
+
+# 命令执行工具配置（run_cmd）
+command:
+  enabled: true                         # 是否启用命令执行工具
+  timeout_s: 30                         # 命令执行超时时间（秒）
+  log_to_file: true                     # 是否将命令执行日志写入文件
+
+# 搜索工具配置（grep, search）
+search:
+  enabled: true                         # 是否启用搜索工具
+  # 网页搜索资料来源优先级：默认优先 Open-WebSearch MCP，失败自动回退 Serper
+  # 可选值：
+  # - open_websearch_mcp：优先（推荐）
+  # - serper：备用（需要 API Key）
+  websearch_providers: ["open_websearch_mcp", "serper"]
+  # Open-WebSearch MCP（优先）
+  open_websearch_mcp_enabled: true      # 是否启用 Open-WebSearch MCP 搜索源
+  open_websearch_mcp_base_url: "http://127.0.0.1:8765"   # MCP 服务地址（示例：本机服务）
+  open_websearch_mcp_endpoint: "/search"                 # 搜索接口路径（与 base_url 拼接）
+  open_websearch_mcp_api_key: "a835b5beb674f8a41746500b01a36e64501f097f"        # 可选：如服务需要密钥，建议用环境变量 CLUDE_SEARCH__OPEN_WEBSEARCH_MCP_API_KEY
+  # Serper（回退）
+  serper_api_key: ""                    # Serper API Key（示例文件禁止放真实密钥；建议用环境变量 CLUDE_SEARCH__SERPER_API_KEY）
+  serper_gl: "cn"                       # 地域参数（默认 cn）
+  serper_hl: "zh-cn"                    # 语言参数（默认 zh-cn）
+  # codesearch（代码搜索）：仅实现网络搜索（Grep.app），用于“编程任务”检索代码片段（code snippet）
+  grep_app_enabled: true                # 是否启用 Grep.app 搜索源
+  grep_app_base_url: "https://grep.app" # Grep.app 服务地址
+  grep_app_endpoint: "/api/search"      # Grep.app API 路径（默认 /api/search）
+  timeout_s: 30                         # 搜索超时时间（秒）
+  max_results: 1000                     # 搜索最大结果数量
+  log_to_file: true                     # 是否将搜索日志写入文件
+
+# 网络工具配置（webfetch, search）
+web:
+  enabled: true                         # 是否启用网络工具
+  timeout_s: 30                         # 网络请求超时时间（秒）
+  max_content_length: 50000             # 最大内容长度（字符）
+  log_to_file: true                     # 是否将网络工具日志写入文件
+  # webfetch 缓存：优先读本地缓存（命中则不再网络抓取），默认保存为 Markdown
+  cache_enabled: true                   # 是否启用本地 Markdown 缓存
+  cache_dir: ".clude/markdown"          # 缓存目录（相对 workspace_root；也支持绝对路径）
+  cache_expiry_days: 7                  # 缓存有效期（天）
+  cache_max_filename_length: 100        # 文件名最大长度（不含扩展名）
+  cache_index_enabled: true             # 是否启用缓存索引（加速命中）
+  cache_index_filename: ".cache_index"  # 缓存索引文件名（位于 cache_dir 内）
+  cache_scan_prefix_bytes: 2000         # 遍历缓存目录时每个文件读取前缀字节数（解析 YAML 头部）
+  cache_max_collision_attempts: 100     # 文件名冲突最大尝试次数（超过则放弃写缓存）
+
+# 补丁工具配置（patching）
+patch:
+  enabled: true                         # 是否启用补丁工具
+  log_to_file: true                     # 是否将补丁操作日志写入文件
+
+# 显示工具配置（display）
+display:
+  enabled: true                         # 是否启用显示工具
+  max_content_length: 10000             # 显示内容最大长度（字符）
+  log_to_file: true                     # 是否将显示日志写入文件
+
+# 提问工具配置（question）
+question:
+  enabled: true                         # 是否启用提问工具
+  log_to_file: true                     # 是否将提问日志写入文件
+
+# 仓库地图工具配置（repo_map）
+repo_map:
+  enabled: true                         # 是否启用仓库地图工具
+  log_to_file: true                     # 是否将仓库地图日志写入文件
+
+# 技能工具配置（skill）
+skill:
+  enabled: true                         # 是否启用技能工具
+  log_to_file: true                     # 是否将技能加载日志写入文件
+
+# 任务工具配置（task_agent, todo_manager）
+task:
+  enabled: true                         # 是否启用任务工具
+  log_to_file: true                     # 是否将任务操作日志写入文件
+

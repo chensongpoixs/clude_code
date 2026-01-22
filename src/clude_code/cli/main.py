@@ -12,9 +12,13 @@ from clude_code.cli.cli_logging import get_cli_logger, get_file_logger
 
 # --- 导入子命令 ---
 from clude_code.cli.observability_cmd import observability_app
+from clude_code.cli.prompts_cmd import app as prompts_app
+from clude_code.cli.approvals_cmd import app as approvals_app
 
 # --- 添加子命令 ---
 app.add_typer(observability_app, name="observability", help="可观测性相关命令")
+app.add_typer(prompts_app, name="prompts", help="Prompt 运维：版本切换/回滚（prompt_versions.json）")
+app.add_typer(approvals_app, name="approvals", help="审批流（Phase2）：list/approve/reject")
 
 # --- 命令路由 ---
 
@@ -41,25 +45,29 @@ def tools(
     run_tools_list(schema, as_json, all_specs, validate)
 
 @app.command()
-def models() -> None:
+def models(
+    project_id: str = typer.Option("default", "--project-id", "-P", help="项目 ID（用于隔离日志/会话/缓存，默认 'default'）"),
+) -> None:
     """列出可用模型列表。"""
     from clude_code.cli.info_cmds import run_models_list
-    run_models_list(get_cli_logger().console)
+    run_models_list(get_cli_logger().console, project_id=project_id)
 
 @app.command()
 def doctor(
     model: str = typer.Option("", help="指定模型 ID"),
+    project_id: str = typer.Option("default", "--project-id", "-P", help="项目 ID（用于隔离日志/会话/缓存，默认 'default'）"),
     select_model: bool = typer.Option(False, "--select-model", help="交互式选择模型进行连通性测试"),
     fix: bool = typer.Option(False, "--fix", help="尝试自动修复缺失依赖")
 ) -> None:
     """执行环境诊断与连通性检查。"""
     from clude_code.cli.doctor_cmd import run_doctor
-    run_doctor(fix, model, select_model, get_cli_logger().console)
+    run_doctor(fix, model, select_model, get_cli_logger().console, project_id=project_id)
 
 @app.command()
 def chat(
     prompt: str = typer.Argument("", help="可选：启动后立即执行的输入；配合 --print/-p 进入非交互模式"),
     model: str = typer.Option("", help="指定模型 ID"),
+    project_id: str = typer.Option("default", "--project-id", "-P", help="项目 ID（用于隔离日志/会话/缓存，默认 'default'）"),
     select_model: bool = typer.Option(False, "--select-model", help="交互式选择模型"),
     debug: bool = typer.Option(False, "--debug", help="显示执行轨迹"),
     live: bool = typer.Option(False, "--live", help="启用 50 行实时刷新界面"),
@@ -72,29 +80,33 @@ def chat(
 ) -> None:
     """启动交互式 Agent 会话（或使用 --print 非交互执行）。"""
     from clude_code.cli.chat_handler import ChatHandler
+    from clude_code.core.project_paths import DEFAULT_PROJECT_ID
     
     cfg = CludeConfig()
     if model:
         cfg.llm.model = model
     
-    # 会话恢复：-c / -r
+    # 规范化 project_id
+    effective_project_id = (project_id or "").strip() or DEFAULT_PROJECT_ID
+    
+    # 会话恢复：-c / -r（注意：会话现在按 project_id 隔离）
     from clude_code.cli.session_store import load_latest_session, load_session
 
     history = None
     session_id = None
     if resume:
-        loaded = load_session(cfg.workspace_root, resume.strip())
+        loaded = load_session(cfg.workspace_root, resume.strip(), project_id=effective_project_id)
         if loaded is None:
             raise typer.BadParameter(f"未找到会话: {resume}")
         history = loaded.history
         session_id = loaded.session_id
     elif cont:
-        loaded = load_latest_session(cfg.workspace_root)
+        loaded = load_latest_session(cfg.workspace_root, project_id=effective_project_id)
         if loaded is not None:
             history = loaded.history
             session_id = loaded.session_id
 
-    handler = ChatHandler(cfg, session_id=session_id, history=history)
+    handler = ChatHandler(cfg, session_id=session_id, history=history, project_id=effective_project_id)
     
     if select_model:
         handler.select_model_interactively()

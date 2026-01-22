@@ -23,10 +23,18 @@ from .tools.write_file import write_file as _write_file_impl
 
 
 class LocalTools:
-    def __init__(self, workspace_root: str, *, max_file_read_bytes: int, max_output_bytes: int) -> None:
+    def __init__(
+        self,
+        workspace_root: str,
+        *,
+        max_file_read_bytes: int,
+        max_output_bytes: int,
+        project_id: str | None = None,
+    ) -> None:
         self.workspace_root = Path(workspace_root)
         self.max_file_read_bytes = max_file_read_bytes
         self.max_output_bytes = max_output_bytes
+        self.project_id = project_id
 
     def list_dir(self, path: str = ".") -> ToolResult:
         return _list_dir_impl(workspace_root=self.workspace_root, path=path)
@@ -105,13 +113,29 @@ class LocalTools:
         return _ask_question_impl(question=question, options=options, multiple=multiple, header=header)
 
     def fetch_web_content(self, url: str, format: str = "markdown", timeout: int = 30, use_cache: bool = True, force_refresh: bool = False) -> ToolResult:
-        return _fetch_web_content_impl(url=url, format=format, timeout=timeout, workspace_root=str(self.workspace_root), use_cache=use_cache, force_refresh=force_refresh)
+        return _fetch_web_content_impl(
+            url=url,
+            format=format,
+            timeout=timeout,
+            workspace_root=str(self.workspace_root),
+            use_cache=use_cache,
+            force_refresh=force_refresh,
+            project_id=self.project_id,
+        )
 
     def websearch(self, query: str, num_results: int = 8, livecrawl: str = "fallback", search_type: str = "auto", context_max_chars: int = 10000) -> ToolResult:
-        return _websearch_impl(query=query, num_results=num_results, livecrawl=livecrawl, search_type=search_type, context_max_chars=context_max_chars)
+        return _websearch_impl(
+            workspace_root=self.workspace_root,
+            project_id=self.project_id,
+            query=query,
+            num_results=num_results,
+            livecrawl=livecrawl,
+            search_type=search_type,
+            context_max_chars=context_max_chars,
+        )
 
     def codesearch(self, query: str, tokens_num: int = 5000) -> ToolResult:
-        return _codesearch_impl(query=query, tokens_num=tokens_num)
+        return _codesearch_impl(workspace_root=self.workspace_root, query=query, tokens_num=tokens_num)
 
     def load_skill(self, skill_name: str) -> ToolResult:
         return _load_skill_impl(skill_name=skill_name, workspace_root=str(self.workspace_root))

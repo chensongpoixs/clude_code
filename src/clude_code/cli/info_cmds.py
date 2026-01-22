@@ -157,7 +157,7 @@ def run_tools_audit() -> None:
     console.print(f"\n[dim]共 {len(specs)} 个工具注册[/dim]")
 
 
-def run_models_list(logger: logging.Logger) -> None:
+def run_models_list(logger: logging.Logger, *, project_id: str | None = None) -> None:
     """列出 LLM 服务的可用模型列表（支持 OpenAI / llama.cpp / Ollama 等）。"""
     cfg = CludeConfig()
     client = LlamaCppHttpClient(
