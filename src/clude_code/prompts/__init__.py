@@ -5,7 +5,8 @@
 """
 
 from .loader import read_prompt, render_prompt
+from .prompt_manager import PromptManager, PromptArtifact
 
-__all__ = ["read_prompt", "render_prompt"]
+__all__ = ["read_prompt", "render_prompt", "PromptManager", "PromptArtifact"]
 
 

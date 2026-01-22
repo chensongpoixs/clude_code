@@ -1,6 +1,12 @@
+---
+title: "Execute Step Prompt (current)"
+version: "1.0.0"
+layer: "task"
+---
+
 【当前执行步骤】：{{ step_id }}
 【核心任务目标】：{{ step_description }}
-【可用工具集】：{{ tools_expected }}
+【可用工具集】：{{ tools_expected_hint }}
 
 ## 强制执行规则：
 1. 动作唯一性：单次回复仅允许执行一个动作（调用一个工具 或 输出一个控制JSON）。

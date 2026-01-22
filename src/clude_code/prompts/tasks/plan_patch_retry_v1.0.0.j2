@@ -1,0 +1,27 @@
+---
+title: "PlanPatch Retry Prompt"
+version: "1.0.0"
+layer: "task"
+purpose: "PlanPatch 解析/应用失败时的纠错重试"
+---
+
+你上一次输出的 PlanPatch JSON 无法解析/应用。
+错误类型：{{ error_type }}
+错误信息：{{ error_message }}
+
+请仅输出一个“严格 JSON”的 PlanPatch（不要解释、不要调用工具、不要输出 ```）：
+{
+  "type": "PlanPatch",
+  "title": "可选：新标题",
+  "remove_steps": [],
+  "update_steps": [],
+  "add_steps": [],
+  "reason": "可选：解释为何这样 patch"
+}
+
+硬性约束：
+- 不得删除/修改 status=done 的步骤
+- PlanPatch 内部不得冲突（同一步骤不能同时 remove 与 update）
+- add_steps 的 status 必须是 pending
+
+
