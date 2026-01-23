@@ -86,7 +86,7 @@ def execute_single_step_iteration(
     执行单个计划步骤的一次 LLM 交互轮次。
     返回: (control_signal, did_modify_code, did_use_tool)
     """
-    tools_hint = ", ".join(step.tools_expected) if step.tools_expected else "（未指定，模型自选）"
+    tools_hint = ", ".join(step.tools_expected) if step.tools_expected else "display（分析/总结类步骤）"
     loop.logger.info(
         f"[bold yellow]→ 执行步骤 {step_cursor + 1}/{len(plan.steps)}: {step.id}（轮次 {iteration + 1}/{loop.cfg.orchestrator.max_step_tool_calls}）[/bold yellow] "
         f"[描述] {step.description} [建议工具] {tools_hint}"
@@ -97,11 +97,18 @@ def execute_single_step_iteration(
         _ev("plan_step_status_changed", {"step_id": step.id, "status": "in_progress"})
 
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
+    
+    # 判断是否为分析/总结类步骤（无指定工具）
+    is_analysis_step = not step.tools_expected or len(step.tools_expected) == 0
+    # 兜底工具：分析类步骤默认使用 display
+    tools_for_prompt = ", ".join(step.tools_expected) if step.tools_expected else "display（输出分析结果）"
+    
     step_prompt = render_prompt(
         "user/stage/execute_step.j2",
         step_id=step.id,
         step_description=step.description,
-        tools_expected=(", ".join(step.tools_expected) if step.tools_expected else "根据需求自主选择"),
+        tools_expected=tools_for_prompt,
+        is_analysis_step=is_analysis_step,
     ).strip()
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)
