@@ -113,6 +113,24 @@ def llm_chat(
         loop.file_only_logger.warning(f"估算 prompt tokens 失败: {ex}", exc_info=True)
         prompt_tokens_est = 0
 
+    # P0 紧急截断：如果 token 使用率 > 95%，强制裁剪到只保留 system + 最近 3 条消息
+    max_tokens = getattr(loop.llm, "max_tokens", 32768) or 32768
+    utilization = prompt_tokens_est / max_tokens if max_tokens > 0 else 0
+    if utilization > 0.95 and len(loop.messages) > 4:
+        loop.logger.warning(
+            f"[red]⚠ 紧急截断触发: {prompt_tokens_est} tokens ({utilization*100:.1f}%) > 95% 预算[/red]"
+        )
+        # 保留 system + 最近 3 条消息
+        system_msg = loop.messages[0] if loop.messages and loop.messages[0].role == "system" else None
+        recent_msgs = loop.messages[-3:]
+        if system_msg:
+            loop.messages = [system_msg] + recent_msgs
+        else:
+            loop.messages = recent_msgs
+        # 重新估算
+        prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
+        loop.logger.warning(f"[yellow]紧急截断后: {len(loop.messages)} 条消息, {prompt_tokens_est} tokens[/yellow]")
+
     # 1) 记录/打印请求参数（model 等）与请求数据摘要
     try:
         # 构建完整的 messages 列表（用于 TUI 显示系统/用户提示词）
@@ -252,6 +270,25 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
     lines: list[str] = []
     if caller:
         lines.append(f"[caller] {caller}")
+    
+    # 输出系统提示词摘要（用于调试上下文溢出）
+    include_system_prompt = bool(getattr(llm_cfg, "include_system_prompt", True)) if llm_cfg is not None else True
+    max_system_chars = int(getattr(llm_cfg, "max_system_chars", 2000) or 2000) if llm_cfg is not None else 2000
+    if include_system_prompt and loop.messages:
+        system_msg = next((m for m in loop.messages if m.role == "system"), None)
+        if system_msg and system_msg.content:
+            sys_content = system_msg.content
+            sys_len = len(sys_content)
+            lines.append("===== System Prompt 摘要 =====")
+            lines.append(f"[系统提示词长度: {sys_len} chars]")
+            if sys_len > max_system_chars:
+                # 截断显示：头部 + 尾部
+                head = sys_content[:max_system_chars // 2]
+                tail = sys_content[-(max_system_chars // 2):]
+                lines.append(f"{head}\n...[省略 {sys_len - max_system_chars} chars]...\n{tail}")
+            else:
+                lines.append(sys_content)
+    
     lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")
     if include_params:
         try:

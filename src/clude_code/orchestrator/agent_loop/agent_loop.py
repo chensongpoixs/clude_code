@@ -217,7 +217,17 @@ class AgentLoop:
 
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
-        self._repo_map = self.tools.generate_repo_map()
+        raw_repo_map = self.tools.generate_repo_map()
+        
+        # 系统提示词大小保护：repo_map 最多占用 20% 的 token 预算
+        MAX_REPO_MAP_CHARS = int(self.llm.max_tokens * 0.2 * 3.5)  # 约 20% token 预算
+        if len(raw_repo_map) > MAX_REPO_MAP_CHARS:
+            # 截断 repo_map，保留头部（核心文件）
+            self._repo_map = raw_repo_map[:MAX_REPO_MAP_CHARS] + f"\n... [repo_map 已截断，原长度: {len(raw_repo_map)} chars]"
+            self.logger.warning(f"[yellow]repo_map 过大，已截断: {len(raw_repo_map)} → {MAX_REPO_MAP_CHARS} chars[/yellow]")
+        else:
+            self._repo_map = raw_repo_map
+        
         self._env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
         self._tools_section = render_tools_for_system_prompt(include_schema=False)
 
@@ -579,11 +589,22 @@ class AgentLoop:
                 self.logger.warning(f"[yellow]Profile System Prompt 构建失败: {e}，降级使用默认[/yellow]")
         
         # 降级：使用默认 SYSTEM_PROMPT
-        return (
+        combined = (
             f"{SYSTEM_PROMPT}"
             f"{self._project_memory_text}"
             f"\n\n=== 环境信息 ===\n{self._env_info}\n\n=== 代码仓库符号概览 ===\n{self._repo_map}"
         )
+        
+        # 系统提示词总长度保护：最多占用 50% 的 token 预算
+        MAX_SYSTEM_CHARS = int(self.llm.max_tokens * 0.5 * 3.5)  # 约 50% token 预算
+        if len(combined) > MAX_SYSTEM_CHARS:
+            self.logger.warning(
+                f"[yellow]⚠ 系统提示词过大: {len(combined)} chars > {MAX_SYSTEM_CHARS} chars (50% token budget)[/yellow]"
+            )
+            # 截断：保留头部 + 基本环境信息
+            combined = combined[:MAX_SYSTEM_CHARS] + "\n... [系统提示词已截断]"
+        
+        return combined
     
     def _update_system_prompt_for_profile(self, profile: PromptProfile | None) -> None:
         """

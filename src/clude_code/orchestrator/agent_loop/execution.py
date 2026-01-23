@@ -173,8 +173,16 @@ def execute_single_step_iteration(
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
-        loop.messages.append(ChatMessage(role="user", content=read_prompt("user/stage/invalid_step_output_retry.md").strip()))
-        loop._trim_history(max_messages=30)
+        
+        # P2 修复：错误消息去重，避免重试循环导致消息雪崩
+        error_prompt = read_prompt("user/stage/invalid_step_output_retry.md").strip()
+        last_user_msg = next((m for m in reversed(loop.messages) if m.role == "user"), None)
+        if last_user_msg and "你的输出既不是工具调用" in last_user_msg.content:
+            # 已有错误提示，不再追加（避免雪崩）
+            loop.logger.debug("[dim]跳过重复错误提示（已存在）[/dim]")
+        else:
+            loop.messages.append(ChatMessage(role="user", content=error_prompt))
+            loop._trim_history(max_messages=30)
         return None, False, False
 
     name = tool_call["tool"]

@@ -142,14 +142,54 @@ class PlanPatch(BaseModel):
     reason: Optional[str] = Field(default=None, description="可选：为什么这样 patch（用于可观测性）")
 
 
+def _auto_fix_patch_conflicts(obj: dict) -> tuple[dict, list[str]]:
+    """
+    自动纠正 PlanPatch 冲突（P0 修复）。
+    
+    规则：
+    - 如果同时在 remove_steps 和 update_steps，保留 update（修改意图强于删除）
+    - 如果同时在 remove_steps 和 add_steps，保留 add（新增意图优先）
+    - 如果同时在 update_steps 和 add_steps，保留 update（已存在步骤优先更新）
+    
+    Returns:
+        (fixed_obj, warnings): 纠正后的字典和警告列表
+    """
+    warnings: list[str] = []
+    
+    remove_ids = set(str(x).strip() for x in obj.get("remove_steps", []) if str(x).strip())
+    update_ids = set(str(u.get("id", "")).strip() for u in obj.get("update_steps", []) if isinstance(u, dict))
+    add_ids = set(str(s.get("id", "")).strip() for s in obj.get("add_steps", []) if isinstance(s, dict))
+    
+    # 冲突 1: remove ∩ update → 保留 update
+    rm_up_conflict = remove_ids & update_ids
+    if rm_up_conflict:
+        obj["remove_steps"] = [rid for rid in obj.get("remove_steps", []) if str(rid).strip() not in rm_up_conflict]
+        warnings.append(f"自动纠正：从 remove_steps 移除 {list(rm_up_conflict)}（保留 update）")
+    
+    # 冲突 2: remove ∩ add → 保留 add
+    rm_add_conflict = remove_ids & add_ids
+    if rm_add_conflict:
+        obj["remove_steps"] = [rid for rid in obj.get("remove_steps", []) if str(rid).strip() not in rm_add_conflict]
+        warnings.append(f"自动纠正：从 remove_steps 移除 {list(rm_add_conflict)}（保留 add）")
+    
+    # 冲突 3: update ∩ add → 保留 update
+    up_add_conflict = update_ids & add_ids
+    if up_add_conflict:
+        obj["add_steps"] = [s for s in obj.get("add_steps", []) if isinstance(s, dict) and str(s.get("id", "")).strip() not in up_add_conflict]
+        warnings.append(f"自动纠正：从 add_steps 移除 {list(up_add_conflict)}（保留 update）")
+    
+    return obj, warnings
+
+
 def parse_plan_patch_from_text(text: str) -> PlanPatch:
     """
     从 LLM 文本中解析 PlanPatch（计划补丁）。
     
     解析策略：
     1. 提取 JSON 候选（支持 fenced code block）
-    2. 尝试 Pydantic 校验（extra="forbid" 会拒绝包含 steps 的 full Plan）
-    3. 失败抛 ValueError，上层可回退解析 full Plan
+    2. 自动纠正冲突（同一步骤不能同时在 remove/update/add）
+    3. 尝试 Pydantic 校验（extra="forbid" 会拒绝包含 steps 的 full Plan）
+    4. 失败抛 ValueError，上层可回退解析 full Plan
     
     Args:
         text: LLM 输出的原始文本
@@ -167,6 +207,15 @@ def parse_plan_patch_from_text(text: str) -> PlanPatch:
             obj = json.loads(c)
             if not isinstance(obj, dict):
                 continue
+            
+            # P0 修复：自动纠正冲突
+            obj, fix_warnings = _auto_fix_patch_conflicts(obj)
+            if fix_warnings:
+                import logging
+                logger = logging.getLogger(__name__)
+                for w in fix_warnings:
+                    logger.warning(f"[PlanPatch] {w}")
+            
             patch = PlanPatch.model_validate(obj)
             return patch
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
