@@ -6,6 +6,8 @@ from typing import Any, Callable, TYPE_CHECKING
 from clude_code.llm.llama_cpp_http import ChatMessage
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.tooling.local_tools import ToolResult
+from clude_code.tooling.feedback import format_feedback_message
+from .logging_utils import format_args_summary
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -77,8 +79,24 @@ def execute_react_fallback_loop(
 
             return AgentTurn(assistant_text=assistant, tool_used=tool_used, trace_id=trace_id, events=events)
 
-        name = tool_call["tool"]
-        args = tool_call["args"]
+        # 兼容：args/params/arguments/input；以及 {"toolname": {...}} 单键简写
+        if isinstance(tool_call, dict) and "tool" in tool_call and isinstance(tool_call.get("tool"), str):
+            name = str(tool_call["tool"])
+            args = tool_call.get("args")
+            if args is None:
+                args = tool_call.get("params") or tool_call.get("arguments") or tool_call.get("input") or {}
+        elif isinstance(tool_call, dict) and len(tool_call) == 1:
+            name, args = next(iter(tool_call.items()))
+        else:
+            name, args = None, None
+
+        if not isinstance(name, str) or not isinstance(args, dict):
+            loop.file_only_logger.warning(f"无法解析工具调用协议: {tool_call}", exc_info=False)
+            loop.messages.append(ChatMessage(role="assistant", content=assistant))
+            retry = "请只输出工具调用 JSON：必须包含 tool 和 args 字段（或使用单键简写），且 args 必须是对象。"
+            loop.messages.append(ChatMessage(role="user", content=retry))
+            loop._trim_history(max_messages=30)
+            continue
         # if name == "none" or name.lower() == "no_tool":
         #     loop.logger.error(f"[red]✗ 未知工具调用: {name}，跳过并继续下一轮[/red]")
         #     loop.file_only_logger.error(f"未知工具调用 [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]")
@@ -87,12 +105,12 @@ def execute_react_fallback_loop(
         #     loop.messages.append(ChatMessage(role="assistant", content=clean_assistant)) 
         #     loop._trim_history(max_messages=30)
         #     return AgentTurn(assistant_text=f"工具调用失败：未知工具 {name}，请使用其他可用工具。", tool_used=tool_used, trace_id=trace_id, events=events)
-        args_summary = loop._format_args_summary(name, args)
+        args_summary = format_args_summary(name, args)
         loop.logger.info(f"[bold blue]🔧 解析到工具调用: {name}[/bold blue] [轮次] {iteration + 1}/20 [参数] {args_summary}")
         loop.file_only_logger.info(f"工具调用详情 [iteration={iteration + 1}] [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]")
         _ev("tool_call_parsed", {"tool": name, "args": args})
 
-        clean_assistant = json.dumps(tool_call, ensure_ascii=False)
+        clean_assistant = json.dumps({"tool": name, "args": args}, ensure_ascii=False)
         loop.messages.append(ChatMessage(role="assistant", content=clean_assistant))
         _ev("assistant_tool_call_recorded", {"tool": name})
         loop._trim_history(max_messages=30)
@@ -102,7 +120,9 @@ def execute_react_fallback_loop(
 
         _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload})
 
-        result_msg = _tool_result_to_message(name, result, keywords=keywords)
+        # 老接口仍保留注入点；若外部传入为空则用默认 formatter
+        formatter = _tool_result_to_message or format_feedback_message
+        result_msg = formatter(name, result, keywords=keywords)
         loop.messages.append(ChatMessage(role="user", content=result_msg))
         loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name}")
         loop.file_only_logger.debug(f"工具结果回喂 [tool={name}] [len={len(result_msg)}]")

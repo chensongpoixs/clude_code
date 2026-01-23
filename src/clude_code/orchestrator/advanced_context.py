@@ -163,8 +163,12 @@ class AdvancedContextManager:
         remaining_tokens = self.window.available_tokens - used_tokens
 
         if remaining_tokens <= 0:
-            # 空间不足，只保留最关键的内容
-            return optimized_items[:1] if optimized_items else []
+            # 空间不足时的“目标保全”：至少保留 system + 最后一条（通常是当前任务/指令）
+            if not optimized_items:
+                return []
+            if len(optimized_items) == 1:
+                return optimized_items[:1]
+            return [optimized_items[0], optimized_items[-1]]
 
         # 3. 选择性保留中等优先级内容
         medium_items = [item for item in self.context_items

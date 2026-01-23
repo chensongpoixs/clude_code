@@ -10,6 +10,7 @@ from clude_code.orchestrator.state_m import AgentState
 from clude_code.orchestrator.planner import Plan
 from .control_protocol import try_parse_control_envelope
 from clude_code.prompts import read_prompt, render_prompt
+from .logging_utils import format_args_summary
 
 
 
@@ -183,15 +184,31 @@ def execute_single_step_iteration(
         loop._trim_history(max_messages=30)
         return None, False, False
 
-    name = tool_call["tool"]
-    args = tool_call["args"]
+    # 兼容：args/params/arguments/input；以及 {"toolname": {...}} 单键简写
+    if isinstance(tool_call, dict) and "tool" in tool_call and isinstance(tool_call.get("tool"), str):
+        name = str(tool_call["tool"])
+        args = tool_call.get("args")
+        if args is None:
+            args = tool_call.get("params") or tool_call.get("arguments") or tool_call.get("input") or {}
+    elif isinstance(tool_call, dict) and len(tool_call) == 1:
+        name, args = next(iter(tool_call.items()))
+    else:
+        name, args = None, None
+
+    if not isinstance(name, str) or not isinstance(args, dict):
+        loop.messages.append(ChatMessage(role="assistant", content=assistant))
+        loop._trim_history(max_messages=30)
+        retry_text = loop._compose_stage_prompt(stage="invalid_step_output_retry", vars={}).strip() or read_prompt("user/stage/invalid_step_output_retry.md").strip()
+        loop.messages.append(ChatMessage(role="user", content=retry_text))
+        loop._trim_history(max_messages=30)
+        return None, False, False
     _ev("tool_call_parsed", {"tool": name, "args": args, "step_id": step.id})
 
-    args_summary = loop._format_args_summary(name, args)
+    args_summary = format_args_summary(name, args)
     loop.logger.info(f"[bold blue]🔧 解析到工具调用: {name}[/bold blue] [步骤] {step.id} [参数] {args_summary}")
     loop.file_only_logger.info(f"工具调用详情 [step_id={step.id}] [tool={name}] [args={json.dumps(args, ensure_ascii=False)}]")
 
-    clean_assistant = json.dumps(tool_call, ensure_ascii=False)
+    clean_assistant = json.dumps({"tool": name, "args": args}, ensure_ascii=False)
     loop.messages.append(ChatMessage(role="assistant", content=clean_assistant))
     loop._trim_history(max_messages=30)
 

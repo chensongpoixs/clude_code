@@ -70,7 +70,16 @@ class VectorStore:
                 pa.field("scope", pa.string()),
                 pa.field("chunk_id", pa.string()),
             ])
-            self._table = self._db.create_table(self.table_name, schema=schema)
+            # 竞态容错：多线程/多进程同时初始化时可能出现“检查时不存在，但创建时已存在”
+            try:
+                self._table = self._db.create_table(self.table_name, schema=schema)
+            except Exception as e:
+                msg = str(e)
+                if "already exists" in msg.lower():
+                    _logger.warning(f"LanceDB 表已存在（并发初始化竞态），将改为 open_table: {self.table_name}")
+                    self._table = self._db.open_table(self.table_name)
+                else:
+                    raise
         else:
             self._table = self._db.open_table(self.table_name)
 

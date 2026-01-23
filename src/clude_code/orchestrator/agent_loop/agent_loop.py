@@ -866,6 +866,18 @@ class AgentLoop:
         from .tool_dispatch import render_tools_for_system_prompt
 
         tools_section = render_tools_for_system_prompt(include_schema=False)
+
+        # 防止 system prompt 过大（尤其是 system/core/global.md 过长时）导致“只剩 system 仍超标”的失忆问题
+        max_tokens = int(getattr(self.cfg.llm, "max_tokens", 32768) or 32768)
+        max_repo_map_tokens = int(max_tokens * 0.20)
+        max_system_tokens = int(max_tokens * 0.25)
+
+        # repo_map 只作为索引参考，先做物理截断（字符粗估：token≈len//2）
+        if repo_map and (len(repo_map) // 2) > max_repo_map_tokens:
+            max_chars = max_repo_map_tokens * 2
+            self.file_only_logger.warning(f"repo_map too large, truncating: chars={len(repo_map)}")
+            repo_map = repo_map[:max_chars] + "\n\n[... Repo Map Truncated ...]\n"
+
         sys_text = self._compose_stage_prompt(
             stage="system",
             vars={
@@ -874,7 +886,14 @@ class AgentLoop:
                 "env_info": f"\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}",
             },
         )
-        return sys_text or (tools_section + project_memory_text + "\n" + env_info + "\n" + repo_map)
+
+        out = sys_text or (tools_section + project_memory_text + "\n" + env_info + "\n" + repo_map)
+        # system prompt 总量硬上限（避免 40k+ tokens 把窗口撑爆）
+        if out and (len(out) // 2) > max_system_tokens:
+            max_chars = max_system_tokens * 2
+            self.file_only_logger.warning(f"system prompt too large, truncating: chars={len(out)}")
+            out = out[:max_chars] + "\n\n[... System Prompt Truncated ...]\n"
+        return out
 
     def _refresh_system_prompt_for_current_intent(self, _ev: Callable[[str, dict[str, Any]], None]) -> None:
         """每轮根据当前 intent/profile 刷新 system prompt（更新 messages[0]）。"""
@@ -1058,18 +1077,31 @@ class AgentLoop:
         _tool_result_to_message: Callable[[str, ToolResult, set[str] | None], str],
         _set_state: Callable[[AgentState, dict[str, Any] | None], None],
     ) -> AgentTurn:
-        return _react_execute_react_fallback_loop(
-            self,
-            trace_id,
-            keywords,
-            confirm,
-            events,
-            _ev,
-            _llm_chat,
-            _try_parse_tool_call,
-            _tool_result_to_message,
-            _set_state,
-        )
+        # 兼容 react.py 的不同版本签名：旧版(10参) / 新版(8参)
+        try:
+            return _react_execute_react_fallback_loop(
+                self,
+                trace_id,
+                keywords,
+                confirm,
+                events,
+                _ev,
+                _llm_chat,
+                _try_parse_tool_call,
+                _tool_result_to_message,
+                _set_state,
+            )
+        except TypeError:
+            return _react_execute_react_fallback_loop(
+                self,
+                trace_id,
+                keywords,
+                confirm,
+                events,
+                _ev,
+                _llm_chat,
+                _set_state,
+            )
 
     def _execute_plan_steps(
         self,
