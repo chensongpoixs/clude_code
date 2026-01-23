@@ -57,6 +57,24 @@
 - 禁止删除/修改 status=done 的步骤
 - 新增步骤的 status 会被强制设为 pending
 
+### 4. 替换步骤的正确方式
+如果你想"替换"某个步骤（删除旧的，新增修改后的），请直接使用 `update_steps`：
+
+✅ **正确做法**（直接更新）：
+```json
+{
+  "update_steps": [{"id": "step_6", "description": "新描述", "tools_expected": ["read_symbol"]}]
+}
+```
+
+❌ **错误做法**（remove + add 同一个 id）：
+```json
+{
+  "remove_steps": ["step_6"],
+  "add_steps": [{"id": "step_6", "description": "新描述", ...}]
+}
+```
+
 ---
 
 ## 当前失败步骤

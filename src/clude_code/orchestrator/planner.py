@@ -166,11 +166,26 @@ def _auto_fix_patch_conflicts(obj: dict) -> tuple[dict, list[str]]:
         obj["remove_steps"] = [rid for rid in obj.get("remove_steps", []) if str(rid).strip() not in rm_up_conflict]
         warnings.append(f"自动纠正：从 remove_steps 移除 {list(rm_up_conflict)}（保留 update）")
     
-    # 冲突 2: remove ∩ add → 保留 add
+    # 冲突 2: remove ∩ add → 转换为 update（"替换"意图）
+    # 注意：简单保留 add 会导致与现有计划中的 step_id 冲突
+    # 正确做法：将 add 转换为 update，既能修改内容又不会 id 冲突
     rm_add_conflict = remove_ids & add_ids
     if rm_add_conflict:
+        # 将 add_steps 中的冲突项转移到 update_steps
+        for add_step in obj.get("add_steps", []):
+            if isinstance(add_step, dict) and str(add_step.get("id", "")).strip() in rm_add_conflict:
+                # 构造 update 条目
+                update_entry = {"id": add_step["id"]}
+                for key in ["description", "dependencies", "tools_expected"]:
+                    if key in add_step:
+                        update_entry[key] = add_step[key]
+                obj.setdefault("update_steps", []).append(update_entry)
+        
+        # 从 add_steps 中移除冲突项
+        obj["add_steps"] = [s for s in obj.get("add_steps", []) if not (isinstance(s, dict) and str(s.get("id", "")).strip() in rm_add_conflict)]
+        # 从 remove_steps 中移除冲突项
         obj["remove_steps"] = [rid for rid in obj.get("remove_steps", []) if str(rid).strip() not in rm_add_conflict]
-        warnings.append(f"自动纠正：从 remove_steps 移除 {list(rm_add_conflict)}（保留 add）")
+        warnings.append(f"自动转换：{list(rm_add_conflict)} 从 remove+add 转为 update（替换意图）")
     
     # 冲突 3: update ∩ add → 保留 update
     up_add_conflict = update_ids & add_ids
