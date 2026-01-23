@@ -329,7 +329,20 @@ APPROVAL_REQUESTED = "approval_requested"
 
 ---
 
-## 6. 附录：文件变更清单
+## 6. 业界对标分析
+
+详细的业界对标分析、差距识别和下一步计划请参见：
+
+**📄 [INDUSTRY_GAP_ANALYSIS.md](./INDUSTRY_GAP_ANALYSIS.md)**
+
+主要发现：
+- 🔴 **P0 关键问题**：Profile 选择后未实际使用，RiskRouter 未集成
+- 🟡 **P1 高优先级**：版本回滚、热重载、混合分类
+- 🟢 **P2/P3**：Sandbox、Approvals、可观测性增强
+
+---
+
+## 7. 附录：文件变更清单
 
 ### 新增文件
 - `src/clude_code/orchestrator/registry/profile_registry.py`
