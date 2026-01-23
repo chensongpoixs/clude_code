@@ -4,6 +4,13 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from clude_code.policy.command_policy import evaluate_command
 from clude_code.tooling.local_tools import ToolResult
+from clude_code.orchestrator.risk_router import (
+    get_default_risk_router,
+    ExecutionStrategy,
+    format_plan_review_prompt,
+    format_approval_request,
+)
+from clude_code.orchestrator.registry import RiskLevel
 from .tool_dispatch import TOOL_REGISTRY
 
 if TYPE_CHECKING:
@@ -26,6 +33,79 @@ def run_tool_lifecycle(
 
     spec = TOOL_REGISTRY.get(name)
     side_effects = spec.side_effects if spec is not None else set()
+
+    # P0-3 & P0-4: 风险评估与路由
+    risk_router = get_default_risk_router()
+    current_risk_level = getattr(loop, '_current_risk_level', RiskLevel.MEDIUM)
+    risk_decision = risk_router.route(
+        risk_level=current_risk_level,
+        tool_name=name,
+    )
+    
+    # 记录风险评估审计
+    loop.audit.write(
+        trace_id=trace_id,
+        event="risk_evaluated",
+        data={
+            "tool": name,
+            "profile_risk_level": current_risk_level.value,
+            "effective_risk_level": risk_decision.risk_level.value,
+            "strategy": risk_decision.strategy.value,
+            "requires_confirmation": risk_decision.requires_confirmation,
+            "requires_rollback": risk_decision.requires_rollback,
+        }
+    )
+    _ev("risk_evaluated", {
+        "tool": name,
+        "risk_level": risk_decision.risk_level.value,
+        "strategy": risk_decision.strategy.value,
+    })
+    
+    # P1-1: 高风险操作需要 Plan Review 确认
+    if risk_decision.strategy == ExecutionStrategy.PLAN_REVIEW:
+        loop.logger.warning(f"[yellow]⚠ 高风险操作 ({risk_decision.risk_level.value}): {name}[/yellow]")
+        
+        # 构建详细的 Plan Review 提示
+        plan_summary = f"工具: {name}\n参数: {json.dumps(args, ensure_ascii=False, indent=2)}"
+        affected_files = []
+        if "path" in args:
+            affected_files.append(str(args["path"]))
+        if "paths" in args and isinstance(args["paths"], list):
+            affected_files.extend([str(p) for p in args["paths"]])
+        
+        review_prompt = format_plan_review_prompt(
+            plan_summary=plan_summary,
+            risk_level=risk_decision.risk_level,
+            affected_files=affected_files if affected_files else None,
+        )
+        
+        loop.logger.info(f"[dim]{review_prompt}[/dim]")
+        if not confirm(review_prompt):
+            loop.logger.warning(f"[red]✗ 用户拒绝高风险操作: {name}[/red]")
+            loop.audit.write(trace_id=trace_id, event="risk_deny", data={"tool": name, "risk_level": risk_decision.risk_level.value})
+            _ev("risk_denied_by_user", {"tool": name, "risk_level": risk_decision.risk_level.value})
+            return ToolResult(ok=False, error={"code": "E_RISK_DENIED", "message": f"用户拒绝高风险操作: {name}"})
+        
+        loop.logger.info(f"[green]✓ 用户确认高风险操作: {name}[/green]")
+        loop.audit.write(trace_id=trace_id, event="plan_review_approved", data={"tool": name, "risk_level": risk_decision.risk_level.value})
+        _ev("plan_review_approved", {"tool": name, "risk_level": risk_decision.risk_level.value})
+    
+    # P1-1: CRITICAL 操作需要人工审批
+    if risk_decision.strategy == ExecutionStrategy.APPROVAL_REQUIRED:
+        loop.logger.error(f"[red]🚨 关键风险操作需要审批: {name}[/red]")
+        
+        # 构建审批请求
+        approval_prompt = format_approval_request(
+            operation=name,
+            risk_level=risk_decision.risk_level,
+            details={"args": str(args)[:200]},
+        )
+        loop.logger.info(f"[dim]{approval_prompt}[/dim]")
+        
+        loop.audit.write(trace_id=trace_id, event="approval_required", data={"tool": name, "risk_level": risk_decision.risk_level.value})
+        _ev("approval_required", {"tool": name, "risk_level": risk_decision.risk_level.value})
+        # TODO: 实现完整审批流程（P2-2），当前先拒绝
+        return ToolResult(ok=False, error={"code": "E_APPROVAL_REQUIRED", "message": f"关键风险操作需要人工审批: {name}"})
 
     # 0) 工具权限（对标 Claude Code：allowedTools/disallowedTools）
     allowed = list(getattr(loop.cfg.policy, "allowed_tools", []) or [])

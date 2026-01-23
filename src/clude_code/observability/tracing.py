@@ -310,6 +310,178 @@ class ConsoleTraceExporter(TraceExporter):
                     self.logger.info(f"[trace]   Event: {event.name} at {event.timestamp}")
 
 
+class OTLPTraceExporter(TraceExporter):
+    """
+    P3-3: OpenTelemetry 兼容的 OTLP 格式导出器
+    
+    特性：
+    - 输出 OTLP JSON 格式（兼容 OpenTelemetry Collector）
+    - 支持文件输出和 HTTP 推送
+    - 可配置端点
+    
+    参考：https://opentelemetry.io/docs/specs/otlp/
+    """
+    
+    def __init__(
+        self,
+        workspace_root: str,
+        endpoint: str | None = None,
+        service_name: str = "clude_code",
+    ):
+        """
+        初始化 OTLP 导出器。
+        
+        参数:
+            workspace_root: 工作区根目录
+            endpoint: OTLP HTTP 端点（如 http://localhost:4318/v1/traces），None = 仅写文件
+            service_name: 服务名称
+        """
+        self.workspace_root = workspace_root
+        self.endpoint = endpoint
+        self.service_name = service_name
+        self.logger = get_logger(__name__, workspace_root=workspace_root)
+        
+        # 创建存储目录
+        self.storage_dir = Path(workspace_root) / ".clude" / "traces"
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.data_file = self.storage_dir / "traces_otlp.json"
+    
+    def _span_to_otlp(self, span: Span) -> Dict[str, Any]:
+        """将 Span 转换为 OTLP 格式"""
+        return {
+            "traceId": span.trace_id.replace("-", ""),  # OTLP 使用无连字符的 hex
+            "spanId": span.span_id.replace("-", "")[:16],  # 8 bytes = 16 hex chars
+            "parentSpanId": span.parent_span_id.replace("-", "")[:16] if span.parent_span_id else "",
+            "name": span.name,
+            "kind": self._span_kind_to_otlp(span.kind),
+            "startTimeUnixNano": int(span.start_time * 1e9),
+            "endTimeUnixNano": int(span.end_time * 1e9) if span.end_time else 0,
+            "attributes": [
+                {"key": k, "value": self._value_to_otlp(v)}
+                for k, v in span.attributes.items()
+            ],
+            "events": [
+                {
+                    "timeUnixNano": int(event.timestamp * 1e9),
+                    "name": event.name,
+                    "attributes": [
+                        {"key": k, "value": self._value_to_otlp(v)}
+                        for k, v in event.attributes.items()
+                    ],
+                }
+                for event in span.events
+            ],
+            "status": {
+                "code": self._status_to_otlp(span.status),
+                "message": span.status_message,
+            },
+            "links": [
+                {
+                    "traceId": link.trace_id.replace("-", ""),
+                    "spanId": link.span_id.replace("-", "")[:16],
+                    "attributes": [
+                        {"key": k, "value": self._value_to_otlp(v)}
+                        for k, v in link.attributes.items()
+                    ],
+                }
+                for link in span.links
+            ],
+        }
+    
+    def _span_kind_to_otlp(self, kind: SpanKind) -> int:
+        """SpanKind 转 OTLP 编码"""
+        mapping = {
+            SpanKind.INTERNAL: 1,
+            SpanKind.SERVER: 2,
+            SpanKind.CLIENT: 3,
+            SpanKind.PRODUCER: 4,
+            SpanKind.CONSUMER: 5,
+        }
+        return mapping.get(kind, 0)
+    
+    def _status_to_otlp(self, status: StatusCode) -> int:
+        """StatusCode 转 OTLP 编码"""
+        mapping = {
+            StatusCode.OK: 1,
+            StatusCode.ERROR: 2,
+            StatusCode.CANCELLED: 2,
+            StatusCode.UNKNOWN: 0,
+        }
+        return mapping.get(status, 0)
+    
+    def _value_to_otlp(self, value: Any) -> Dict[str, Any]:
+        """将值转换为 OTLP AnyValue 格式"""
+        if isinstance(value, bool):
+            return {"boolValue": value}
+        elif isinstance(value, int):
+            return {"intValue": str(value)}
+        elif isinstance(value, float):
+            return {"doubleValue": value}
+        elif isinstance(value, str):
+            return {"stringValue": value}
+        elif isinstance(value, (list, tuple)):
+            return {"arrayValue": {"values": [self._value_to_otlp(v) for v in value]}}
+        else:
+            return {"stringValue": str(value)}
+    
+    def export(self, spans: List[Span]) -> None:
+        """导出 Span 数据为 OTLP 格式"""
+        if not spans:
+            return
+        
+        # 构建 OTLP 请求体
+        otlp_data = {
+            "resourceSpans": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "service.name", "value": {"stringValue": self.service_name}},
+                            {"key": "telemetry.sdk.name", "value": {"stringValue": "clude_code"}},
+                            {"key": "telemetry.sdk.language", "value": {"stringValue": "python"}},
+                        ]
+                    },
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "clude_code.tracer"},
+                            "spans": [self._span_to_otlp(span) for span in spans],
+                        }
+                    ],
+                }
+            ]
+        }
+        
+        # 写入文件
+        try:
+            with open(self.data_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(otlp_data, ensure_ascii=False) + "\n")
+        except Exception as e:
+            self.logger.error(f"Error writing OTLP trace: {e}")
+        
+        # 如果配置了端点，推送到 Collector
+        if self.endpoint:
+            self._push_to_collector(otlp_data)
+    
+    def _push_to_collector(self, data: Dict[str, Any]) -> None:
+        """推送到 OpenTelemetry Collector"""
+        try:
+            import urllib.request
+            import urllib.error
+            
+            req = urllib.request.Request(
+                self.endpoint,
+                data=json.dumps(data).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status >= 400:
+                    self.logger.warning(f"OTLP push failed: {resp.status}")
+        except Exception as e:
+            # 推送失败不阻塞主流程
+            self.logger.debug(f"OTLP push error (ignored): {e}")
+
+
 class SamplingTraceExporter(TraceExporter):
     """采样追踪导出器"""
     

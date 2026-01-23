@@ -7,6 +7,7 @@ Prompt 加载器（增强版）
 3. 版本化文件解析（xxx_v1.2.3.md）
 4. YAML front matter 解析
 5. 简单变量替换（兼容模式）
+6. P3-1: LRU 缓存优化（基于文件 mtime）
 
 对齐 agent_design_v_1.0.md 设计规范。
 """
@@ -14,11 +15,119 @@ Prompt 加载器（增强版）
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+# ============================================================
+# P3-1: 缓存系统
+# ============================================================
+
+@dataclass
+class _CacheEntry:
+    """缓存条目"""
+    content: str
+    metadata: "PromptMetadata"
+    mtime: float  # 文件修改时间
+    file_version: str
+
+
+class _PromptCache:
+    """
+    P3-1: Prompt LRU 缓存
+    
+    特性：
+    - 基于文件 mtime 的缓存有效性检查
+    - 线程安全
+    - 可配置的最大缓存数
+    """
+    
+    def __init__(self, max_size: int = 100):
+        self._cache: dict[str, _CacheEntry] = {}
+        self._access_order: list[str] = []  # LRU 顺序
+        self._max_size = max_size
+        self._lock = threading.Lock()
+        self._hits = 0
+        self._misses = 0
+    
+    def get(self, key: str, path: Path) -> _CacheEntry | None:
+        """
+        获取缓存（自动检查 mtime）。
+        
+        返回:
+            缓存条目，None 如果未命中或已过期
+        """
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                self._misses += 1
+                return None
+            
+            # 检查文件是否已修改
+            try:
+                current_mtime = path.stat().st_mtime
+                if current_mtime > entry.mtime:
+                    # 文件已更新，缓存失效
+                    del self._cache[key]
+                    if key in self._access_order:
+                        self._access_order.remove(key)
+                    self._misses += 1
+                    return None
+            except OSError:
+                # 文件不存在或无法访问
+                self._misses += 1
+                return None
+            
+            # 更新 LRU 顺序
+            if key in self._access_order:
+                self._access_order.remove(key)
+            self._access_order.append(key)
+            
+            self._hits += 1
+            return entry
+    
+    def put(self, key: str, entry: _CacheEntry) -> None:
+        """添加缓存条目"""
+        with self._lock:
+            # LRU 淘汰
+            while len(self._cache) >= self._max_size and self._access_order:
+                oldest = self._access_order.pop(0)
+                self._cache.pop(oldest, None)
+            
+            self._cache[key] = entry
+            if key in self._access_order:
+                self._access_order.remove(key)
+            self._access_order.append(key)
+    
+    def clear(self) -> None:
+        """清空缓存"""
+        with self._lock:
+            self._cache.clear()
+            self._access_order.clear()
+            self._hits = 0
+            self._misses = 0
+    
+    @property
+    def stats(self) -> dict[str, int]:
+        """获取缓存统计"""
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = (self._hits / total * 100) if total > 0 else 0
+            return {
+                "hits": self._hits,
+                "misses": self._misses,
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "hit_rate": round(hit_rate, 1),
+            }
+
+
+# 全局缓存实例
+_prompt_cache = _PromptCache(max_size=100)
 
 # Jinja2 可选导入（优雅降级）
 try:
@@ -198,7 +307,7 @@ def _simple_render(text: str, **variables: object) -> str:
 
 def read_prompt(rel_path: str, version: str | None = None) -> str:
     """
-    读取 prompt 文件内容。
+    读取 prompt 文件内容（带缓存）。
     
     参数:
         rel_path: 相对于 prompts/ 的路径（如 "system/core/global.md"）
@@ -213,8 +322,25 @@ def read_prompt(rel_path: str, version: str | None = None) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {rel_path}")
     
+    # P3-1: 尝试从缓存获取
+    cache_key = f"{rel_path}@{version or 'default'}"
+    cached = _prompt_cache.get(cache_key, path)
+    if cached:
+        return cached.content
+    
+    # 缓存未命中，读取文件
     text = path.read_text(encoding="utf-8", errors="replace")
-    content, _ = _parse_front_matter(text)
+    content, metadata = _parse_front_matter(text)
+    file_version = _parse_version_from_filename(path.name)
+    
+    # 存入缓存
+    _prompt_cache.put(cache_key, _CacheEntry(
+        content=content,
+        metadata=metadata,
+        mtime=path.stat().st_mtime,
+        file_version=file_version,
+    ))
+    
     return content
 
 
@@ -256,7 +382,7 @@ def render_prompt(rel_path: str, version: str | None = None, **variables: object
 
 def load_prompt_asset(rel_path: str, version: str | None = None) -> PromptAsset:
     """
-    加载完整的 prompt 资产（含元数据）。
+    加载完整的 prompt 资产（含元数据，带缓存）。
     
     参数:
         rel_path: 相对路径
@@ -271,9 +397,29 @@ def load_prompt_asset(rel_path: str, version: str | None = None) -> PromptAsset:
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {rel_path}")
     
+    # P3-1: 尝试从缓存获取
+    cache_key = f"{rel_path}@{version or 'default'}"
+    cached = _prompt_cache.get(cache_key, path)
+    if cached:
+        return PromptAsset(
+            content=cached.content,
+            metadata=cached.metadata,
+            file_version=cached.file_version or cached.metadata.version,
+            path=rel_path,
+        )
+    
+    # 缓存未命中，读取文件
     text = path.read_text(encoding="utf-8", errors="replace")
     content, metadata = _parse_front_matter(text)
     file_version = _parse_version_from_filename(path.name)
+    
+    # 存入缓存
+    _prompt_cache.put(cache_key, _CacheEntry(
+        content=content,
+        metadata=metadata,
+        mtime=path.stat().st_mtime,
+        file_version=file_version,
+    ))
     
     return PromptAsset(
         content=content,
@@ -355,3 +501,25 @@ def render_system_prompt(
         parts.append(render_prompt(context_path, **context_vars))
     
     return "\n\n".join(parts)
+
+
+# ============================================================
+# P3-1: 缓存控制接口
+# ============================================================
+
+def get_cache_stats() -> dict[str, int]:
+    """获取缓存统计信息"""
+    return _prompt_cache.stats
+
+
+def clear_cache() -> None:
+    """清空 prompt 缓存"""
+    _prompt_cache.clear()
+
+
+def set_cache_max_size(max_size: int) -> None:
+    """设置缓存最大容量"""
+    global _prompt_cache
+    old_cache = _prompt_cache
+    _prompt_cache = _PromptCache(max_size=max_size)
+    # 可选：复制旧缓存数据（暂不实现，直接清空更简单）

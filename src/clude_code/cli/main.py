@@ -12,9 +12,11 @@ from clude_code.cli.cli_logging import get_cli_logger, get_file_logger
 
 # --- 导入子命令 ---
 from clude_code.cli.observability_cmd import observability_app
+from clude_code.cli.prompts_cmd import prompts_app
 
 # --- 添加子命令 ---
 app.add_typer(observability_app, name="observability", help="可观测性相关命令")
+app.add_typer(prompts_app, name="prompts", help="Prompt 版本管理命令")
 
 # --- 命令路由 ---
 

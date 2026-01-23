@@ -200,18 +200,23 @@ class ProfileRegistry:
     - 加载配置文件
     - 按名称查找 Profile
     - 列出所有 Profile
+    - 配置热重载（P1-3）
     """
     
-    def __init__(self, config_path: str | Path | None = None):
+    def __init__(self, config_path: str | Path | None = None, auto_reload: bool = False):
         """
         初始化 Registry。
         
         参数:
             config_path: 配置文件路径，None = 使用默认路径
+            auto_reload: 是否启用自动重载检测
         """
         self._profiles: dict[str, PromptProfile] = {}
         self._config_path: Path | None = None
         self._loaded = False
+        self._auto_reload = auto_reload
+        self._last_mtime: float = 0.0  # P1-3: 文件修改时间
+        self._reload_count: int = 0     # P1-3: 重载次数统计
         
         if config_path:
             self.load(config_path)
@@ -226,14 +231,66 @@ class ProfileRegistry:
             data = yaml.safe_load(f) or {}
         
         profiles_data = data.get("prompt_profiles", {})
+        new_profiles: dict[str, PromptProfile] = {}
         for name, profile_data in profiles_data.items():
-            self._profiles[name] = _parse_profile(name, profile_data)
+            new_profiles[name] = _parse_profile(name, profile_data)
         
+        # 原子性更新
+        self._profiles = new_profiles
         self._config_path = path
+        self._last_mtime = path.stat().st_mtime
         self._loaded = True
     
+    def reload(self) -> bool:
+        """
+        重新加载配置文件。
+        
+        返回:
+            是否成功重载
+        """
+        if not self._config_path:
+            return False
+        
+        try:
+            self.load(self._config_path)
+            self._reload_count += 1
+            return True
+        except Exception:
+            return False
+    
+    def reload_if_changed(self) -> bool:
+        """
+        P1-3: 检测配置文件是否变更，如有变更则重载。
+        
+        返回:
+            是否执行了重载
+        """
+        if not self._config_path or not self._config_path.exists():
+            return False
+        
+        current_mtime = self._config_path.stat().st_mtime
+        if current_mtime > self._last_mtime:
+            return self.reload()
+        return False
+    
+    def check_and_reload(self) -> bool:
+        """
+        P1-3: 智能检查与重载（对外接口）。
+        
+        如果启用了 auto_reload，则检查文件变更；
+        否则直接返回 False。
+        
+        返回:
+            是否执行了重载
+        """
+        if self._auto_reload:
+            return self.reload_if_changed()
+        return False
+    
     def get(self, name: str) -> PromptProfile | None:
-        """按名称获取 Profile"""
+        """按名称获取 Profile（自动检查重载）"""
+        # P1-3: 每次访问时检查是否需要重载
+        self.check_and_reload()
         return self._profiles.get(name)
     
     def get_or_raise(self, name: str) -> PromptProfile:
@@ -270,6 +327,21 @@ class ProfileRegistry:
     def is_loaded(self) -> bool:
         """是否已加载配置"""
         return self._loaded
+    
+    @property
+    def reload_count(self) -> int:
+        """P1-3: 配置重载次数"""
+        return self._reload_count
+    
+    @property
+    def last_mtime(self) -> float:
+        """P1-3: 配置文件最后修改时间"""
+        return self._last_mtime
+    
+    @property
+    def config_path(self) -> Path | None:
+        """配置文件路径"""
+        return self._config_path
     
     def __len__(self) -> int:
         return len(self._profiles)

@@ -51,7 +51,7 @@ from .llm_io import (
 )
 from .react import execute_react_fallback_loop as _react_execute_react_fallback_loop
 from .semantic_search import semantic_search as _semantic_search_fn
-from .tool_dispatch import dispatch_tool as _dispatch_tool_fn, iter_tool_specs as _iter_tool_specs
+from .tool_dispatch import dispatch_tool as _dispatch_tool_fn, iter_tool_specs as _iter_tool_specs, render_tools_for_system_prompt
 
 
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -207,19 +207,17 @@ class AgentLoop:
 
         # Initialize with Repo Map for better global context (Aider-style)
         import platform
-        repo_map = self.tools.generate_repo_map()
-        env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
+        self._repo_map = self.tools.generate_repo_map()
+        self._env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
+        self._tools_section = render_tools_for_system_prompt(include_schema=False)
 
         # Claude Code 对标：自动加载 CLUDE.md 作为项目记忆（只读、失败不阻塞）
-        project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)
+        self._project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)
         self._project_memory_meta: dict[str, object] = project_memory_meta
         self._project_memory_emitted: bool = False
 
-        combined_system_prompt = (
-            f"{SYSTEM_PROMPT}"
-            f"{project_memory_text}"
-            f"\n\n=== 环境信息 ===\n{env_info}\n\n=== 代码仓库符号概览 ===\n{repo_map}"
-        )
+        # 初始化时使用默认 System Prompt（后续会根据 Profile 动态更新）
+        combined_system_prompt = self._build_system_prompt_from_profile(None)
         
         self.messages: list[ChatMessage] = [
             ChatMessage(role="system", content=combined_system_prompt),
@@ -330,8 +328,17 @@ class AgentLoop:
         # 2) 记录用户输入（必要时把规划提示并入同一条 user 消息，避免 role 不交替）
         self.audit.write(trace_id=trace_id, event="user_message", data={"text": user_text})
         _ev("user_message", {"text": user_text})
-        # planning_prompt：将规划提示并入同一条 user 消息（保持 role 交替 + 便于审计）
-        user_content = user_text if planning_prompt is None else planning_prompt
+        
+        # P0-2: 使用 Profile 渲染 User Prompt
+        # - 如果有 planning_prompt，使用 planning_prompt（阶段模板）
+        # - 否则使用 Profile 的意图模板渲染用户输入
+        if planning_prompt is not None:
+            user_content = planning_prompt
+        else:
+            user_content = self._build_user_prompt_from_profile(
+                user_text=user_text,
+                planning_prompt="",
+            )
 
         self.logger.info(f"[bold cyan]发送给 LLM 的 user_content[/bold cyan] len={len(user_content)}")
         # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
@@ -523,6 +530,97 @@ class AgentLoop:
     ) -> ToolResult:
         return run_tool_lifecycle(self, name, args, trace_id, confirm, _ev)
 
+    def _build_system_prompt_from_profile(self, profile: PromptProfile | None) -> str:
+        """
+        根据 Profile 动态构建 System Prompt。
+        
+        对齐 agent_design_v_1.0.md 设计规范：
+        - Profile 决定 System Prompt 组合（Core + Role + Policy + Context）
+        - 支持降级到默认 SYSTEM_PROMPT
+        
+        参数:
+            profile: Prompt Profile，None 表示使用默认 Prompt
+        
+        返回:
+            组合后的 System Prompt 文本
+        """
+        if profile is not None:
+            try:
+                # 使用 Profile 的四层组合
+                system_prompt = profile.get_system_prompt(
+                    tools_section=self._tools_section,
+                    project_memory=self._project_memory_text.strip() if self._project_memory_text else "",
+                    env_info=f"{self._env_info}\n\n=== 代码仓库符号概览 ===\n{self._repo_map}",
+                )
+                self.logger.debug(f"[dim]使用 Profile '{profile.name}' 构建 System Prompt[/dim]")
+                return system_prompt
+            except Exception as e:
+                self.logger.warning(f"[yellow]Profile System Prompt 构建失败: {e}，降级使用默认[/yellow]")
+        
+        # 降级：使用默认 SYSTEM_PROMPT
+        return (
+            f"{SYSTEM_PROMPT}"
+            f"{self._project_memory_text}"
+            f"\n\n=== 环境信息 ===\n{self._env_info}\n\n=== 代码仓库符号概览 ===\n{self._repo_map}"
+        )
+    
+    def _update_system_prompt_for_profile(self, profile: PromptProfile | None) -> None:
+        """
+        更新消息历史中的 System Prompt。
+        
+        当 Profile 变化时调用，确保 System Prompt 与当前 Profile 一致。
+        """
+        if not self.messages or self.messages[0].role != "system":
+            return
+        
+        new_system_prompt = self._build_system_prompt_from_profile(profile)
+        self.messages[0] = ChatMessage(role="system", content=new_system_prompt)
+        self.logger.debug("[dim]已更新 System Prompt[/dim]")
+    
+    def _build_user_prompt_from_profile(
+        self,
+        user_text: str,
+        planning_prompt: str = "",
+    ) -> str:
+        """
+        根据 Profile 渲染 User Prompt。
+        
+        对齐 agent_design_v_1.0.md 设计规范：
+        - 禁止直接使用原始用户输入作为最终 User Prompt
+        - 使用 Profile 的意图模板渲染用户输入
+        
+        参数:
+            user_text: 原始用户输入
+            planning_prompt: 规划协议提示词（可选）
+        
+        返回:
+            渲染后的 User Prompt 文本
+        """
+        profile = self._current_profile
+        
+        if profile is not None:
+            try:
+                # 获取当前意图名称
+                intent_name = ""
+                if hasattr(self, 'classifier') and hasattr(self.classifier, '_last_category'):
+                    intent_name = self.classifier._last_category.value if self.classifier._last_category else ""
+                
+                # 使用 Profile 的意图模板渲染
+                rendered = profile.render_user_prompt(
+                    user_text=user_text,
+                    planning_prompt=planning_prompt,
+                    project_id=getattr(self.cfg, 'project_id', 'default'),
+                    intent_name=intent_name or profile.name,
+                    risk_level=self._current_risk_level.value,
+                )
+                self.logger.debug(f"[dim]使用 Profile '{profile.name}' 渲染 User Prompt[/dim]")
+                return rendered
+            except Exception as e:
+                self.logger.warning(f"[yellow]Profile User Prompt 渲染失败: {e}，降级使用原始输入[/yellow]")
+        
+        # 降级：直接返回原始用户输入
+        return user_text
+
     def _select_profile(self, category: IntentCategory, _ev: Callable[[str, dict[str, Any]], None]) -> PromptProfile | None:
         """
         根据意图分类选择 Prompt Profile。
@@ -542,6 +640,8 @@ class AgentLoop:
                 "risk_level": profile.risk_level.value,
                 "intent_category": category.value,
             })
+            # P0-1: 根据 Profile 动态更新 System Prompt
+            self._update_system_prompt_for_profile(profile)
         else:
             self.logger.debug(f"[dim]未找到 Profile: {profile_name}，使用默认配置[/dim]")
             self._current_profile = None

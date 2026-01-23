@@ -38,16 +38,82 @@ class ClassificationResult(BaseModel):
 
 class IntentClassifier:
     """
-    意图分类器：使用 LLM 对用户输入进行语义分类。
+    意图分类器：使用关键词 + LLM 混合策略对用户输入进行语义分类。
+    
+    P1-4 业界对标：
+    - 快速路径：关键词匹配（高置信度直接返回）
+    - 精准路径：LLM 深度语义分类（低置信度时使用）
+    
     规范化：这是决策门（Decision Gate）的前置步骤。
     """
     
+    # P1-4: 关键词分类规则
+    _KEYWORD_RULES: list[tuple[IntentCategory, set[str], float]] = [
+        # (意图类型, 关键词集合, 置信度)
+        
+        # 问候类 - 高置信度
+        (IntentCategory.GENERAL_CHAT, {
+            "你好", "你好啊", "您好", "哈喽", "嗨", "hi", "hello", "hey",
+            "在吗", "在不在", "晚安", "早上好", "下午好", "晚上好",
+            "谢谢", "感谢", "辛苦了", "拜拜", "再见"
+        }, 0.98),
+        
+        # 能力询问类
+        (IntentCategory.CAPABILITY_QUERY, {
+            "你可以干嘛", "能干嘛", "怎么用", "帮助", "help", "capability",
+            "can you", "你会什么", "你能做什么", "有什么功能"
+        }, 0.95),
+        
+        # 编码任务类
+        (IntentCategory.CODING_TASK, {
+            "写代码", "修改代码", "重构", "优化代码", "实现", "添加功能",
+            "fix bug", "修复", "implement", "create function", "add feature"
+        }, 0.85),
+        
+        # 错误诊断类
+        (IntentCategory.ERROR_DIAGNOSIS, {
+            "报错", "error", "bug", "调试", "debug", "失败", "异常",
+            "traceback", "exception", "为什么不工作", "doesn't work"
+        }, 0.85),
+        
+        # 仓库分析类
+        (IntentCategory.REPO_ANALYSIS, {
+            "分析代码", "解释代码", "这段代码", "代码结构", "入口在哪",
+            "explain", "analyze", "what does this", "找一下"
+        }, 0.80),
+        
+        # 文档任务类
+        (IntentCategory.DOCUMENTATION_TASK, {
+            "写文档", "生成文档", "添加注释", "readme", "docstring",
+            "document", "写注释"
+        }, 0.85),
+        
+        # 技术咨询类
+        (IntentCategory.TECHNICAL_CONSULTING, {
+            "什么是", "解释一下", "原理是什么", "最佳实践", "怎么理解",
+            "what is", "how does", "explain", "best practice"
+        }, 0.75),
+        
+        # 项目设计类
+        (IntentCategory.PROJECT_DESIGN, {
+            "架构设计", "技术选型", "系统设计", "设计方案", "architecture",
+            "design", "技术栈"
+        }, 0.80),
+        
+        # 安全咨询类
+        (IntentCategory.SECURITY_CONSULTING, {
+            "安全", "漏洞", "security", "vulnerability", "xss", "sql注入",
+            "加密", "认证"
+        }, 0.85),
+    ]
     
-   
+    # P1-4: 关键词分类置信度阈值（低于此值走 LLM）
+    _KEYWORD_CONFIDENCE_THRESHOLD = 0.90
 
     def __init__(self, llm_client: Any, file_only_logger: Any = None):
         self.llm = llm_client
         self.file_only_logger = file_only_logger
+        self._last_category: IntentCategory | None = None  # 记录最后分类结果
         # 新结构：user/stage/intent_classify.j2
 
     @staticmethod
@@ -59,63 +125,146 @@ class IntentClassifier:
         解决方案：转义所有花括号（{ -> {{, } -> }}）
         """
         return (s or "").replace("{", "{{").replace("}", "}}")
+    
+    def _keyword_classify(self, text: str) -> ClassificationResult | None:
+        """
+        P1-4: 关键词快速分类。
+        
+        返回:
+            ClassificationResult 如果匹配成功，None 如果未匹配
+        """
+        text_lower = text.strip().lower()
+        
+        if not text_lower:
+            return ClassificationResult(
+                category=IntentCategory.GENERAL_CHAT,
+                reason="Heuristic: empty input",
+                confidence=1.0
+            )
+        
+        # 精确匹配问候语
+        greetings = {"你好", "你好啊", "您好", "哈喽", "嗨", "hi", "hello", "hey"}
+        if text_lower in greetings:
+            return ClassificationResult(
+                category=IntentCategory.GENERAL_CHAT,
+                reason="Heuristic: exact greeting match",
+                confidence=0.99
+            )
+        
+        # 短文本问候变体
+        if len(text_lower) <= 10 and any(k in text_lower for k in ("你好", "哈喽", "嗨", "hi", "hello")):
+            return ClassificationResult(
+                category=IntentCategory.GENERAL_CHAT,
+                reason="Heuristic: greeting variant",
+                confidence=0.95
+            )
+        
+        # 遍历关键词规则
+        best_match: tuple[IntentCategory, float, str] | None = None
+        for category, keywords, base_confidence in self._KEYWORD_RULES:
+            for kw in keywords:
+                if kw in text_lower:
+                    # 计算匹配置信度（关键词越长越可信）
+                    confidence = base_confidence * (1 + len(kw) / 50)
+                    confidence = min(confidence, 0.99)
+                    
+                    if best_match is None or confidence > best_match[1]:
+                        best_match = (category, confidence, kw)
+        
+        if best_match:
+            return ClassificationResult(
+                category=best_match[0],
+                reason=f"Heuristic: keyword '{best_match[2]}'",
+                confidence=best_match[1]
+            )
+        
+        return None
 
     def classify(self, user_text: str) -> ClassificationResult:
-        """执行分类。"""
-        # 1) 业界做法：对极短/高频“闲聊/能力询问”走启发式，避免不必要的大模型请求。
-        # 这样能显著提升健壮性：当本地 llama.cpp 不可用时，仍可正常回应问候/说明能力。
-        text_strip = (user_text or "").strip().lower()
-        # if not text_strip:
-        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: empty input", confidence=1.0)
+        """
+        执行混合分类（关键词 + LLM）。
+        
+        P1-4 策略：
+        1. 先尝试关键词分类
+        2. 高置信度（>= 0.90）直接返回
+        3. 低置信度或无匹配时走 LLM
+        """
+        text_strip = (user_text or "").strip()
+        
+        # P1-4: 第一步 - 关键词快速分类
+        keyword_result = self._keyword_classify(text_strip)
+        
+        if keyword_result:
+            # 高置信度直接返回（快速路径）
+            if keyword_result.confidence >= self._KEYWORD_CONFIDENCE_THRESHOLD:
+                if self.file_only_logger:
+                    self.file_only_logger.info(
+                        "====>关键词分类命中（快速路径）: %s, 置信度: %.2f, 原因: %s",
+                        keyword_result.category.value,
+                        keyword_result.confidence,
+                        keyword_result.reason
+                    )
+                self._last_category = keyword_result.category
+                return keyword_result
+            
+            # 低置信度作为备选
+            if self.file_only_logger:
+                self.file_only_logger.info(
+                    "====>关键词分类低置信度，走 LLM: %s, 置信度: %.2f",
+                    keyword_result.category.value,
+                    keyword_result.confidence
+                )
 
-        # greetings = {
-        #     "你好", "你好啊", "您好", "哈喽", "嗨", "hi", "hello", "hey",
-        #     "在吗", "在不在", "晚安", "早上好", "下午好", "晚上好",
-        # }
-        # if text_strip in greetings:
-        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: greeting", confidence=1.0)
-
-        # # 一些常见“寒暄 + 标点”的变体（例如：你好啊～/你好啊!!）
-        # if len(text_strip) <= 8 and any(k in text_strip for k in ("你好", "哈喽", "嗨", "hi", "hello")):
-        #     return ClassificationResult(category=IntentCategory.GENERAL_CHAT, reason="Heuristic: greeting (variant)", confidence=0.95)
-
-        # if any(kw in text_strip for kw in ("你可以干嘛", "能干嘛", "怎么用", "帮助", "help", "capability", "can you")):
-        #     return ClassificationResult(category=IntentCategory.CAPABILITY_QUERY, reason="Heuristic: capability keyword", confidence=0.95)
-
-        # 走 LLM 深度语义分类
+        # P1-4: 第二步 - LLM 深度语义分类
         from clude_code.llm.llama_cpp_http import ChatMessage
         try:
-            # 转义用户输入中的花括号，避免 format() 解析错误
-            # safe_user_text = self._escape_for_format(user_text)
             prompt = _render_prompt(
-                                "user/stage/intent_classify.j2", 
-                                user_text=user_text,
-                                )
+                "user/stage/intent_classify.j2", 
+                user_text=user_text,
+            )
             if self.file_only_logger:   
                 self.file_only_logger.info("====>意图分类器输入 Prompt: %s", prompt)
 
             response = self.llm.chat([ChatMessage(role="user", content=prompt)])
             
-            # 打印返回 JSON 到文件（不输出到屏幕）
             if self.file_only_logger:
-                # 1. 长度截断保护（防止极端情况内存溢出）
-                # safe_resp = response[:10000] + ("..." if len(response) > 10000 else "")
-                self.file_only_logger.info("====>意图分类器返回数据 Response: %s", response);
+                self.file_only_logger.info("====>意图分类器返回数据 Response: %s", response)
             
             # 容错提取 JSON
             json_match = re.search(r"(\{.*?\})", response, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group(1))
-                return ClassificationResult.model_validate(data)
+                llm_result = ClassificationResult.model_validate(data)
+                
+                # P1-4: 融合关键词和 LLM 结果
+                if keyword_result and keyword_result.category == llm_result.category:
+                    # 两者一致，提升置信度
+                    llm_result.confidence = min(llm_result.confidence + 0.1, 1.0)
+                    llm_result.reason = f"Hybrid: {keyword_result.reason} + LLM"
+                
+                self._last_category = llm_result.category
+                return llm_result
+                
         except Exception as e:
-            # 异常只写入文件：不打印到屏幕（避免污染 live UI / 避免 Typer 输出 traceback）
+            # 异常只写入文件
             if self.file_only_logger:
-                # 注意：这里不要 f-string 拼接超长内容；只记录关键信息 + 截断后的输入
                 self.file_only_logger.exception(
-                    "IntentClassifier LLM 分类失败（将返回 UNCERTAIN）。user_text=%r ",
+                    "IntentClassifier LLM 分类失败。user_text=%r ",
                     (user_text[:500] + "…") if len(user_text) > 500 else user_text, 
                     exc_info=True,
                 )
             
+            # P1-4: LLM 失败时使用关键词结果作为兜底
+            if keyword_result:
+                if self.file_only_logger:
+                    self.file_only_logger.info(
+                        "====>LLM 失败，降级使用关键词结果: %s",
+                        keyword_result.category.value
+                    )
+                self._last_category = keyword_result.category
+                return keyword_result
+        
+        # 兜底返回
+        self._last_category = IntentCategory.UNCERTAIN
         return ClassificationResult(category=IntentCategory.UNCERTAIN, reason="Fallback to default")
 
