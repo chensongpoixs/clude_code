@@ -12,12 +12,12 @@ from .tool_dispatch import render_tools_for_system_prompt
 _TOOLS_SECTION = render_tools_for_system_prompt(include_schema=False)
 
 
-_BASE_SYSTEM_PROMPT = read_prompt("agent_loop/system_base.md")
+# 新结构：system/core/global.md 为全局规范（对应旧 agent_loop/system_base.md）
+_BASE_SYSTEM_PROMPT = read_prompt("system/core/global.md")
 
 
-
-# Agent 自己的大模型
-_LOCAL_AGENT_RUNTIME_SYSTEM_PROMPT_ = read_prompt("agent_loop/local_agent_runtime_system.md")
+# Agent 自己的大模型（保留兼容，内容相同）
+_LOCAL_AGENT_RUNTIME_SYSTEM_PROMPT_ = read_prompt("system/core/global.md")
 
 
 SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT + "\n\n# 可用工具清单\n" + _TOOLS_SECTION + "\n"

@@ -1,0 +1,21 @@
+# 错误诊断
+
+## 用户描述
+{{ user_text }}
+
+## 任务类型
+意图：{{ intent_name }}
+风险等级：{{ risk_level }}
+项目ID：{{ project_id }}
+
+{% if planning_prompt %}
+## 规划协议
+{{ planning_prompt }}
+{% endif %}
+
+## 诊断要求
+1. 分析错误信息，定位问题根因
+2. 通过工具验证假设
+3. 提供修复方案
+4. 验证修复效果
+

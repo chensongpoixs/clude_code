@@ -27,13 +27,8 @@ from clude_code.prompts import render_prompt as _render_prompt
 #     # 兜底类
 #     UNCERTAIN = "UNCERTAIN"               # 意图模糊，无法归类
 
-class IntentCategory(str, Enum):
-    """用户意图分类标签。"""
-    CODING_TASK = "CODING_TASK"           # 代码任务：修改、重构、写代码、跑测试、修复 bug
-    CAPABILITY_QUERY = "CAPABILITY_QUERY" # 能力询问：你可以干嘛、怎么用、有哪些工具、你能帮我吗
-    REPO_ANALYSIS = "REPO_ANALYSIS"       # 仓库分析：代码结构、逻辑解释、寻找入口、RAG 搜索
-    GENERAL_CHAT = "GENERAL_CHAT"         # 通用对话：你好、谢谢、你是谁
-    UNCERTAIN = "UNCERTAIN"               # 意图模糊
+# IntentCategory 已迁移到 registry/intent_registry.py，这里导入使用
+from clude_code.orchestrator.registry.intent_registry import IntentCategory
 
 class ClassificationResult(BaseModel):
     """分类结果。"""
@@ -53,7 +48,7 @@ class IntentClassifier:
     def __init__(self, llm_client: Any, file_only_logger: Any = None):
         self.llm = llm_client
         self.file_only_logger = file_only_logger
-        # self.CLASSIFY_PROMPT = _read_prompt("classifier/intent_classify_prompt.j2")
+        # 新结构：user/stage/intent_classify.j2
 
     @staticmethod
     def _escape_for_format(s: str) -> str:
@@ -93,9 +88,9 @@ class IntentClassifier:
             # 转义用户输入中的花括号，避免 format() 解析错误
             # safe_user_text = self._escape_for_format(user_text)
             prompt = _render_prompt(
-                                "classifier/intent_classify_prompt.j2", 
+                                "user/stage/intent_classify.j2", 
                                 user_text=user_text,
-                                ) #$self.CLASSIFY_PROMPT.format(user_text=safe_user_text)
+                                )
             if self.file_only_logger:   
                 self.file_only_logger.info("====>意图分类器输入 Prompt: %s", prompt)
 

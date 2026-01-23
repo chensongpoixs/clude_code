@@ -98,7 +98,7 @@ def execute_single_step_iteration(
 
     _ev("llm_request", {"messages": len(loop.messages), "step_id": step.id, "iteration": iteration + 1})
     step_prompt = render_prompt(
-        "agent_loop/execute_step_prompt.j2",
+        "user/stage/execute_step.j2",
         step_id=step.id,
         step_description=step.description,
         tools_expected=(", ".join(step.tools_expected) if step.tools_expected else "根据需求自主选择"),
@@ -173,7 +173,7 @@ def execute_single_step_iteration(
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))
         loop._trim_history(max_messages=30)
-        loop.messages.append(ChatMessage(role="user", content=read_prompt("agent_loop/invalid_step_output_retry.md").strip()))
+        loop.messages.append(ChatMessage(role="user", content=read_prompt("user/stage/invalid_step_output_retry.md").strip()))
         loop._trim_history(max_messages=30)
         return None, False, False
 
@@ -226,7 +226,7 @@ def handle_replanning(
         cur_plan_md = "(render_plan_markdown 失败，略)"
     #  从新规划提示生成重规划提示
     replan_prompt = render_prompt(
-        "agent_loop/replan_prompt.j2",
+        "user/stage/replan.j2",
         max_plan_steps=int(loop.cfg.orchestrator.max_plan_steps),
         step_id=step.id,
         step_description=step.description,
@@ -306,7 +306,7 @@ def handle_replanning(
             last_patch_error = e
             # 第一次失败则准备 retry prompt（从 prompts/ 目录加载）
             retry_prompt = render_prompt(
-                "agent_loop/plan_patch_retry.j2",
+                "user/stage/plan_patch_retry.j2",
                 error_type=type(e).__name__,
                 error_message=str(e),
             )

@@ -25,3 +25,8 @@
 /src/clude_code/config/__pycache__
 /tmp_tool_test.txt
 /src/clude_code/prompts/__pycache__
+/src/clude_code/orchestrator/sandbox/__pycache__
+/src/clude_code/orchestrator/registry/__pycache__
+/src/clude_code/orchestrator/approvals/__pycache__
+/__pycache__
+/tools/__pycache__

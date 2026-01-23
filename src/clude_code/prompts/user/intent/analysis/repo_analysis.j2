@@ -1,0 +1,21 @@
+# 仓库分析
+
+## 用户问题
+{{ user_text }}
+
+## 任务类型
+意图：{{ intent_name }}
+风险等级：{{ risk_level }}
+项目ID：{{ project_id }}
+
+{% if planning_prompt %}
+## 规划协议
+{{ planning_prompt }}
+{% endif %}
+
+## 分析要求
+1. 使用工具探测代码结构
+2. 分析关键逻辑和依赖关系
+3. 基于事实给出结论
+4. 必要时提供代码引用
+

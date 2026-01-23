@@ -19,7 +19,15 @@ from clude_code.knowledge.vector_store import VectorStore
 from clude_code.verification.runner import Verifier
 from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
 from clude_code.orchestrator.state_m import AgentState
-from clude_code.orchestrator.classifier import IntentClassifier, IntentCategory
+from clude_code.orchestrator.classifier import IntentClassifier, ClassificationResult
+from clude_code.orchestrator.registry import (
+    ProfileRegistry,
+    PromptProfile,
+    RiskLevel,
+    IntentCategory,
+    get_default_registry,
+    get_default_profile_for_category,
+)
 
 from .models import AgentTurn
 from .parsing import try_parse_tool_call
@@ -184,6 +192,11 @@ class AgentLoop:
         self.vector_store = VectorStore(cfg)
         self.verifier = Verifier(cfg)
         self.classifier = IntentClassifier(self.llm, file_only_logger=self.file_only_logger)
+        
+        # Profile Registry（意图 → Prompt Profile 映射）
+        self.profile_registry = get_default_registry(cfg.workspace_root)
+        self._current_profile: PromptProfile | None = None
+        self._current_risk_level: RiskLevel = RiskLevel.MEDIUM
 
         # 阶段 C: 追踪本轮修改过的文件路径，用于选择性测试
         self._turn_modified_paths: set[Path] = set()
@@ -487,7 +500,7 @@ class AgentLoop:
         tools_expected_example = json.dumps(tool_names, ensure_ascii=False)
         tools_expected_hint = ", ".join(tool_names)
         return render_prompt(
-            "agent_loop/planning_prompt.j2",
+            "user/stage/planning.j2",
             max_plan_steps=int(self.cfg.orchestrator.max_plan_steps),
             tools_expected_example=tools_expected_example,
             tools_expected_hint=tools_expected_hint,
@@ -510,11 +523,40 @@ class AgentLoop:
     ) -> ToolResult:
         return run_tool_lifecycle(self, name, args, trace_id, confirm, _ev)
 
+    def _select_profile(self, category: IntentCategory, _ev: Callable[[str, dict[str, Any]], None]) -> PromptProfile | None:
+        """
+        根据意图分类选择 Prompt Profile。
+        
+        对齐 agent_design_v_1.0.md 设计规范：
+        - Intent → prompt_profile → System/User Prompt 组合
+        """
+        profile_name = get_default_profile_for_category(category)
+        profile = self.profile_registry.get(profile_name)
+        
+        if profile:
+            self._current_profile = profile
+            self._current_risk_level = profile.risk_level
+            self.logger.debug(f"[dim]选择 Profile: {profile_name} (风险等级: {profile.risk_level.value})[/dim]")
+            _ev("profile_selected", {
+                "profile_name": profile_name,
+                "risk_level": profile.risk_level.value,
+                "intent_category": category.value,
+            })
+        else:
+            self.logger.debug(f"[dim]未找到 Profile: {profile_name}，使用默认配置[/dim]")
+            self._current_profile = None
+            self._current_risk_level = RiskLevel.MEDIUM
+        
+        return profile
+
     def _classify_intent_and_decide_planning(self, user_text: str, _ev: Callable[[str, dict[str, Any]], None]) -> bool:
         """意图分类和决策门：根据用户意图决定是否启用规划。"""
         classification = self.classifier.classify(user_text)
         self.logger.info(f"[bold cyan]意图识别结果: {classification.category.value}[/bold cyan] (置信度: {classification.confidence})")
         _ev("intent_classified", classification.model_dump())
+        
+        # 选择对应的 Prompt Profile
+        self._select_profile(classification.category, _ev)
 
         enable_planning = self.cfg.orchestrator.enable_planning
         if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):

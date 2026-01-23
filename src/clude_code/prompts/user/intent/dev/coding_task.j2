@@ -1,0 +1,21 @@
+# 代码任务
+
+## 用户需求
+{{ user_text }}
+
+## 任务类型
+意图：{{ intent_name }}
+风险等级：{{ risk_level }}
+项目ID：{{ project_id }}
+
+{% if planning_prompt %}
+## 规划协议
+{{ planning_prompt }}
+{% endif %}
+
+## 执行要求
+1. 理解用户需求，必要时通过工具探测环境
+2. 制定实施方案
+3. 逐步执行代码修改
+4. 验证修改结果
+
