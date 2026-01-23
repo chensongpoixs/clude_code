@@ -40,6 +40,22 @@ class LocalTools:
             limit=limit,
         )
 
+    def read_symbol(
+        self,
+        path: str,
+        symbol: str,
+        skip_docstring: bool = True,
+        skip_comments: bool = False,
+    ) -> ToolResult:
+        return _read_file_impl(
+            workspace_root=self.workspace_root,
+            max_file_read_bytes=self.max_file_read_bytes,
+            path=path,
+            symbol=symbol,
+            skip_docstring=skip_docstring,
+            skip_comments=skip_comments,
+        )
+
     def write_file(self, path: str, text: str, content_based: bool = False, insert_at_line: int | None = None) -> ToolResult:
         return _write_file_impl(workspace_root=self.workspace_root, path=path, text=text, content_based=content_based, insert_at_line=insert_at_line)
 

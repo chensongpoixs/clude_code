@@ -171,7 +171,20 @@ def _h_list_dir(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
 
 def _h_read_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.read_file(path=args["path"], offset=args.get("offset"), limit=args.get("limit"))
+    return loop.tools.read_file(
+        path=args["path"],
+        offset=args.get("offset"),
+        limit=args.get("limit"),
+    )
+
+
+def _h_read_symbol(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
+    return loop.tools.read_symbol(
+        path=args["path"],
+        symbol=args["symbol"],
+        skip_docstring=bool(args.get("skip_docstring", True)),
+        skip_comments=bool(args.get("skip_comments", False)),
+    )
 
 
 def _h_glob_file_search(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -307,14 +320,14 @@ def _spec_list_dir() -> ToolSpec:
 
 
 def _spec_read_file() -> ToolSpec:
-    """ToolSpec：read_file（只读）。"""
+    """ToolSpec：read_file（只读，支持 offset/limit 分段）。"""
     return ToolSpec(
         name="read_file",
         summary="读取文件内容（只读，支持 offset/limit 分段）。",
         description=(
             "用于读取工作区内文件内容（Read File）。\n"
             "- 大文件建议用 offset/limit 分段读取，避免上下文刷屏。\n"
-            "- 如需搜索再定位：优先用 grep/search_semantic 再 read_file 精读。"
+            "- 如需只读取某个函数/类，请用 read_symbol 工具（更节省 token）。"
         ),
         args_schema=_obj_schema(
             properties={
@@ -332,6 +345,37 @@ def _spec_read_file() -> ToolSpec:
         callable_by_model=True,
         exec_command_key=None,
         handler=_h_read_file,
+    )
+
+
+def _spec_read_symbol() -> ToolSpec:
+    """ToolSpec：read_symbol（按函数/类读取，跳过注释，节省 token）。"""
+    return ToolSpec(
+        name="read_symbol",
+        summary="按函数/类名读取代码（跳过注释，节省 token）。",
+        description=(
+            "用于只读取指定函数或类的定义（Read Symbol）。\n"
+            "- 优势：相比 read_file 整个文件，可节省 90%+ 的 token。\n"
+            "- 支持语言：Python（AST 精确提取）、JS/TS/Go/Rust/C（正则匹配）。\n"
+            "- skip_docstring=true 跳过 docstring，skip_comments=true 跳过行注释。"
+        ),
+        args_schema=_obj_schema(
+            properties={
+                "path": {"type": "string", "description": "相对工作区的文件路径"},
+                "symbol": {"type": "string", "description": "函数名或类名"},
+                "skip_docstring": {"type": "boolean", "default": True, "description": "跳过 docstring（默认 true）"},
+                "skip_comments": {"type": "boolean", "default": False, "description": "跳过行注释（默认 false）"},
+            },
+            required=["path", "symbol"],
+        ),
+        example_args={"path": "src/main.py", "symbol": "process_data", "skip_docstring": True},
+        side_effects={"read"},
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_read_symbol,
     )
 
 
@@ -1225,6 +1269,7 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     """
     yield _spec_list_dir()
     yield _spec_read_file()
+    yield _spec_read_symbol()
     yield _spec_glob_file_search()
     yield _spec_grep()
     yield _spec_apply_patch()

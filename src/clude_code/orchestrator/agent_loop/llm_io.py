@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import inspect
 import time
@@ -271,7 +272,7 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
     if caller:
         lines.append(f"[caller] {caller}")
     
-    # 输出系统提示词摘要（用于调试上下文溢出）
+    # 输出系统提示词摘要（只在内容变化时输出，避免日志噪音）
     include_system_prompt = bool(getattr(llm_cfg, "include_system_prompt", True)) if llm_cfg is not None else True
     max_system_chars = int(getattr(llm_cfg, "max_system_chars", 2000) or 2000) if llm_cfg is not None else 2000
     if include_system_prompt and loop.messages:
@@ -279,15 +280,24 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
         if system_msg and system_msg.content:
             sys_content = system_msg.content
             sys_len = len(sys_content)
-            lines.append("===== System Prompt 摘要 =====")
-            lines.append(f"[系统提示词长度: {sys_len} chars]")
-            if sys_len > max_system_chars:
-                # 截断显示：头部 + 尾部
-                head = sys_content[:max_system_chars // 2]
-                tail = sys_content[-(max_system_chars // 2):]
-                lines.append(f"{head}\n...[省略 {sys_len - max_system_chars} chars]...\n{tail}")
-            else:
-                lines.append(sys_content)
+            
+            # 计算哈希，检测是否变化
+            sys_hash = hashlib.md5(sys_content.encode("utf-8", errors="replace")).hexdigest()[:16]
+            last_hash = getattr(loop, "_last_logged_system_prompt_hash", None)
+            
+            if sys_hash != last_hash:
+                # 系统提示词有变化，输出摘要
+                loop._last_logged_system_prompt_hash = sys_hash
+                lines.append("===== System Prompt 摘要（有变化）=====")
+                lines.append(f"[系统提示词长度: {sys_len} chars, hash: {sys_hash}]")
+                if sys_len > max_system_chars:
+                    # 截断显示：头部 + 尾部
+                    head = sys_content[:max_system_chars // 2]
+                    tail = sys_content[-(max_system_chars // 2):]
+                    lines.append(f"{head}\n...[省略 {sys_len - max_system_chars} chars]...\n{tail}")
+                else:
+                    lines.append(sys_content)
+            # 如果没变化，不输出系统提示词内容
     
     lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")
     if include_params:
