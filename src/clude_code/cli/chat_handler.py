@@ -52,8 +52,17 @@ class ChatHandler:
         self._custom_commands = load_custom_commands(self.cfg.workspace_root)
 
     def select_model_interactively(self) -> None:
-        """调用公共工具进行交互式模型选择。"""
+        """调用公共工具进行交互式模型选择，并同步更新 AgentLoop。"""
+        old_model = self.cfg.llm.model
         select_model_interactively(self.cfg, self.cli_logger.console)
+        new_model = self.cfg.llm.model
+        
+        # 如果模型发生变化，同步更新 AgentLoop 的 LLM 客户端
+        if new_model != old_model and hasattr(self.agent, 'switch_model'):
+            self.agent.switch_model(new_model, validate=False)
+        elif new_model != old_model and hasattr(self.agent, 'llm'):
+            # 降级：直接更新 llm.model
+            self.agent.llm.model = new_model
 
     def _show_welcome(self) -> None:
         """显示动画欢迎界面"""

@@ -159,6 +159,36 @@ python -m compileall -q src/clude_code/orchestrator/agent_loop/llm_io.py
 
 ---
 
+## 类似问题检查
+
+### 已检查的文件
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `llm_io.py` | ✅ 已修复 | 移除 cursor 依赖 |
+| `agent_loop.py` | ✅ 已清理 | 移除 `_llm_log_cursor` 设置 |
+| `execution.py` | ✅ 安全 | `step_cursor` 是局部变量 |
+| `planning.py` | ✅ 安全 | 无索引依赖问题 |
+| `react.py` | ✅ 安全 | 无索引依赖问题 |
+| `classifier.py` | ✅ 安全 | `_last_category` 在同一调用链中使用 |
+
+### 其他状态变量
+
+| 变量 | 用途 | 风险 |
+|------|------|------|
+| `_last_llm_stage` | 日志记录当前阶段 | 低 - 仅用于日志 |
+| `_current_profile` | Profile 选择 | 低 - 在 run_turn 中同步更新 |
+| `_current_risk_level` | 风险等级 | 低 - 与 Profile 同步 |
+| `_current_ev` / `_current_trace_id` | display 工具上下文 | 低 - 每轮更新 |
+
+### 潜在改进
+
+1. **消息合并可观测性**：`normalize_messages_for_llama` 应该记录合并前后的消息内容差异
+2. **状态变量文档化**：建议在代码中注释每个 `_` 前缀变量的生命周期和依赖关系
+3. **单元测试**：为消息合并 + 日志输出场景添加测试用例
+
+---
+
 ## 总结
 
 | 项目 | 内容 |
@@ -167,4 +197,6 @@ python -m compileall -q src/clude_code/orchestrator/agent_loop/llm_io.py
 | 原因 | `_llm_log_cursor` 被消息合并逻辑破坏 |
 | 修复 | 改为基于内容语义查找最后一条 user 消息 |
 | 对齐 | 业界自包含日志函数实践 |
+| 额外清理 | 移除 `agent_loop.py` 中冗余的 `_llm_log_cursor` 设置 |
+| 类似问题 | 已检查其他文件，无类似问题 |
 

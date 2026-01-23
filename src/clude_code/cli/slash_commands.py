@@ -41,6 +41,7 @@ def _print_help(ctx: SlashContext) -> None:
     ctx.console.print("- `/clear`：清空当前会话上下文（保留 system prompt）")
     ctx.console.print("- `/config`：显示当前配置摘要")
     ctx.console.print("- `/model [id]`：查看或切换当前模型（本会话生效）")
+    ctx.console.print("- `/models`：列出所有可用模型")
     ctx.console.print("- `/permissions`：查看权限与工具 allow/deny")
     ctx.console.print("- `/permissions network on|off`：开关网络权限（影响 exec 策略评估）")
     ctx.console.print("- `/permissions allow <tool...>`：设置允许工具名单（空=不限制）")
@@ -87,17 +88,61 @@ def _show_config(ctx: SlashContext) -> None:
 
 
 def _set_model(ctx: SlashContext, model: str | None) -> None:
+    """处理 /model 命令：查看或切换模型"""
     if not model:
-        ctx.console.print(f"[bold]当前模型[/bold]: {ctx.cfg.llm.model or 'auto'}")
+        # 显示当前模型
+        current = ctx.cfg.llm.model or "auto"
+        if hasattr(ctx.agent, "get_current_model"):
+            current = ctx.agent.get_current_model() or current
+        ctx.console.print(f"[bold]当前模型[/bold]: {current}")
+        ctx.console.print("[dim]用法: /model <model_id> 切换模型，/models 列出可用模型[/dim]")
         return
-    ctx.cfg.llm.model = model
-    # 同步到运行中的 LLM client（本会话即时生效）
-    try:
-        if hasattr(ctx.agent, "llm"):
-            ctx.agent.llm.model = model
-    except Exception:
-        pass
-    ctx.console.print(f"[green]✓ 已切换模型: {model}[/green]")
+    
+    # 使用 AgentLoop 的 switch_model 方法（如果可用）
+    if hasattr(ctx.agent, "switch_model"):
+        success, message = ctx.agent.switch_model(model)
+        if success:
+            ctx.cfg.llm.model = model  # 同步到配置
+            ctx.console.print(f"[green]✓ {message}[/green]")
+        else:
+            ctx.console.print(f"[yellow]⚠ {message}[/yellow]")
+    else:
+        # 降级：直接设置（兼容旧版本）
+        ctx.cfg.llm.model = model
+        try:
+            if hasattr(ctx.agent, "llm"):
+                ctx.agent.llm.model = model
+        except Exception:
+            pass
+        ctx.console.print(f"[green]✓ 已切换模型: {model}[/green]")
+
+
+def _list_models(ctx: SlashContext) -> None:
+    """处理 /models 命令：列出可用模型"""
+    models: list[str] = []
+    current = ""
+    
+    # 尝试从 AgentLoop 获取
+    if hasattr(ctx.agent, "list_available_models"):
+        models = ctx.agent.list_available_models()
+        current = ctx.agent.get_current_model() if hasattr(ctx.agent, "get_current_model") else ctx.cfg.llm.model
+    elif hasattr(ctx.agent, "llm") and hasattr(ctx.agent.llm, "list_model_ids"):
+        models = ctx.agent.llm.list_model_ids()
+        current = ctx.agent.llm.model
+    
+    if not models:
+        ctx.console.print("[yellow]无法获取可用模型列表（API 不支持或网络错误）[/yellow]")
+        ctx.console.print(f"[dim]当前配置模型: {ctx.cfg.llm.model}[/dim]")
+        return
+    
+    ctx.console.print("[bold]可用模型[/bold]")
+    for m in models:
+        if m == current:
+            ctx.console.print(f"  [green]✓ {m}[/green]  [dim](当前)[/dim]")
+        else:
+            ctx.console.print(f"  - {m}")
+    ctx.console.print("")
+    ctx.console.print(f"[dim]共 {len(models)} 个模型，用 /model <id> 切换[/dim]")
 
 
 def _permissions(ctx: SlashContext, args: list[str]) -> None:
@@ -333,6 +378,9 @@ def handle_slash_command(ctx: SlashContext, text: str) -> bool:
         return True
     if cmd == "/model":
         _set_model(ctx, args[0] if args else None)
+        return True
+    if cmd == "/models":
+        _list_models(ctx)
         return True
     if cmd == "/permissions":
         _permissions(ctx, args)

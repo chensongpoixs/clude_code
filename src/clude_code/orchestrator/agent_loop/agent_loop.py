@@ -6,6 +6,7 @@ from typing import Any, Callable, List, Dict, Optional
 
 from clude_code.config.config import CludeConfig
 from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
+from clude_code.llm.model_manager import ModelManager, get_model_manager
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
 from clude_code.observability.usage import SessionUsage
@@ -161,6 +162,11 @@ class AgentLoop:
             timeout_s=cfg.llm.timeout_s,
             api_key=cfg.llm.api_key,  # 支持 OpenAI/Azure 等需要认证的 API
         )
+        
+        # 绑定模型管理器（支持动态模型切换）
+        self._model_manager = get_model_manager()
+        self._model_manager.bind(self.llm)
+        
         self.tools = LocalTools(
             cfg.workspace_root,
             max_file_read_bytes=cfg.limits.max_file_read_bytes,
@@ -270,9 +276,7 @@ class AgentLoop:
 
         # 阶段 C: 清空本轮修改追踪
         self._turn_modified_paths.clear()
-        # LLM 请求/返回日志：本轮只打印"本轮新增 user + 本次返回"，不输出历史轮次
-        # 说明：llm_io.py 会用这个 cursor 计算"本次请求新增消息"的切片范围
-        self._llm_log_cursor = len(self.messages)
+        # 注：_llm_log_cursor 已弃用（llm_io.py 现在使用基于内容的消息查找，不再依赖索引）
 
         events: list[dict[str, Any]] = []
         step_idx = 0
@@ -1032,4 +1036,46 @@ class AgentLoop:
         流程图: 见 `agent_loop_semantic_search_flow.svg`
         """
         return _semantic_search_fn(self, query)
+
+    # ============================================================
+    # 动态模型切换 API
+    # ============================================================
+    
+    def switch_model(self, model: str, validate: bool = True) -> tuple[bool, str]:
+        """
+        切换 LLM 模型。
+        
+        参数:
+            model: 目标模型名称/ID
+            validate: 是否验证模型可用性（默认 True）
+        
+        返回:
+            (success, message) 元组
+        """
+        old_model = self.llm.model
+        success, message = self._model_manager.switch_model(model, validate)
+        
+        if success:
+            self.logger.info(f"[bold green]模型已切换: {old_model} → {model}[/bold green]")
+            self.audit.write(
+                trace_id="model_switch",
+                event="model_switched",
+                data={"old_model": old_model, "new_model": model},
+            )
+        else:
+            self.logger.warning(f"[yellow]模型切换失败: {message}[/yellow]")
+        
+        return success, message
+    
+    def get_current_model(self) -> str:
+        """获取当前使用的模型名称"""
+        return self.llm.model
+    
+    def list_available_models(self) -> list[str]:
+        """获取可用模型列表"""
+        return self._model_manager.list_models()
+    
+    def rollback_model(self) -> tuple[bool, str]:
+        """回滚到上一个使用的模型"""
+        return self._model_manager.rollback_model()
 

@@ -350,9 +350,18 @@ class EnhancedChatHandler:
         self.agent = EnhancedAgentLoop(cfg)
 
     def select_model_interactively(self) -> None:
-        """调用公共工具进行交互式模型选择。"""
+        """调用公共工具进行交互式模型选择，并同步更新 AgentLoop。"""
         from clude_code.cli.utils import select_model_interactively
+        old_model = self.cfg.llm.model
         select_model_interactively(self.cfg, self.logger)
+        new_model = self.cfg.llm.model
+        
+        # 如果模型发生变化，同步更新 AgentLoop 的 LLM 客户端
+        if new_model != old_model and hasattr(self.agent, 'switch_model'):
+            self.agent.switch_model(new_model, validate=False)
+        elif new_model != old_model and hasattr(self.agent, 'llm'):
+            # 降级：直接更新 llm.model
+            self.agent.llm.model = new_model
 
     def run_loop(self, debug: bool, live: bool) -> None:
         """主交互循环。"""

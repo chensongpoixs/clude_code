@@ -63,6 +63,42 @@ class LlamaCppHttpClient:
         # API Key 优先级：参数 > 环境变量（按 provider 检测）> 空
         # 支持的环境变量：OPENAI_API_KEY / SILICONFLOW_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_API_KEY
         self.api_key = api_key or self._detect_api_key_from_env(base_url)
+        
+        # 模型切换回调（用于通知监听者）
+        self._on_model_changed: list[callable] = []
+    
+    # ============================================================
+    # 动态模型切换 API
+    # ============================================================
+    
+    def set_model(self, model: str) -> None:
+        """
+        动态切换模型。
+        
+        参数:
+            model: 新的模型名称/ID
+        """
+        old_model = self.model
+        self.model = model
+        
+        # 触发回调
+        for callback in self._on_model_changed:
+            try:
+                callback(old_model, model)
+            except Exception as e:
+                logger.warning(f"模型切换回调执行失败: {e}")
+    
+    def get_model(self) -> str:
+        """获取当前模型名称"""
+        return self.model
+    
+    def on_model_changed(self, callback: callable) -> None:
+        """
+        注册模型变更回调。
+        
+        回调签名: callback(old_model: str, new_model: str) -> None
+        """
+        self._on_model_changed.append(callback)
     
     def _detect_api_key_from_env(self, base_url: str) -> str:
         """根据 base_url 自动检测对应的 API Key 环境变量。"""
