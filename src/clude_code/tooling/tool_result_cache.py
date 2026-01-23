@@ -149,34 +149,71 @@ class ToolResultCache:
     
     def invalidate_path(self, path: str) -> int:
         """
-        失效与指定路径相关的缓存。
+        失效与指定路径相关的缓存（细粒度失效）。
         
-        用于写操作后清除相关缓存。
+        失效策略：
+        1. 精准匹配：缓存路径 == target 或以 target 结尾
+        2. 父目录失效：如果 target 是 "src/main.py"，则 list_dir("src") 也失效
         
         Args:
-            path: 文件路径
+            path: 被修改的文件路径
         
         Returns:
             失效的条目数
         """
-        # 简单实现：遍历所有条目检查路径
-        # 更高效的实现可以维护 path -> keys 的反向索引
-        keys_to_remove = []
+        if not path:
+            return 0
+        
+        # 规范化路径（统一分隔符）
+        norm_path = path.replace("\\", "/").strip("/")
+        
+        # 提取父目录（用于失效 list_dir 缓存）
+        parent_dir = "/".join(norm_path.split("/")[:-1]) if "/" in norm_path else ""
+        
+        keys_to_remove: list[str] = []
         
         for key, entry in self._cache.items():
             result = entry.result
-            # 检查结果中是否包含该路径
-            if isinstance(result, dict):
-                result_path = result.get("path") or result.get("file")
-                if result_path and path in str(result_path):
-                    keys_to_remove.append(key)
+            if not isinstance(result, dict):
+                continue
+            
+            # 获取缓存条目的路径
+            result_path = result.get("path") or result.get("file") or ""
+            if not result_path:
+                continue
+            
+            norm_result_path = str(result_path).replace("\\", "/").strip("/")
+            
+            # 策略 1: 精准匹配（文件读取、grep 等）
+            if norm_result_path == norm_path or norm_result_path.endswith("/" + norm_path):
+                keys_to_remove.append(key)
+                continue
+            
+            # 策略 2: 父目录匹配（list_dir 缓存）
+            # 如果缓存的是某个目录的列表，且被修改的文件在该目录下
+            if parent_dir and norm_result_path == parent_dir:
+                keys_to_remove.append(key)
+                continue
+            
+            # 策略 3: 子路径匹配（glob_file_search 等可能缓存了包含该文件的结果）
+            if "matches" in result and isinstance(result["matches"], list):
+                # 检查 matches 列表中是否包含被修改的文件
+                for match in result["matches"]:
+                    if isinstance(match, str):
+                        norm_match = match.replace("\\", "/").strip("/")
+                        if norm_match == norm_path or norm_match.endswith("/" + norm_path):
+                            keys_to_remove.append(key)
+                            break
+        
+        # 去重（同一个 key 可能被多个策略命中）
+        keys_to_remove = list(set(keys_to_remove))
         
         for key in keys_to_remove:
             del self._cache[key]
         
         if keys_to_remove:
             self._stats["invalidations"] += len(keys_to_remove)
-            logger.debug(f"[ToolCache] 失效 {len(keys_to_remove)} 条目 (path={path})")
+            logger.debug(f"[ToolCache] 细粒度失效 {len(keys_to_remove)} 条目 (path={path})")
         
         return len(keys_to_remove)
     

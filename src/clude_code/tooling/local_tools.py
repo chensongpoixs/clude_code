@@ -119,8 +119,8 @@ class LocalTools:
     def list_skills(self) -> ToolResult:
         return _list_skills_impl(workspace_root=str(self.workspace_root))
 
-    def todowrite(self, content: str, priority: str = "medium", status: str = "pending") -> ToolResult:
-        return _todowrite_impl(content=content, priority=priority, status=status)
+    def todowrite(self, content: str, priority: str = "medium", status: str = "pending", todo_id: str | None = None) -> ToolResult:
+        return _todowrite_impl(content=content, priority=priority, status=status, todo_id=todo_id)
 
     def todoread(self, status: str | None = None, todo_id: str | None = None) -> ToolResult:
         return _todoread_impl(status=status, todo_id=todo_id)

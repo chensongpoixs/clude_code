@@ -828,24 +828,27 @@ def _spec_load_skill() -> ToolSpec:
 
 
 def _h_todowrite(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    """处理器：todowrite（创建任务）。"""
+    """处理器：todowrite（创建/更新任务）。"""
     content = args.get("content", "")
     priority = args.get("priority", "medium")
     status = args.get("status", "pending")
+    todo_id = args.get("todo_id")  # P1-2: 显式 ID 协议
 
-    return loop.tools.todowrite(content=content, priority=priority, status=status)
+    return loop.tools.todowrite(content=content, priority=priority, status=status, todo_id=todo_id)
 
 
 def _spec_todowrite() -> ToolSpec:
-    """ToolSpec：todowrite（创建任务）。"""
+    """ToolSpec：todowrite（创建/更新任务）。P1-2: 显式 ID 协议。"""
     return ToolSpec(
         name="todowrite",
         summary="创建或更新任务列表。",
+        description="传入 todo_id 则更新已有任务，不传则创建新任务。",
         args_schema=_obj_schema(
             properties={
                 "content": {"type": "string", "description": "任务内容"},
                 "priority": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium", "description": "优先级"},
-                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "default": "pending", "description": "状态"}
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "default": "pending", "description": "状态"},
+                "todo_id": {"type": "string", "description": "任务ID（传入则更新，不传则创建）"},
             },
             required=["content"],
         ),
@@ -1301,9 +1304,52 @@ def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolRes
         if not ok:
             logger.warning(f"[yellow]⚠ 工具 {name} 参数校验失败: {validated_or_msg}[/yellow]")
             return ToolResult(ok=False, error={"code": "E_INVALID_ARGS", "message": f"参数校验失败: {validated_or_msg}"})
-        
+
+        validated_args: dict[str, Any] = validated_or_msg  # type: ignore
+
+        # --- Phase 6: 工具结果缓存（在统一分发入口做，避免分散在各工具实现） ---
+        # 业界实践：缓存只读/确定性工具，并在写操作后做失效。
+        try:
+            from clude_code.tooling.tool_result_cache import get_session_cache
+
+            cache = get_session_cache()
+            if cache.is_cacheable(name):
+                cached_payload = cache.get(name, validated_args)
+                if isinstance(cached_payload, dict):
+                    # 给回喂/日志留出信号位，避免“看起来像没执行工具”
+                    cached_payload = dict(cached_payload)
+                    cached_payload["from_cache"] = True
+                    return ToolResult(True, payload=cached_payload)
+        except Exception as _cache_err:
+            # 缓存是性能优化：任何异常都不能影响工具可用性
+            logger.debug(f"[dim]tool cache skipped: {_cache_err}[/dim]")
+
         # 校验通过，执行处理器（使用校验/转换后的参数，例如 "1" -> 1）
-        return spec.handler(loop, validated_or_msg)  # type: ignore
+        tr = spec.handler(loop, validated_args)  # type: ignore
+
+        # 缓存写入（仅缓存成功结果）
+        try:
+            from clude_code.tooling.tool_result_cache import get_session_cache
+
+            cache = get_session_cache()
+            if cache.is_cacheable(name) and tr.ok and isinstance(tr.payload, dict):
+                cache.set(name, validated_args, tr.payload)
+
+            # 写操作后失效：细粒度策略，只失效被修改路径相关的缓存（P0-1 优化）
+            if name in {"write_file", "apply_patch", "undo_patch"} and tr.ok:
+                affected_path = ""
+                if isinstance(tr.payload, dict):
+                    affected_path = tr.payload.get("path") or tr.payload.get("file") or ""
+                if affected_path:
+                    cache.invalidate_path(str(affected_path))
+                else:
+                    # 无法确定路径时回退到保守策略
+                    cache.clear()
+                    logger.debug("[dim]cache: fallback to clear() - no path in result[/dim]")
+        except Exception as _cache_err:
+            logger.debug(f"[dim]tool cache set/invalid skipped: {_cache_err}[/dim]")
+
+        return tr
 
     except KeyError as e:
         logger.error(f"[red]✗ 参数缺失: {e}[/red]", exc_info=True)

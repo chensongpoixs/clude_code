@@ -5,7 +5,6 @@ Task tool - 任务代理工具
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -78,8 +77,8 @@ class TaskManager:
         self.tasks[task.task_id] = task
         return task
 
-    async def execute_task(self, task_id: str) -> Optional[Any]:
-        """执行任务"""
+    def execute_task(self, task_id: str) -> Optional[Any]:
+        """执行任务（同步版本，避免 asyncio.run 嵌套问题）"""
         if task_id not in self.tasks:
             raise ValueError(f"Task {task_id} not found")
 
@@ -91,8 +90,8 @@ class TaskManager:
             if not handler:
                 raise ValueError(f"No handler registered for agent type {task.agent_type.value}")
 
-            # 异步执行代理任务
-            result = await handler(task.prompt, task.session_id)
+            # 同步执行代理任务（P1-1: 修复异步嵌套问题）
+            result = handler(task.prompt, task.session_id)
             task.result = result
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now().isoformat()
@@ -141,16 +140,18 @@ def get_task_manager() -> TaskManager:
     return _task_manager
 
 
-async def general_agent_handler(prompt: str, session_id: Optional[str] = None) -> Any:
-    """通用代理处理器"""
+def general_agent_handler(prompt: str, session_id: Optional[str] = None) -> Any:
+    """通用代理处理器（同步版本）"""
+    import time
     # 模拟处理时间
-    await asyncio.sleep(0.1)
+    time.sleep(0.1)
     return {"type": "general", "result": f"Processed: {prompt[:100]}...", "session_id": session_id}
 
 
-async def explore_agent_handler(prompt: str, session_id: Optional[str] = None) -> Any:
-    """探索代理处理器"""
-    await asyncio.sleep(0.1)
+def explore_agent_handler(prompt: str, session_id: Optional[str] = None) -> Any:
+    """探索代理处理器（同步版本）"""
+    import time
+    time.sleep(0.1)
     return {"type": "explore", "result": f"Explored: {prompt[:100]}...", "session_id": session_id}
 
 
@@ -197,12 +198,10 @@ def run_task(
         _logger.debug(f"[TaskAgent] 开始创建任务: description={description[:50]}..., agent_type={agent_type.value}")
         task = manager.create_task(description, prompt, agent_type, session_id)
 
-        # 在实际实现中，这里会异步启动任务
-        # 现在同步执行模拟
+        # P1-1: 同步执行（避免 asyncio.run 嵌套问题）
         try:
-            # 注意：这里是同步调用，实际应该异步
             _logger.debug(f"[TaskAgent] 开始执行任务: task_id={task.task_id}")
-            result = asyncio.run(manager.execute_task(task.task_id))
+            result = manager.execute_task(task.task_id)  # 直接同步调用
             _logger.info(f"[TaskAgent] 任务执行成功: task_id={task.task_id}, status={task.status.value}")
         except Exception as e:
             _logger.error(f"[TaskAgent] 任务执行失败: task_id={task.task_id}, error={e}", exc_info=True)

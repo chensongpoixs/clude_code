@@ -138,18 +138,20 @@ def get_todo_manager() -> TodoManager:
 def todowrite(
     content: str,
     priority: str = "medium",
-    status: str = "pending"
+    status: str = "pending",
+    todo_id: Optional[str] = None,
 ) -> ToolResult:
     """
-    创建或更新任务列表
+    创建或更新任务列表（P1-2: 显式 ID 协议）
 
     Args:
         content: 任务内容
         priority: 优先级 (high/medium/low)
         status: 状态 (pending/in_progress/completed/cancelled)
+        todo_id: 任务ID（传入则更新已有任务，不传则创建新任务）
 
     Returns:
-        ToolResult: 任务创建结果
+        ToolResult: 任务创建/更新结果
     """
     # 检查工具是否启用
     config = get_task_config()
@@ -160,31 +162,47 @@ def todowrite(
     try:
         manager = get_todo_manager()
 
-        # 如果是更新现有任务
-        if content.startswith("update:"):
-            parts = content.split(":", 2)
-            if len(parts) == 3:
-                todo_id = parts[1].strip()
-                new_content = parts[2].strip()
-                item = manager.update_todo(todo_id, content=new_content, status=TodoStatus(status))
-                if item:
-                    return ToolResult(
-                        ok=True,
-                        payload={
-                            "action": "updated",
-                            "todo": {
-                                "id": item.id,
-                                "content": item.content,
-                                "status": item.status.value,
-                                "priority": item.priority
-                            }
+        # P1-2: 显式 ID 协议 - 根据 todo_id 是否存在决定创建/更新
+        if todo_id:
+            # 更新现有任务
+            _logger.debug(f"[Todo] 更新任务: todo_id={todo_id}")
+            item = manager.update_todo(
+                todo_id, 
+                content=content, 
+                status=TodoStatus(status),
+                priority=priority,
+            )
+            if item:
+                _logger.info(f"[Todo] 任务更新成功: todo_id={todo_id}")
+                return ToolResult(
+                    ok=True,
+                    payload={
+                        "action": "updated",
+                        "todo": {
+                            "id": item.id,
+                            "content": item.content,
+                            "status": item.status.value,
+                            "priority": item.priority,
+                            "updated_at": item.updated_at,
                         }
-                    )
+                    }
+                )
+            else:
+                _logger.warning(f"[Todo] 任务未找到: todo_id={todo_id}")
+                return ToolResult(
+                    ok=False,
+                    error={
+                        "code": "TODO_NOT_FOUND",
+                        "message": f"Todo with ID '{todo_id}' not found",
+                    }
+                )
 
         # 创建新任务
+        _logger.debug(f"[Todo] 创建任务: content={content[:50]}...")
         item = manager.create_todo(content, priority)
         item.status = TodoStatus(status)
 
+        _logger.info(f"[Todo] 任务创建成功: todo_id={item.id}")
         return ToolResult(
             ok=True,
             payload={
@@ -194,7 +212,7 @@ def todowrite(
                     "content": item.content,
                     "status": item.status.value,
                     "priority": item.priority,
-                    "created_at": item.created_at
+                    "created_at": item.created_at,
                 }
             }
         )

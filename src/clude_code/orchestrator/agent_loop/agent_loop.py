@@ -207,6 +207,10 @@ class AgentLoop:
         # 阶段 C: 追踪本轮修改过的文件路径，用于选择性测试
         self._turn_modified_paths: set[Path] = set()
 
+        # P0-2: Question 工具阻塞协议状态
+        self._waiting_user_input: bool = False
+        self._pending_question: dict[str, Any] | None = None
+
         # display 工具需要的运行时上下文（在 run_turn 中设置）
         self._current_ev: Callable[[str, dict[str, Any]], None] | None = None
         self._current_trace_id: str | None = None
@@ -532,7 +536,20 @@ class AgentLoop:
         confirm: Callable[[str], bool],
         _ev: Callable[[str, dict[str, Any]], None],
     ) -> ToolResult:
-        return run_tool_lifecycle(self, name, args, trace_id, confirm, _ev)
+        result = run_tool_lifecycle(self, name, args, trace_id, confirm, _ev)
+        
+        # P0-2: Question 工具阻塞协议检测
+        # 如果工具返回 type="question" 且 status="pending"，设置等待用户输入标志
+        if result.ok and isinstance(result.payload, dict):
+            payload_type = result.payload.get("type")
+            payload_status = result.payload.get("status")
+            if payload_type == "question" and payload_status == "pending":
+                self._waiting_user_input = True
+                self._pending_question = result.payload.get("data")
+                self.logger.info("[yellow]⏸ Question 工具触发阻塞：等待用户输入[/yellow]")
+                _ev("question_pending", {"question": self._pending_question})
+        
+        return result
 
     def _build_system_prompt_from_profile(self, profile: PromptProfile | None) -> str:
         """
@@ -1037,6 +1054,64 @@ class AgentLoop:
         """
         return _semantic_search_fn(self, query)
 
+    # ============================================================
+    # P0-2: Question 工具阻塞协议 API
+    # ============================================================
+    
+    def is_waiting_input(self) -> bool:
+        """
+        检查 Agent 是否正在等待用户输入。
+        
+        当 question 工具返回 pending 状态时，此方法返回 True。
+        调用者（CLI/UI）应检测此状态并收集用户输入。
+        """
+        return self._waiting_user_input
+    
+    def get_pending_question(self) -> dict[str, Any] | None:
+        """
+        获取待回答的问题数据。
+        
+        返回:
+            问题数据字典（包含 question/options/multiple/header），或 None
+        """
+        return self._pending_question
+    
+    def answer_question(self, answer: str | list[str]) -> None:
+        """
+        提供 question 工具的答案，恢复 Agent 执行。
+        
+        参数:
+            answer: 用户的回答（单选为 str，多选为 list[str]）
+        
+        行为:
+            1. 将答案作为 user 消息注入 messages
+            2. 清除等待标志
+            3. 下次 run_turn 时 Agent 将看到答案并继续
+        """
+        if not self._waiting_user_input:
+            self.logger.warning("[yellow]answer_question 调用但当前未在等待输入[/yellow]")
+            return
+        
+        # 构建答案消息
+        if isinstance(answer, list):
+            answer_text = f"[用户回答] {', '.join(answer)}"
+        else:
+            answer_text = f"[用户回答] {answer}"
+        
+        # 注入到消息历史
+        self._append_message(ChatMessage(role="user", content=answer_text))
+        
+        # 清除等待状态
+        self._waiting_user_input = False
+        self._pending_question = None
+        
+        self.logger.info(f"[green]✓ 收到用户回答，已恢复执行[/green]")
+        self.audit.write(
+            trace_id=self._current_trace_id or "question_answer",
+            event="question_answered",
+            data={"answer": answer_text[:200]},
+        )
+    
     # ============================================================
     # 动态模型切换 API
     # ============================================================
