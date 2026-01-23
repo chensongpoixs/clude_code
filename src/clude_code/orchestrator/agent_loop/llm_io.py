@@ -197,7 +197,12 @@ def llm_chat(
 
 
 def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
-    """纯文本：只打印“本次请求新增的 user 文本”，不打印历史轮次 messages。"""
+    """
+    纯文本：只打印"本次请求的最后一条 user 文本"。
+    
+    修复：不再依赖 _llm_log_cursor（因为 normalize_messages_for_llama 会合并消息导致 cursor 失效）。
+    业界做法：直接找 messages 中最后一条 user 消息。
+    """
     llm_cfg = getattr(getattr(loop, "cfg", None), "llm_detail_logging", None)
     enabled = bool(getattr(llm_cfg, "enabled", True)) if llm_cfg is not None else True
     log_to_file = bool(getattr(llm_cfg, "log_to_file", True)) if llm_cfg is not None else True
@@ -209,25 +214,16 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
     if not enabled:
         return
 
-    # 计算“本次请求新增消息”：使用 run_turn 初始化的 cursor + llm_chat 每次发送后推进 cursor
-    base = 0
-    try:
-        base = int(getattr(loop, "_llm_log_cursor", 0) or 0)
-    except Exception:
-        base = 0
-    if base < 0:
-        base = 0
-    if base > len(loop.messages):
-        base = len(loop.messages)
-
-    new_msgs = loop.messages[base:]
-    new_users = [m for m in new_msgs if getattr(m, "role", None) == "user"]
-
-    # 推进 cursor：确保下一次只打印新增部分
-    try:
-        loop._llm_log_cursor = len(loop.messages)
-    except Exception:
-        pass
+    # 修复：不再使用 cursor，直接找最后一条 user 消息
+    # 这样即使 normalize_messages_for_llama 合并了消息，也能正确打印
+    new_users: list[ChatMessage] = []
+    for msg in reversed(loop.messages or []):
+        if getattr(msg, "role", None) == "user":
+            new_users.insert(0, msg)
+            break  # 只取最后一条 user 消息（本轮输入）
+        elif getattr(msg, "role", None) == "assistant":
+            # 遇到 assistant 就停止，说明之前的 user 是历史轮次的
+            break
 
     caller = None
     if include_caller:
