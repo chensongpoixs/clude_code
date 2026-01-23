@@ -52,7 +52,12 @@ from .llm_io import (
 )
 from .react import execute_react_fallback_loop as _react_execute_react_fallback_loop
 from .semantic_search import semantic_search as _semantic_search_fn
-from .tool_dispatch import dispatch_tool as _dispatch_tool_fn, iter_tool_specs as _iter_tool_specs, render_tools_for_system_prompt
+from .tool_dispatch import (
+    dispatch_tool as _dispatch_tool_fn,
+    iter_tool_specs as _iter_tool_specs,
+    render_tools_for_system_prompt,
+    render_tools_for_intent,
+)
 
 
 def _try_parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -215,6 +220,9 @@ class AgentLoop:
         import platform
         self._repo_map = self.tools.generate_repo_map()
         self._env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
+        
+        # 动态工具集：初始化为全量工具，后续根据意图动态更新
+        self._current_intent: str = "UNKNOWN"
         self._tools_section = render_tools_for_system_prompt(include_schema=False)
 
         # Claude Code 对标：自动加载 CLUDE.md 作为项目记忆（只读、失败不阻塞）
@@ -581,6 +589,26 @@ class AgentLoop:
         self.messages[0] = ChatMessage(role="system", content=new_system_prompt)
         self.logger.debug("[dim]已更新 System Prompt[/dim]")
     
+    def _update_tools_for_intent(self, intent: str) -> None:
+        """
+        根据意图动态更新工具集（Token 节省方案 B）。
+        
+        Args:
+            intent: 意图类别（如 "CODE_ANALYSIS", "GENERAL_CHAT"）
+        """
+        if intent == self._current_intent:
+            return  # 无需更新
+        
+        self._current_intent = intent
+        
+        # 使用动态工具集
+        self._tools_section = render_tools_for_intent(intent, include_schema=False)
+        
+        # 记录工具数量变化
+        from clude_code.tooling.tool_groups import get_tool_count_by_intent
+        tool_count = get_tool_count_by_intent(intent)
+        self.logger.debug(f"[dim]动态工具集已更新: 意图={intent}, 工具数={tool_count}[/dim]")
+    
     def _build_user_prompt_from_profile(
         self,
         user_text: str,
@@ -661,6 +689,9 @@ class AgentLoop:
         
         # 选择对应的 Prompt Profile
         self._select_profile(classification.category, _ev)
+        
+        # 动态工具集：根据意图更新工具集（Token 优化）
+        self._update_tools_for_intent(classification.category.value)
 
         enable_planning = self.cfg.orchestrator.enable_planning
         if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):

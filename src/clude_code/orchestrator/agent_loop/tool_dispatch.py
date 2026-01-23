@@ -285,14 +285,10 @@ def _spec_list_dir() -> ToolSpec:
     """ToolSpec：list_dir（只读）。"""
     return ToolSpec(
         name="list_dir",
-        summary="列出目录内容（只读）。",
-        description=(
-            "用于查看某个目录下有哪些文件/子目录（List Directory）。\n"
-            "- 适合：先 list_dir 再决定 read_file/grep/glob_file_search。\n"
-            "- 注意：path 必须是工作区内的相对路径。"
-        ),
+        summary="列出目录",
+        description="查看目录内容。path 须为工作区相对路径。",
         args_schema=_obj_schema(
-            properties={"path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"}},
+            properties={"path": {"type": "string", "default": "."}},
             required=[],
         ),
         example_args={"path": "."},
@@ -310,17 +306,13 @@ def _spec_read_file() -> ToolSpec:
     """ToolSpec：read_file（只读）。"""
     return ToolSpec(
         name="read_file",
-        summary="读取文件内容（只读，支持 offset/limit 分段）。",
-        description=(
-            "用于读取工作区内文件内容（Read File）。\n"
-            "- 大文件建议用 offset/limit 分段读取，避免上下文刷屏。\n"
-            "- 如需搜索再定位：优先用 grep/search_semantic 再 read_file 精读。"
-        ),
+        summary="读取文件",
+        description="支持 offset/limit 分段。大文件先 grep 定位。",
         args_schema=_obj_schema(
             properties={
-                "path": {"type": "string", "description": "相对工作区的文件路径"},
-                "offset": {"type": ["integer", "null"], "minimum": 1, "description": "起始行号（1-based）"},
-                "limit": {"type": ["integer", "null"], "minimum": 1, "description": "读取行数上限"},
+                "path": {"type": "string"},
+                "offset": {"type": ["integer", "null"], "minimum": 1},
+                "limit": {"type": ["integer", "null"], "minimum": 1},
             },
             required=["path"],
         ),
@@ -339,16 +331,12 @@ def _spec_glob_file_search() -> ToolSpec:
     """ToolSpec：glob_file_search（只读）。"""
     return ToolSpec(
         name="glob_file_search",
-        summary="按文件名模式查找文件（只读，支持 ** 递归）。",
-        description=(
-            "用于按文件名模式快速定位文件（Glob File Search）。\n"
-            "- 适合：找某类文件（例如 **/*.md、**/*config*.py）。\n"
-            "- 注意：这是文件名匹配，不是内容搜索；内容搜索请用 grep。"
-        ),
+        summary="按名搜索文件",
+        description="按文件名模式查找，支持 ** 递归。内容搜索用 grep。",
         args_schema=_obj_schema(
             properties={
-                "glob_pattern": {"type": "string", "description": "glob 模式，例如 **/*.md, **/*.py, **/*.cpp, **/*.c, **/*.h, **/*.cc, **/*.java, **/*.js, **/*.ts, **/*.html, **/*.css, **/*.json, **/*.xml"},
-                "target_directory": {"type": "string", "default": ".", "description": "搜索根目录（相对工作区）"},
+                "glob_pattern": {"type": "string"},
+                "target_directory": {"type": "string", "default": "."},
             },
             required=["glob_pattern"],
         ),
@@ -363,43 +351,24 @@ def _spec_glob_file_search() -> ToolSpec:
     )
 
 
-"""
-ToolSpec：grep（只读；优先 rg）。
-"""
 def _spec_grep() -> ToolSpec:
+    """ToolSpec：grep（只读；优先 rg）。"""
     return ToolSpec(
         name="grep",
-        summary="全能跨语言代码搜索器。",
-        #summary="代码搜索（优先 rg，fallback Python）。",
-        # description=(
-        #     "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。\n"
-        #     "- 适合：定位函数名/类名/错误字符串/配置键。\n"
-        #     "- 建议：pattern 尽量具体；返回太多时用 path 限定目录或降低 max_hits。"
-        # ),
-        description=( 
-            "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。支持 C/C++/Java 等多种语言的自动后缀匹配。\n"
-            "如果你在寻找特定语言的定义（如 C++ 类或 Java 方法），指定 'language' 参数将极大提高准确率。"
-        ),
+        summary="正则搜索",
+        description="按正则搜索代码。支持 language 过滤。",
         args_schema=_obj_schema(
             properties={
-                # "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
-                # "path": {"type": "string", "default": ".", "description": "搜索路径（相对工作区）"},
-                # "ignore_case": {"type": "boolean", "default": False, "description": "是否忽略大小写"},
-                # "max_hits": {"type": "integer", "default": 200, "minimum": 1, "description": "最多返回条数"},
-                "pattern": {"type": "string", "description": "正则表达式 列如： class\\s+(?i)， 表示匹配 class 后跟空白符再跟任意字符，且忽略大小写"},
-                "path": {"type": "string", "default": ".", "description": "搜索路径（相对工作区）"},
-                "language": {
-                    "type": "string", 
-                    "enum": ["all", "c", "cpp", "java", "python", "js", "go", "rust"],
-                    "description": "编程语言类型，会自动过滤相关的源码和头文件"
-                },
-                "include_glob": {"type": "string", "description": "文件名通配符过滤，如 'test_*.cpp'"},
+                "pattern": {"type": "string"},
+                "path": {"type": "string", "default": "."},
+                "language": {"type": "string", "enum": ["all", "c", "cpp", "java", "python", "js", "go", "rust"]},
+                "include_glob": {"type": "string"},
                 "ignore_case": {"type": "boolean", "default": False},
                 "max_hits": {"type": "integer", "default": 100}
             },
             required=["pattern"],
         ),
-        example_args={"pattern": "class\\s+(?i)", "path": ".", "language": "cpp",  "include_glob": "*.cpp", "ignore_case": False, "max_hits": 100},
+        example_args={"pattern": "class\\s+(?i)", "path": ".", "language": "cpp", "include_glob": "*.cpp", "ignore_case": False, "max_hits": 100},
         side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional={"rg"},
@@ -414,32 +383,20 @@ def _spec_apply_patch() -> ToolSpec:
     """ToolSpec：apply_patch（写文件）。"""
     return ToolSpec(
         name="apply_patch",
-        summary="补丁式编辑（写文件，支持 fuzzy）。",
-        description=(
-            "用于对文件进行“基于上下文的补丁替换”（Apply Patch）。\n"
-            "- 建议：old/new 块带足够上下文（前后至少 3-5 行）以保证唯一匹配。\n"
-            "- fuzzy=true 仅建议在单点替换且文本略有漂移时使用。\n"
-            "- 重要：该工具会写文件，必须遵守 policy 的确认机制。"
-        ),
+        summary="补丁编辑",
+        description="上下文替换。old/new 带 3-5 行上下文。",
         args_schema=_obj_schema(
             properties={
-                "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
-                "old": {"type": "string", "description": "要被替换的旧代码块（建议带上下文）"},
-                "new": {"type": "string", "description": "新代码块"},
-                "expected_replacements": {"type": "integer", "default": 1, "minimum": 0, "description": "期望替换次数（0=全替换）"},
-                "fuzzy": {"type": "boolean", "default": False, "description": "是否启用模糊匹配（仅支持单处替换）"},
-                "min_similarity": {"type": "number", "default": 0.92, "minimum": 0.0, "maximum": 1.0, "description": "模糊匹配最小相似度"},
+                "path": {"type": "string"},
+                "old": {"type": "string"},
+                "new": {"type": "string"},
+                "expected_replacements": {"type": "integer", "default": 1, "minimum": 0},
+                "fuzzy": {"type": "boolean", "default": False},
+                "min_similarity": {"type": "number", "default": 0.92, "minimum": 0.0, "maximum": 1.0},
             },
             required=["path", "old", "new"],
         ),
-        example_args={
-            "path": "src/*.*",
-            "old": "x = 1",
-            "new": "x = 2",
-            "expected_replacements": 1,
-            "fuzzy": False,
-            "min_similarity": 0.92,
-        },
+        example_args={"path": "src/*.*", "old": "x = 1", "new": "x = 2", "expected_replacements": 1, "fuzzy": False, "min_similarity": 0.92},
         side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),
@@ -454,16 +411,12 @@ def _spec_undo_patch() -> ToolSpec:
     """ToolSpec：undo_patch（写文件）。"""
     return ToolSpec(
         name="undo_patch",
-        summary="回滚补丁（写文件，基于 undo_id）。",
-        description=(
-            "用于回滚 apply_patch 产生的变更（Undo Patch）。\n"
-            "- 适合：补丁应用错误/需要撤销。\n"
-            "- 注意：force=true 会忽略 hash 冲突检查，可能覆盖你后续手动修改。"
-        ),
+        summary="回滚补丁",
+        description="撤销 apply_patch。force=true 忽略冲突。",
         args_schema=_obj_schema(
             properties={
-                "undo_id": {"type": "string", "description": "apply_patch 返回的 undo_id"},
-                "force": {"type": "boolean", "default": False, "description": "强制回滚（忽略 hash 冲突检查）"},
+                "undo_id": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
             },
             required=["undo_id"],
         ),
@@ -482,20 +435,14 @@ def _spec_write_file() -> ToolSpec:
     """ToolSpec：write_file（写文件）。"""
     return ToolSpec(
         name="write_file",
-        summary="写入文件（写文件）。",
-        description=(
-            "用于创建/覆盖/追加写入文件（Write File）。\n"
-            "- 默认：覆盖写入（wrote）。\n"
-            "- content_based=true：文件非空则追加（appended）。\n"
-            "- insert_at_line：按行插入（注意行号是 0-based）。\n"
-            "重要：该工具会写文件，必须遵守 policy 的确认机制。"
-        ),
-         args_schema=_obj_schema(
+        summary="写入文件",
+        description="创建/覆盖/追加。content_based=true 则追加。",
+        args_schema=_obj_schema(
             properties={
-                "path": {"type": "string", "description": "目标文件路径（相对工作区）"},
-                "text": {"type": "string", "default": "", "description": "写入内容"},
-                "content_based": {"type": "boolean", "default": False, "description": "是否根据现有内容智能决定写入行为：空文件则写入，有内容则追加"},
-                "insert_at_line": {"type": "integer", "default": 0, "description": "在指定行号插入内容（从0开始）。如果指定此参数，将忽略content_based设置"},
+                "path": {"type": "string"},
+                "text": {"type": "string", "default": ""},
+                "content_based": {"type": "boolean", "default": False},
+                "insert_at_line": {"type": "integer", "default": 0},
             },
             required=["path"],
         ),
@@ -514,18 +461,13 @@ def _spec_run_cmd() -> ToolSpec:
     """ToolSpec：run_cmd（exec）。"""
     return ToolSpec(
         name="run_cmd",
-        summary="执行命令（可能有副作用，受策略约束）。",
-        description=(
-            "用于在工作区内执行命令（Execute Command）。\n"
-            "- 适合：运行测试/格式化/构建/一次性诊断命令。\n"
-            "- 注意：该工具可能产生副作用（写文件/联网/安装依赖），必须遵守 policy 的确认与限制。\n"
-            "- 建议：命令尽量幂等；输出可能会被 max_output_bytes 截断。"
-        ),
+        summary="执行命令",
+        description="执行 shell 命令。需确认，输出可能截断。",
         args_schema=_obj_schema(
             properties={
-                "command": {"type": "string", "description": "要执行的命令字符串"},
-                "cwd": {"type": "string", "default": ".", "description": "工作目录（相对工作区）"},
-                "timeout_s": {"type": "integer", "default": 30, "minimum": 1, "description": "超时时间（秒），默认取配置 command.timeout_s"},
+                "command": {"type": "string"},
+                "cwd": {"type": "string", "default": "."},
+                "timeout_s": {"type": "integer", "default": 30, "minimum": 1},
             },
             required=["command"],
         ),
@@ -544,11 +486,12 @@ def _spec_search_semantic() -> ToolSpec:
     """ToolSpec：search_semantic（只读 + search）。"""
     return ToolSpec(
         name="search_semantic",
-        summary="语义检索（向量 RAG，只读）。",
+        summary="语义搜索",
+        description="向量 RAG 检索代码。",
         args_schema=_obj_schema(
             properties={
-                "query": {"type": "string", "description": "自然语言查询"},
-                "max_results": {"type": "integer", "default": 10, "minimum": 1, "description": "最多返回条数"},
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "default": 10, "minimum": 1},
             },
             required=["query"],
         ),
@@ -567,32 +510,22 @@ def _spec_display() -> ToolSpec:
     """ToolSpec：display（只读）。"""
     return ToolSpec(
         name="display",
-        summary="向用户输出信息（进度、分析结果、说明等，只读）。",
+        summary="显示消息",
+        description="向用户输出进度/结果。",
         args_schema=_obj_schema(
             properties={
-                "content": {"type": "string", "description": "要显示的内容（支持 Markdown）"},
-                "level": {
-                    "type": "string",
-                    "enum": ["info", "success", "warning", "error", "progress"],
-                    "default": "info",
-                    "description": "消息级别",
-                },
-                "title": {"type": ["string", "null"], "description": "可选标题"},
-                "thought": {"type": ["string", "null"], "description": "可选：思考过程（对齐 UI 的 Why/Decision 区域）"},
-                "explanation": {"type": ["string", "null"], "description": "可选：解释/理由（与 thought 语义接近，兼容不同 prompt 习惯）"},
-                "evidence": {
-                    "type": ["array", "null"],
-                    "items": {"type": "string"},
-                    "description": "可选：证据/要点列表（用于 UI Evidence 区域）",
-                },
-
-                # 兼容字段：历史上曾使用 message（保留以避免旧 prompt/脚本失效）
-                "message": {"type": ["string", "null"], "description": "兼容字段：等价于 content（后续将废弃）"},
+                "content": {"type": "string"},
+                "level": {"type": "string", "enum": ["info", "success", "warning", "error", "progress"], "default": "info"},
+                "title": {"type": ["string", "null"]},
+                "thought": {"type": ["string", "null"]},
+                "explanation": {"type": ["string", "null"]},
+                "evidence": {"type": ["array", "null"], "items": {"type": "string"}},
+                "message": {"type": ["string", "null"]},
             },
             required=["content"],
         ),
         example_args={"content": "正在分析文件...", "level": "progress"},
-        side_effects=set(),  # 无副作用（只读展示）
+        side_effects=set(),
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -622,8 +555,8 @@ def _spec_internal_repo_map() -> ToolSpec:
 def _spec_preview_multi_edit() -> ToolSpec:
     return ToolSpec(
         name="preview_multi_edit",
-        summary="预览多文件批量编辑的影响和风险",
-        description="在应用多文件编辑前预览所有变化，分析潜在风险和依赖关系。帮助用户做出明智的编辑决策。",
+        summary="批量编辑预览",
+        description="预览多文件编辑影响。",
         args_schema={
             "type": "object",
             "properties": {
@@ -632,37 +565,28 @@ def _spec_preview_multi_edit() -> ToolSpec:
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "文件路径"},
-                            "old_string": {"type": "string", "description": "要替换的旧内容"},
-                            "new_string": {"type": "string", "description": "替换成的新内容"}
+                            "path": {"type": "string"},
+                            "old_string": {"type": "string"},
+                            "new_string": {"type": "string"}
                         },
                         "required": ["path", "old_string", "new_string"]
-                    },
-                    "description": "编辑任务列表"
+                    }
                 }
             },
             "required": ["edits"]
         },
-        example_args={
-            "edits": [
-                {
-                    "path": "src/main.py",
-                    "old_string": "def old_func():",
-                    "new_string": "def new_func():"
-                }
-            ]
-        },
-        side_effects={"read"},  # 只读操作，分析影响
+        example_args={"edits": [{"path": "src/main.py", "old_string": "def old_func():", "new_string": "def new_func():"}]},
+        side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
         callable_by_model=True,
         category="file",
         priority=2,
-        cacheable=False,  # 预览不缓存
+        cacheable=False,
         timeout_seconds=30,
         exec_command_key=None,
-        requires_confirmation=False,  # 预览不需要确认
+        requires_confirmation=False,
         version="1.0.0",
         handler=_h_preview_multi_edit,
     )
@@ -725,18 +649,19 @@ def _spec_question() -> ToolSpec:
     """ToolSpec：question（向用户提问）。"""
     return ToolSpec(
         name="question",
-        summary="向用户提问并获取回答。",
+        summary="提问用户",
+        description="向用户提问并等待回答。",
         args_schema=_obj_schema(
             properties={
-                "question": {"type": "string", "description": "问题文本"},
-                "options": {"type": "array", "items": {"type": "string"}, "description": "可选的选项列表"},
-                "multiple": {"type": "boolean", "default": False, "description": "是否允许多选"},
-                "header": {"type": "string", "description": "问题标题"}
+                "question": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "string"}},
+                "multiple": {"type": "boolean", "default": False},
+                "header": {"type": "string"}
             },
             required=["question"],
         ),
         example_args={"question": "您想要如何处理这个文件？", "options": ["删除", "重命名", "保留"]},
-        side_effects={"read"},  # 实际上不修改文件，但需要用户交互
+        side_effects={"read"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -764,33 +689,25 @@ def _h_webfetch(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
 
 def _spec_webfetch() -> ToolSpec:
-    """ToolSpec：webfetch（获取网页内容，支持本地 Markdown 缓存）。"""
+    """ToolSpec：webfetch（获取网页内容）。"""
     return ToolSpec(
         name="webfetch",
-        summary="抓取网页内容并缓存为 Markdown（支持 7 天本地缓存）。",
-        description=(
-            "用于把指定 URL 的网页内容抓取为 Markdown 格式（Web Fetch）。\n"
-            "- 特性：自动缓存到 .clude/markdown/ 目录，文件名以文档标题命名。\n"
-            "- 缓存有效期 7 天，优先返回本地缓存，无缓存则抓取。\n"
-            "- 适合：抓官网文档/博客/FAQ，然后结合内容回答或写代码。\n"
-            "- 注意：只支持 http/https；内容会按配置的 max_content_length 截断。\n"
-            "- 提示：如果只是需要【找资料】，先用 websearch 再 webfetch 关键页面。\n"
-            "- force_refresh=true 可强制忽略缓存重新抓取。"
-        ),
+        summary="获取网页",
+        description="抓取 URL 转 Markdown。支持缓存。",
         args_schema=_obj_schema(
             properties={
-                "url": {"type": "string", "description": "要获取的 URL"},
-                "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown", "description": "返回格式（markdown 或纯文本）"},
-                "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"},
-                "use_cache": {"type": "boolean", "default": True, "description": "是否使用本地缓存（推荐 true）"},
-                "force_refresh": {"type": "boolean", "default": False, "description": "是否强制刷新（忽略缓存重新抓取）"},
+                "url": {"type": "string"},
+                "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
+                "timeout": {"type": "integer", "default": 30, "minimum": 1},
+                "use_cache": {"type": "boolean", "default": True},
+                "force_refresh": {"type": "boolean", "default": False},
             },
             required=["url"],
         ),
         example_args={"url": "https://httpx.readthedocs.io/en/latest/", "format": "markdown", "timeout": 30, "use_cache": True},
-        side_effects={"network", "write"},  # 网络访问 + 写缓存文件
+        side_effects={"network", "write"},
         external_bins_required=set(),
-        external_bins_optional={"curl", "wget"},  # 可选的外部工具
+        external_bins_optional={"curl", "wget"},
         visible_in_prompt=True,
         callable_by_model=True,
         exec_command_key=None,
@@ -809,11 +726,10 @@ def _spec_load_skill() -> ToolSpec:
     """ToolSpec：load_skill（加载技能）。"""
     return ToolSpec(
         name="load_skill",
-        summary="加载和执行预定义的技能。",
+        summary="加载技能",
+        description="加载预定义技能模板。",
         args_schema=_obj_schema(
-            properties={
-                "skill_name": {"type": "string", "description": "技能名称（文件名，不含扩展名）"}
-            },
+            properties={"skill_name": {"type": "string"}},
             required=["skill_name"],
         ),
         example_args={"skill_name": "refactor"},
@@ -840,17 +756,18 @@ def _spec_todowrite() -> ToolSpec:
     """ToolSpec：todowrite（创建任务）。"""
     return ToolSpec(
         name="todowrite",
-        summary="创建或更新任务列表。",
+        summary="创建任务",
+        description="创建或更新任务。",
         args_schema=_obj_schema(
             properties={
-                "content": {"type": "string", "description": "任务内容"},
-                "priority": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium", "description": "优先级"},
-                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "default": "pending", "description": "状态"}
+                "content": {"type": "string"},
+                "priority": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "default": "pending"}
             },
             required=["content"],
         ),
         example_args={"content": "修复登录bug", "priority": "high", "status": "pending"},
-        side_effects={"write"},  # 可能写入任务文件
+        side_effects={"write"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -872,11 +789,12 @@ def _spec_todoread() -> ToolSpec:
     """ToolSpec：todoread（读取任务）。"""
     return ToolSpec(
         name="todoread",
-        summary="读取任务列表。",
+        summary="读取任务",
+        description="读取任务列表。",
         args_schema=_obj_schema(
             properties={
-                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"], "description": "过滤状态"},
-                "todo_id": {"type": "string", "description": "特定任务ID"}
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
+                "todo_id": {"type": "string"}
             },
             required=[],
         ),
@@ -906,19 +824,15 @@ def _spec_websearch() -> ToolSpec:
     """ToolSpec：websearch（网页搜索）。"""
     return ToolSpec(
         name="websearch",
-        summary="执行实时网页搜索（返回标题/链接/摘要）。",
-        description=(
-            "用于“找资料/找页面”，返回搜索结果列表（title/url/snippet）。\n"
-            "- 如需阅读全文：拿 websearch 的 url 再用 webfetch 抓取页面内容。\n"
-            "- 搜索源由配置决定（Open-WebSearch MCP / Serper）。"
-        ),
+        summary="网页搜索",
+        description="搜索返回标题/链接/摘要。",
         args_schema=_obj_schema(
             properties={
-                "query": {"type": "string", "description": "搜索查询"},
-                "num_results": {"type": "integer", "default": 8, "minimum": 1, "description": "返回结果数量"},
-                "livecrawl": {"type": "string", "enum": ["fallback", "preferred"], "default": "fallback", "description": "实时爬取模式"},
-                "search_type": {"type": "string", "enum": ["auto", "fast", "deep"], "default": "auto", "description": "搜索类型"},
-                "context_max_chars": {"type": "integer", "default": 10000, "minimum": 1000, "description": "上下文最大字符数"}
+                "query": {"type": "string"},
+                "num_results": {"type": "integer", "default": 8, "minimum": 1},
+                "livecrawl": {"type": "string", "enum": ["fallback", "preferred"], "default": "fallback"},
+                "search_type": {"type": "string", "enum": ["auto", "fast", "deep"], "default": "auto"},
+                "context_max_chars": {"type": "integer", "default": 10000, "minimum": 1000}
             },
             required=["query"],
         ),
@@ -945,31 +859,17 @@ def _spec_codesearch() -> ToolSpec:
     """ToolSpec：codesearch（网络代码搜索）。"""
     return ToolSpec(
         name="codesearch",
-        summary="网络搜索开源代码片段（网络）。",
-        description=(
-            "用于编程任务的代码片段检索（Network Code Search）。\n"
-            "- 适合：查找某库/某框架的典型用法、报错修复示例、实现模式（会返回代码片段）。\n"
-            "- 不适合：读取当前仓库源码（请优先用 read_file/grep/search_semantic）。\n"
-            "注意：返回的是开源匹配片段，可能需要根据项目上下文改造与验证（tests/lint）。"
-        ),
+        summary="代码搜索",
+        description="搜索开源代码片段。本地代码用 grep。",
         args_schema=_obj_schema(
             properties={
-                "query": {
-                    "type": "string",
-                    "description": "代码搜索查询（建议包含库名/函数名/关键字/语言，例如 'python httpx timeout Client'）",
-                },
-                "tokens_num": {
-                    "type": "integer",
-                    "default": 5000,
-                    "minimum": 500,
-                    "maximum": 50000,
-                    "description": "输出预算（越大返回越多；工具会做上限与截断，避免刷屏）。",
-                }
+                "query": {"type": "string"},
+                "tokens_num": {"type": "integer", "default": 5000, "minimum": 500, "maximum": 50000}
             },
             required=["query"],
         ),
         example_args={"query": "python httpx Client timeout usage", "tokens_num": 2500},
-        side_effects={"network"},  # 可能需要外部API
+        side_effects={"network"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -993,18 +893,19 @@ def _spec_run_task() -> ToolSpec:
     """ToolSpec：run_task（运行子代理任务）。"""
     return ToolSpec(
         name="run_task",
-        summary="启动和管理系统中的子代理。",
+        summary="运行子任务",
+        description="启动子代理执行任务。",
         args_schema=_obj_schema(
             properties={
-                "description": {"type": "string", "description": "任务描述"},
-                "prompt": {"type": "string", "description": "代理提示"},
-                "subagent_type": {"type": "string", "enum": ["general", "explore"], "default": "general", "description": "代理类型"},
-                "session_id": {"type": "string", "description": "会话ID"}
+                "description": {"type": "string"},
+                "prompt": {"type": "string"},
+                "subagent_type": {"type": "string", "enum": ["general", "explore"], "default": "general"},
+                "session_id": {"type": "string"}
             },
             required=["description", "prompt"],
         ),
         example_args={"description": "分析代码库结构", "prompt": "请分析这个项目的架构", "subagent_type": "explore"},
-        side_effects={"exec"},  # 可能执行子代理
+        side_effects={"exec"},
         external_bins_required=set(),
         external_bins_optional=set(),
         visible_in_prompt=True,
@@ -1025,11 +926,10 @@ def _spec_get_task_status() -> ToolSpec:
     """ToolSpec：get_task_status（获取任务状态）。"""
     return ToolSpec(
         name="get_task_status",
-        summary="获取子代理任务的状态。",
+        summary="任务状态",
+        description="获取子任务状态。",
         args_schema=_obj_schema(
-            properties={
-                "task_id": {"type": "string", "description": "任务ID"}
-            },
+            properties={"task_id": {"type": "string"}},
             required=["task_id"],
         ),
         example_args={"task_id": "task_123"},
@@ -1062,59 +962,21 @@ def _h_get_weather(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
 
 
 def _spec_get_weather() -> ToolSpec:
-    """
-    ToolSpec：get_weather（获取实时天气）
-    
-    使用 OpenWeatherMap API 获取全球任意城市的实时天气信息。
-    支持城市名查询和经纬度查询两种方式。
-    
-    环境变量配置：
-    - OPENWEATHERMAP_API_KEY: OpenWeatherMap API Key（必需）
-    
-    获取免费 API Key: https://openweathermap.org/api
-    """
+    """ToolSpec：get_weather（获取实时天气）"""
     return ToolSpec(
         name="get_weather",
-        summary="获取实时天气信息（OpenWeatherMap）",
-        description="使用 OpenWeatherMap API 获取全球城市的实时天气，支持城市名或经纬度查询，返回温度、湿度、风速等详细信息。",
+        summary="获取天气",
+        description="获取城市实时天气。",
         args_schema=_obj_schema(
             properties={
-                "city": {
-                    "type": "string",
-                    "description": "城市名称（支持中文、英文），如 'Beijing', '北京', 'London'"
-                },
-                "lat": {
-                    "type": "number",
-                    "description": "纬度（-90 到 90），与 lon 配合使用",
-                    "minimum": -90,
-                    "maximum": 90
-                },
-                "lon": {
-                    "type": "number",
-                    "description": "经度（-180 到 180），与 lat 配合使用",
-                    "minimum": -180,
-                    "maximum": 180
-                },
-                "units": {
-                    "type": "string",
-                    "enum": ["metric", "imperial", "standard"],
-                    "default": "metric",
-                    "description": "温度单位：metric=摄氏度（默认），imperial=华氏度，standard=开尔文"
-                },
-                "lang": {
-                    "type": "string",
-                    "default": "zh_cn",
-                    "description": "返回语言（默认中文 zh_cn）"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 60,
-                    "description": "请求超时时间（秒）"
-                }
+                "city": {"type": "string"},
+                "lat": {"type": "number", "minimum": -90, "maximum": 90},
+                "lon": {"type": "number", "minimum": -180, "maximum": 180},
+                "units": {"type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric"},
+                "lang": {"type": "string", "default": "zh_cn"},
+                "timeout": {"type": "integer", "default": 10, "minimum": 1, "maximum": 60}
             },
-            required=[],  # city 或 lat+lon 二选一
+            required=[],
         ),
         example_args={"city": "Beijing", "units": "metric"},
         side_effects={"network"},
@@ -1146,59 +1008,20 @@ def _h_get_weather_forecast(loop: "AgentLoop", args: dict[str, Any]) -> ToolResu
 
 
 def _spec_get_weather_forecast() -> ToolSpec:
-    """
-    ToolSpec：get_weather_forecast（获取天气预报）
-    
-    使用 OpenWeatherMap API 获取最多5天的天气预报。
-    每3小时提供一个数据点，包含温度、湿度、降水概率等信息。
-    """
+    """ToolSpec：get_weather_forecast（获取天气预报）"""
     return ToolSpec(
         name="get_weather_forecast",
-        summary="获取天气预报（最多5天）",
-        description="使用 OpenWeatherMap API 获取未来5天的天气预报，每3小时一个数据点，包含温度、湿度、降水概率等。",
+        summary="天气预报",
+        description="获取未来5天天气预报。",
         args_schema=_obj_schema(
             properties={
-                "city": {
-                    "type": "string",
-                    "description": "城市名称（支持中文、英文）"
-                },
-                "lat": {
-                    "type": "number",
-                    "description": "纬度（-90 到 90）",
-                    "minimum": -90,
-                    "maximum": 90
-                },
-                "lon": {
-                    "type": "number",
-                    "description": "经度（-180 到 180）",
-                    "minimum": -180,
-                    "maximum": 180
-                },
-                "units": {
-                    "type": "string",
-                    "enum": ["metric", "imperial", "standard"],
-                    "default": "metric",
-                    "description": "温度单位"
-                },
-                "lang": {
-                    "type": "string",
-                    "default": "zh_cn",
-                    "description": "返回语言"
-                },
-                "days": {
-                    "type": "integer",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 5,
-                    "description": "预报天数（最多5天）"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 60,
-                    "description": "请求超时时间（秒）"
-                }
+                "city": {"type": "string"},
+                "lat": {"type": "number", "minimum": -90, "maximum": 90},
+                "lon": {"type": "number", "minimum": -180, "maximum": 180},
+                "units": {"type": "string", "enum": ["metric", "imperial", "standard"], "default": "metric"},
+                "lang": {"type": "string", "default": "zh_cn"},
+                "days": {"type": "integer", "default": 5, "minimum": 1, "maximum": 5},
+                "timeout": {"type": "integer", "default": 10, "minimum": 1, "maximum": 60}
             },
             required=[],
         ),
@@ -1264,7 +1087,7 @@ def get_tool_registry():
 
 def render_tools_for_system_prompt(*, include_schema: bool = False) -> str:
     """
-    为 SYSTEM_PROMPT 生成“可用工具清单”片段。
+    为 SYSTEM_PROMPT 生成"可用工具清单"片段。
     - 默认只输出简洁示例（避免 system prompt 过长导致上下文挤压）
     - include_schema=True 时额外输出 JSON Schema（更适合写入 docs 或 debug）
     """
@@ -1279,6 +1102,44 @@ def render_tools_for_system_prompt(*, include_schema: bool = False) -> str:
             lines.append(f"    - schema: {schema}")
             lines.append(f"    - summary: {spec.summary}")
     return "\n".join(lines)
+
+
+def render_tools_for_intent(intent: str, *, include_schema: bool = False) -> str:
+    """
+    根据意图生成精简的工具清单（动态工具集）。
+    
+    Args:
+        intent: 意图类别（如 "CODE_ANALYSIS", "GENERAL_CHAT"）
+        include_schema: 是否包含 JSON Schema
+    
+    Returns:
+        工具清单字符串
+    """
+    from clude_code.tooling.tool_groups import get_tool_names_for_intent
+    
+    tool_names = get_tool_names_for_intent(intent)
+    
+    lines: list[str] = []
+    for spec in iter_tool_specs():
+        if not spec.visible_in_prompt:
+            continue
+        if spec.name not in tool_names:
+            continue
+        
+        ex = json.dumps(spec.example_args, ensure_ascii=False)
+        lines.append(f"  - {spec.name}: {ex}")
+        if include_schema:
+            schema = json.dumps(spec.args_schema, ensure_ascii=False)
+            lines.append(f"    - schema: {schema}")
+            lines.append(f"    - summary: {spec.summary}")
+    
+    return "\n".join(lines)
+
+
+def get_tool_count_for_intent(intent: str) -> int:
+    """获取意图对应的工具数量"""
+    from clude_code.tooling.tool_groups import get_tool_count_by_intent
+    return get_tool_count_by_intent(intent)
 
 
 def dispatch_tool(loop: "AgentLoop", name: str, args: dict[str, Any]) -> ToolResult:

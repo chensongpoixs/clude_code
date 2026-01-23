@@ -1,9 +1,46 @@
 from __future__ import annotations
 
 import json
+from enum import Enum
 from typing import Any
 
 from clude_code.tooling.local_tools import ToolResult
+
+
+class CompressionLevel(Enum):
+    """压缩级别"""
+    MINIMAL = "minimal"     # 最小压缩（保留更多细节）
+    BALANCED = "balanced"   # 平衡模式（默认）
+    AGGRESSIVE = "aggressive"  # 激进压缩（最大 token 节省）
+
+
+# 根据压缩级别调整的参数
+COMPRESSION_PARAMS = {
+    CompressionLevel.MINIMAL: {
+        "MAX_PREVIEW_CHARS": 300,
+        "MAX_GREP_HITS": 25,
+        "MAX_READ_FILE_CHARS": 5000,
+        "MAX_WEB_RESULTS": 8,
+        "MAX_CODE_RESULTS": 8,
+        "MAX_WEBFETCH_PREVIEW_CHARS": 1200,
+    },
+    CompressionLevel.BALANCED: {
+        "MAX_PREVIEW_CHARS": 200,
+        "MAX_GREP_HITS": 15,
+        "MAX_READ_FILE_CHARS": 3000,
+        "MAX_WEB_RESULTS": 5,
+        "MAX_CODE_RESULTS": 5,
+        "MAX_WEBFETCH_PREVIEW_CHARS": 800,
+    },
+    CompressionLevel.AGGRESSIVE: {
+        "MAX_PREVIEW_CHARS": 100,
+        "MAX_GREP_HITS": 8,
+        "MAX_READ_FILE_CHARS": 1500,
+        "MAX_WEB_RESULTS": 3,
+        "MAX_CODE_RESULTS": 3,
+        "MAX_WEBFETCH_PREVIEW_CHARS": 400,
+    },
+}
 
 
 def _tail_lines(text: str, max_lines: int = 30, max_chars: int = 4000) -> str:
@@ -21,10 +58,21 @@ def _head_items(items: list[dict[str, Any]], max_items: int = 20) -> list[dict[s
     return out
 
 
-def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None = None) -> dict[str, Any]:
+def summarize_tool_result(
+    tool: str,
+    tr: ToolResult,
+    keywords: set[str] | None = None,
+    compression: CompressionLevel = CompressionLevel.BALANCED
+) -> dict[str, Any]:
     """
     Turn raw ToolResult into a compact, structured summary for feeding back to the LLM.
     Key idea: keep only decision-critical signals + references, avoid dumping full payload.
+    
+    Args:
+        tool: 工具名称
+        tr: 工具执行结果
+        keywords: 关键词集合（用于优先级排序）
+        compression: 压缩级别 (MINIMAL/BALANCED/AGGRESSIVE)
     """
     if not tr.ok:
         return {"tool": tool, "ok": False, "error": tr.error}
@@ -39,13 +87,14 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     # Pre-process keywords for search
     kw_list = [k.lower() for k in (keywords or []) if k]
 
-    # 全局护栏：回喂给 LLM 的摘要必须有上限（防止上下文膨胀/刷屏）
-    MAX_PREVIEW_CHARS = 200
-    MAX_GREP_HITS = 20
-    MAX_READ_FILE_CHARS = 4000
-    MAX_WEB_RESULTS = 5
-    MAX_CODE_RESULTS = 5
-    MAX_WEBFETCH_PREVIEW_CHARS = 800
+    # 根据压缩级别获取参数（Phase 3: 分层压缩）
+    params = COMPRESSION_PARAMS.get(compression, COMPRESSION_PARAMS[CompressionLevel.BALANCED])
+    MAX_PREVIEW_CHARS = params["MAX_PREVIEW_CHARS"]
+    MAX_GREP_HITS = params["MAX_GREP_HITS"]
+    MAX_READ_FILE_CHARS = params["MAX_READ_FILE_CHARS"]
+    MAX_WEB_RESULTS = params["MAX_WEB_RESULTS"]
+    MAX_CODE_RESULTS = params["MAX_CODE_RESULTS"]
+    MAX_WEBFETCH_PREVIEW_CHARS = params["MAX_WEBFETCH_PREVIEW_CHARS"]
 
     if tool == "list_dir":
         # ... (list_dir logic remains same as it's already compact)
@@ -319,11 +368,39 @@ def summarize_tool_result(tool: str, tr: ToolResult, keywords: set[str] | None =
     return summary
 
 
-def format_feedback_message(tool: str, tr: ToolResult, keywords: set[str] | None = None) -> str:
+def format_feedback_message(
+    tool: str,
+    tr: ToolResult,
+    keywords: set[str] | None = None,
+    compression: CompressionLevel = CompressionLevel.BALANCED
+) -> str:
     """
     JSON string fed back to the model as a user message.
     Must remain compact and structured.
+    
+    Args:
+        tool: 工具名称
+        tr: 工具执行结果
+        keywords: 关键词集合
+        compression: 压缩级别
     """
-    return json.dumps(summarize_tool_result(tool, tr, keywords=keywords), ensure_ascii=False)
+    return json.dumps(
+        summarize_tool_result(tool, tr, keywords=keywords, compression=compression),
+        ensure_ascii=False
+    )
+
+
+def estimate_token_savings(original_size: int, compressed_size: int) -> dict[str, Any]:
+    """估算压缩节省的 token 数"""
+    saved_chars = original_size - compressed_size
+    saved_tokens = saved_chars // 4  # 粗略估算
+    ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
+    return {
+        "original_chars": original_size,
+        "compressed_chars": compressed_size,
+        "saved_chars": saved_chars,
+        "saved_tokens_est": saved_tokens,
+        "compression_ratio": f"{ratio:.1f}%"
+    }
 
 
