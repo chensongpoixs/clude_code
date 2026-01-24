@@ -80,6 +80,92 @@ class LLMConfig(BaseModel):
     )
     timeout_s: int = Field(default=120, ge=1)
 
+
+"""
+单个厂商配置（Single Provider Configuration）
+@author chensong（chensong）
+@date 2026-01-24
+@brief 单个厂商的连接和认证配置
+"""
+class ProviderConfigItem(BaseModel):
+    enabled: bool = Field(default=False, description="是否启用此厂商")
+    api_key: str = Field(default="", description="API 密钥")
+    base_url: str = Field(default="", description="API 基础 URL")
+    api_version: str = Field(default="", description="API 版本（如 Azure）")
+    organization: str = Field(default="", description="组织 ID（如 OpenAI）")
+    default_model: str = Field(default="", description="默认模型")
+    timeout_s: int = Field(default=120, ge=1, description="请求超时（秒）")
+    extra: Dict[str, Any] = Field(default_factory=dict, description="厂商特定配置")
+
+
+"""
+多厂商配置（Multi-Provider Configuration）
+@author chensong（chensong）
+@date 2026-01-24
+@brief 管理多个 LLM 厂商的配置
+"""
+class ProvidersConfig(BaseModel):
+    default: str = Field(default="openai_compat", description="默认厂商")
+    
+    # 国际主流
+    openai: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o",
+    ))
+    anthropic: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://api.anthropic.com",
+        default_model="claude-3-5-sonnet-latest",
+    ))
+    azure_openai: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        default_model="gpt-4o",
+    ))
+    google_gemini: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        default_model="gemini-1.5-pro",
+    ))
+    
+    # 国内厂商
+    deepseek: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://api.deepseek.com/v1",
+        default_model="deepseek-chat",
+    ))
+    moonshot: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://api.moonshot.cn/v1",
+        default_model="moonshot-v1-8k",
+    ))
+    zhipu: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        default_model="glm-4",
+    ))
+    siliconflow: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://api.siliconflow.cn/v1",
+        default_model="deepseek-ai/DeepSeek-V3",
+    ))
+    qianwen: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default_model="qwen-turbo",
+    ))
+    
+    # 本地部署
+    ollama: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        enabled=True,
+        base_url="http://127.0.0.1:11434",
+        default_model="llama3.2",
+    ))
+    llama_cpp: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        enabled=True,
+        base_url="http://127.0.0.1:8899",
+        default_model="gemma-3-12b-it",
+    ))
+    
+    # 通用兼容
+    openai_compat: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
+        enabled=True,
+        base_url="http://127.0.0.1:8899",
+        default_model="deepseek-ai/DeepSeek-V3",
+    ))
+
+
 """
 策略配置（Policy Configuration）
 @author chensong（chensong）
@@ -362,6 +448,7 @@ class CludeConfig(BaseSettings):
 
     workspace_root: str = "."
     llm: LLMConfig = LLMConfig()
+    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     policy: PolicyConfig = PolicyConfig()
     limits: LimitsConfig = LimitsConfig()
     logging: LoggingConfig = LoggingConfig()

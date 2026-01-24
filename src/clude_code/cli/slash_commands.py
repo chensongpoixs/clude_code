@@ -38,11 +38,16 @@ class SlashContext:
 
 def _print_help(ctx: SlashContext) -> None:
     ctx.console.print("[bold]可用命令（Slash Commands）[/bold]")
+    ctx.console.print("[bold cyan]── 基础 ──[/bold cyan]")
     ctx.console.print("- `/help`：显示本帮助")
     ctx.console.print("- `/clear`：清空当前会话上下文（保留 system prompt）")
     ctx.console.print("- `/config`：显示当前配置摘要")
-    ctx.console.print("- `/model [id]`：查看或切换当前模型（本会话生效）")
-    ctx.console.print("- `/models`：列出所有可用模型")
+    ctx.console.print("[bold cyan]── 厂商/模型 ──[/bold cyan]")
+    ctx.console.print("- `/providers`：列出所有可用厂商（支持 21+ 厂商）")
+    ctx.console.print("- `/provider [id]`：查看或切换当前厂商")
+    ctx.console.print("- `/models`：列出当前厂商的可用模型")
+    ctx.console.print("- `/model [id]`：查看或切换当前模型")
+    ctx.console.print("[bold cyan]── 多模态 ──[/bold cyan]")
     ctx.console.print("- `/image <path|url>`：预加载图片，下次输入时自动附加")
     ctx.console.print("- `/permissions`：查看权限与工具 allow/deny")
     ctx.console.print("- `/permissions network on|off`：开关网络权限（影响 exec 策略评估）")
@@ -120,31 +125,205 @@ def _set_model(ctx: SlashContext, model: str | None) -> None:
 
 
 def _list_models(ctx: SlashContext) -> None:
-    """处理 /models 命令：列出可用模型"""
-    models: list[str] = []
+    """处理 /models 命令：列出可用模型（增强版，显示详细信息）"""
+    from rich.table import Table
+    
+    models_info = []
     current = ""
+    current_provider = ""
     
-    # 尝试从 AgentLoop 获取
-    if hasattr(ctx.agent, "list_available_models"):
-        models = ctx.agent.list_available_models()
-        current = ctx.agent.get_current_model() if hasattr(ctx.agent, "get_current_model") else ctx.cfg.llm.model
-    elif hasattr(ctx.agent, "llm") and hasattr(ctx.agent.llm, "list_model_ids"):
-        models = ctx.agent.llm.list_model_ids()
-        current = ctx.agent.llm.model
+    # 尝试从 ModelManager 获取详细信息
+    try:
+        from clude_code.llm import get_model_manager
+        mm = get_model_manager()
+        current_provider = mm.get_current_provider_id()
+        current = mm.get_current_model()
+        models_info = mm.list_models_info()  # 返回 ModelInfo 列表
+    except Exception:
+        pass
     
-    if not models:
+    # 降级：从 AgentLoop 获取
+    if not models_info:
+        if hasattr(ctx.agent, "list_available_models"):
+            model_ids = ctx.agent.list_available_models()
+            current = ctx.agent.get_current_model() if hasattr(ctx.agent, "get_current_model") else ctx.cfg.llm.model
+            # 转换为简单格式
+            models_info = [{"id": m, "name": m} for m in model_ids]
+        elif hasattr(ctx.agent, "llm") and hasattr(ctx.agent.llm, "list_model_ids"):
+            model_ids = ctx.agent.llm.list_model_ids()
+            current = ctx.agent.llm.model
+            models_info = [{"id": m, "name": m} for m in model_ids]
+    
+    if not models_info:
         ctx.console.print("[yellow]无法获取可用模型列表（API 不支持或网络错误）[/yellow]")
         ctx.console.print(f"[dim]当前配置模型: {ctx.cfg.llm.model}[/dim]")
         return
     
-    ctx.console.print("[bold]可用模型[/bold]")
-    for m in models:
-        if m == current:
-            ctx.console.print(f"  [green]✓ {m}[/green]  [dim](当前)[/dim]")
+    # 使用 Rich Table 展示
+    provider_name = current_provider or "当前厂商"
+    table = Table(title=f"{provider_name} 可用模型 ({len(models_info)})")
+    table.add_column("模型 ID", style="cyan")
+    table.add_column("名称", style="white")
+    table.add_column("上下文", justify="right")
+    table.add_column("能力", justify="center")
+    
+    for m in models_info:
+        # 处理 ModelInfo 对象或字典
+        if hasattr(m, "id"):
+            mid = m.id
+            name = m.name
+            ctx_window = f"{m.context_window // 1000}K" if m.context_window else "-"
+            caps = []
+            if getattr(m, "supports_vision", False):
+                caps.append("🖼️")
+            if getattr(m, "supports_function_call", False):
+                caps.append("📞")
+            if getattr(m, "supports_streaming", True):
+                caps.append("🌊")
+            caps_str = " ".join(caps)
         else:
-            ctx.console.print(f"  - {m}")
+            mid = m.get("id", "")
+            name = m.get("name", mid)
+            ctx_window = "-"
+            caps_str = ""
+        
+        # 标记当前模型
+        if mid == current:
+            mid = f"★ {mid}"
+            style = "green"
+        else:
+            style = None
+        
+        table.add_row(mid, name, ctx_window, caps_str, style=style)
+    
+    ctx.console.print(table)
     ctx.console.print("")
-    ctx.console.print(f"[dim]共 {len(models)} 个模型，用 /model <id> 切换[/dim]")
+    ctx.console.print("[dim]🖼️ = Vision  📞 = Function Call  🌊 = Streaming  ★ = 当前使用[/dim]")
+    ctx.console.print(f"[dim]用 /model <id> 切换模型，/providers 查看厂商[/dim]")
+
+
+def _list_providers(ctx: SlashContext) -> None:
+    """处理 /providers 命令：列出所有可用厂商"""
+    from rich.table import Table
+    
+    providers = []
+    current_provider = ""
+    
+    # 获取当前厂商 ID
+    try:
+        from clude_code.llm import get_model_manager
+        mm = get_model_manager()
+        current_provider = mm.get_current_provider_id()
+    except Exception:
+        pass
+    
+    # 从 ProviderRegistry 获取所有可用厂商（而不是 ModelManager 中已注册的）
+    try:
+        from clude_code.llm.registry import ProviderRegistry
+        providers = ProviderRegistry.list_providers()
+    except Exception as e:
+        ctx.console.print(f"[red]获取厂商列表失败: {e}[/red]")
+        return
+    
+    if not providers:
+        ctx.console.print("[yellow]未找到已注册的厂商[/yellow]")
+        return
+    
+    # 使用 Rich Table 展示
+    table = Table(title=f"可用模型厂商 ({len(providers)})")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("厂商 ID", style="cyan")
+    table.add_column("名称", style="white")
+    table.add_column("类型", style="yellow")
+    table.add_column("区域", style="magenta")
+    
+    for i, p in enumerate(providers, 1):
+        pid = p.get("id", "")
+        name = p.get("name", pid)
+        ptype = p.get("type", "-")
+        region = p.get("region", "-")
+        
+        # 标记当前厂商
+        is_current = pid == current_provider
+        if is_current:
+            pid = f"★ {pid}"
+            style = "green"
+        else:
+            style = None
+        
+        table.add_row(str(i), pid, name, ptype, region, style=style)
+    
+    ctx.console.print(table)
+    ctx.console.print("")
+    ctx.console.print("[dim]★ = 当前使用[/dim]")
+    ctx.console.print("[dim]用 /provider <id> 切换厂商，/models 查看模型[/dim]")
+
+
+def _switch_provider(ctx: SlashContext, provider_id: str | None) -> None:
+    """处理 /provider <name> 命令：切换厂商"""
+    if not provider_id:
+        # 显示当前厂商
+        current = ""
+        try:
+            from clude_code.llm import get_model_manager
+            mm = get_model_manager()
+            current = mm.get_current_provider_id()
+        except Exception:
+            pass
+        
+        ctx.console.print(f"[bold]当前厂商[/bold]: {current or '未设置'}")
+        ctx.console.print("[dim]用法: /provider <provider_id> 切换厂商，/providers 列出所有厂商[/dim]")
+        return
+    
+    # 切换厂商
+    try:
+        from clude_code.llm import get_model_manager, ProviderRegistry, ProviderConfig
+        mm = get_model_manager()
+        
+        # 检查厂商是否已注册到 ModelManager
+        if provider_id not in [p.get("id") for p in mm.list_providers()]:
+            # 尝试从 Registry 获取并注册
+            if ProviderRegistry.has_provider(provider_id):
+                # 从配置获取厂商配置
+                provider_cfg_item = getattr(ctx.cfg.providers, provider_id, None)
+                if provider_cfg_item:
+                    config = ProviderConfig(
+                        name=provider_id,
+                        api_key=provider_cfg_item.api_key,
+                        base_url=provider_cfg_item.base_url,
+                        api_version=provider_cfg_item.api_version,
+                        default_model=provider_cfg_item.default_model,
+                        timeout_s=provider_cfg_item.timeout_s,
+                        extra=provider_cfg_item.extra,
+                    )
+                else:
+                    config = ProviderConfig(name=provider_id)
+                
+                provider = ProviderRegistry.get_provider(provider_id, config)
+                mm.register_provider(provider_id, provider)
+            else:
+                # 列出可用厂商
+                from clude_code.llm import list_providers
+                available = [p.get("id") for p in list_providers()]
+                ctx.console.print(f"[red]✗ 未知厂商: {provider_id}[/red]")
+                ctx.console.print(f"[dim]可用厂商: {', '.join(available[:10])}...[/dim]")
+                return
+        
+        # 执行切换
+        success, message = mm.switch_provider(provider_id)
+        if success:
+            ctx.console.print(f"[green]✓ {message}[/green]")
+            # 显示当前模型
+            current_model = mm.get_current_model()
+            if current_model:
+                ctx.console.print(f"[dim]当前模型: {current_model}[/dim]")
+            # 显示可用模型数
+            models = mm.list_models()
+            ctx.console.print(f"[dim]可用模型: {len(models)} 个[/dim]")
+        else:
+            ctx.console.print(f"[yellow]⚠ {message}[/yellow]")
+    except Exception as e:
+        ctx.console.print(f"[red]✗ 切换厂商失败: {e}[/red]")
 
 
 def _load_image(ctx: SlashContext, path_or_url: str | None) -> bool:
@@ -423,6 +602,12 @@ def handle_slash_command(ctx: SlashContext, text: str) -> bool:
         return True
     if cmd == "/models":
         _list_models(ctx)
+        return True
+    if cmd == "/providers":
+        _list_providers(ctx)
+        return True
+    if cmd == "/provider":
+        _switch_provider(ctx, args[0] if args else None)
         return True
     if cmd == "/image":
         _load_image(ctx, args[0] if args else None)

@@ -57,7 +57,7 @@
 | 48 | Open Source LLMs         | 开源生态    | 通用    | LLM                      |
 | 49 | Private Model Server     | 私有模型    | 通用    | LLM                      |
 | 50 | Custom API Provider      | 自定义接入   | 通用    | LLM                      |
-
+| 51 | 七牛云                      | 国内云厂商   | 国内    | LLM                      |
 ---
 
 ## 汇报可用结论（建议直接放页脚）
