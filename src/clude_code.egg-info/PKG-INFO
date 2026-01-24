@@ -9,10 +9,14 @@ Requires-Dist: pydantic-settings>=2.2.0
 Requires-Dist: rich>=13.7.0
 Requires-Dist: httpx>=0.27.0
 Requires-Dist: PyYAML>=6.0.1
+Requires-Dist: psutil>=5.9.0
+Requires-Dist: jinja2>=3.1.6
 Provides-Extra: dev
 Requires-Dist: ruff>=0.7.0; extra == "dev"
 Requires-Dist: mypy>=1.11.0; extra == "dev"
 Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: py-spy>=0.3.14; extra == "dev"
+Requires-Dist: memory-profiler>=0.61.0; extra == "dev"
 Provides-Extra: ui
 Requires-Dist: textual>=0.70.0; extra == "ui"
 Provides-Extra: rag

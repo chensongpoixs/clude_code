@@ -102,8 +102,39 @@ class FileLineFileHandler(RotatingFileHandler):
             record.filename = Path(record.pathname).name
             record.lineno_caller = record.lineno
         
-        # 调用父类方法
-        super().emit(record)
+        # 调用父类方法，捕获Windows文件锁定异常（业界最佳实践）
+        try:
+            super().emit(record)
+        except PermissionError as e:
+            # Windows文件锁定问题：记录警告但不中断日志写入
+            # 业界做法：降级到直接写入，不中断服务（参考Django/Python logging官方文档）
+            import warnings
+            import sys
+            # 只在第一次出现时警告，避免刷屏
+            if not hasattr(self, '_rotation_warned'):
+                warnings.warn(
+                    f"日志轮转失败（文件被锁定，Windows环境常见问题）: {e}。日志将继续写入原文件。",
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+                self._rotation_warned = True
+            
+            # 尝试直接写入（不轮转）
+            try:
+                # 关闭当前流，重新打开（避免轮转）
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                self.stream = self._open()
+                # 直接写入格式化后的记录
+                msg = self.format(record)
+                if self.stream:
+                    self.stream.write(msg + self.terminator)
+                    self.flush()
+            except Exception:
+                # 如果仍然失败，忽略（不影响核心功能）
+                # 业界做法：日志失败不应影响主程序运行
+                pass
 
 """
 获取配置好的日志记录器。

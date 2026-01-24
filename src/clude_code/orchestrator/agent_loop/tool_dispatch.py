@@ -155,13 +155,34 @@ class ToolSpec:
 
             return True, out
         except ValidationError as e:
-            # 5. 格式化友好的错误回喂
+            # 5. 格式化友好的错误回喂（业界最佳实践：提供参数建议）
             errors = []
+            invalid_params = set()
             for err in e.errors():
                 loc = ".".join(str(x) for x in err["loc"])
                 msg = err["msg"]
                 errors.append(f"参数 '{loc}': {msg}")
-            return False, "; ".join(errors)
+                invalid_params.add(loc)
+            
+            # 业界做法：检测常见错误参数，提供纠正建议
+            error_msg = "; ".join(errors)
+            
+            # 检测常见错误参数并提供建议
+            suggestions = []
+            if "max_depth" in invalid_params and self.name == "list_dir":
+                suggestions.append("提示: `list_dir` 不支持 `max_depth` 参数，请使用 `path` 参数。如需递归搜索，请使用 `glob_file_search` 工具。")
+            if "file_list" in invalid_params and self.name == "question":
+                suggestions.append("提示: `question` 不支持 `file_list` 参数，请使用 `options` 参数传递文件列表。示例: `question(question=\"选择文件\", options=[\"file1\", \"file2\"])`")
+            
+            if suggestions:
+                error_msg += " " + " ".join(suggestions)
+            
+            # 提供支持的参数列表（业界做法：帮助LLM理解正确用法）
+            supported_params = list(props.keys())
+            if supported_params:
+                error_msg += f" 支持的参数: {', '.join(supported_params)}"
+            
+            return False, error_msg
         except Exception as ex:
             return False, f"校验逻辑异常: {ex}"
 
@@ -302,7 +323,9 @@ def _spec_list_dir() -> ToolSpec:
         description=(
             "用于查看某个目录下有哪些文件/子目录（List Directory）。\n"
             "- 适合：先 list_dir 再决定 read_file/grep/glob_file_search。\n"
-            "- 注意：path 必须是工作区内的相对路径。"
+            "- 注意：path 必须是工作区内的相对路径。\n"
+            "- 参数说明：只支持 `path` 参数（相对路径），不支持 `max_depth` 等递归深度参数。\n"
+            "- 如需递归搜索文件，请使用 `glob_file_search` 工具。"
         ),
         args_schema=_obj_schema(
             properties={"path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"}},
@@ -770,16 +793,30 @@ def _spec_question() -> ToolSpec:
     return ToolSpec(
         name="question",
         summary="向用户提问并获取回答。",
+        description=(
+            "向用户提问并获取回答（Question）。\n"
+            "- 适合：需要用户选择或确认的场景。\n"
+            "- 参数说明：\n"
+            "  - `question`: 问题文本（必需）\n"
+            "  - `options`: 选项列表（可选），可以是文件列表、操作选项等\n"
+            "  - `multiple`: 是否允许多选（默认 false）\n"
+            "  - `header`: 问题标题（可选）\n"
+            "- 示例：从文件列表中选择：`question(question=\"请选择一个文件\", options=[\"file1.h\", \"file2.h\"])`\n"
+            "- 注意：不支持 `file_list` 参数，请使用 `options` 参数传递文件列表。"
+        ),
         args_schema=_obj_schema(
             properties={
                 "question": {"type": "string", "description": "问题文本"},
-                "options": {"type": "array", "items": {"type": "string"}, "description": "可选的选项列表"},
+                "options": {"type": "array", "items": {"type": "string"}, "description": "可选的选项列表（可以是文件列表、操作选项等）"},
                 "multiple": {"type": "boolean", "default": False, "description": "是否允许多选"},
                 "header": {"type": "string", "description": "问题标题"}
             },
             required=["question"],
         ),
-        example_args={"question": "您想要如何处理这个文件？", "options": ["删除", "重命名", "保留"]},
+        example_args={
+            "question": "您想要如何处理这个文件？", 
+            "options": ["删除", "重命名", "保留"]
+        },
         side_effects={"read"},  # 实际上不修改文件，但需要用户交互
         external_bins_required=set(),
         external_bins_optional=set(),

@@ -333,8 +333,30 @@ def handle_replanning(
                 continue
 
     # 2) 两次 PlanPatch 都失败：才回退 full Plan（旧协议）
+    # P0 修复：如果 assistant_text 包含 PlanPatch，跳过 FullPlan 解析
+    assistant_text = last_assistant_plan or ""
+    import json as _json
+    import re as _re
+    _json_match = _re.search(r'\{[\s\S]*\}', assistant_text)
+    is_planpatch = False
+    if _json_match:
+        try:
+            _obj = _json.loads(_json_match.group())
+            if isinstance(_obj, dict) and _obj.get("type") == "PlanPatch":
+                is_planpatch = True
+        except _json.JSONDecodeError:
+            pass
+    
+    if is_planpatch:
+        # PlanPatch 解析成功但应用失败，不尝试 FullPlan 解析
+        loop.logger.error(
+            f"[red]✗ PlanPatch 应用失败[/red] 原因: {last_patch_error}",
+        )
+        _ev("stop_reason", {"reason": "plan_patch_apply_failed", "patch_error": str(last_patch_error or "")})
+        return None, replans_used
+    
+    # 尝试 FullPlan 解析
     try:
-        assistant_text = last_assistant_plan or ""
         new_plan = parse_plan_from_text(assistant_text)
         new_plan = carry_over_done_status(plan, new_plan)
         if len(new_plan.steps) > loop.cfg.orchestrator.max_plan_steps:
@@ -344,10 +366,9 @@ def handle_replanning(
         loop.file_only_logger.info("重规划计划:\n" + render_plan_markdown(new_plan))
         return new_plan, replans_used
     except Exception as e2:
-        # 若模型给的是 PlanPatch（缺少 steps），这里的报错会非常误导；统一报更明确的错误
+        # FullPlan 解析也失败
         loop.logger.error(
             f"[red]✗ 重规划解析失败[/red] patch_error={last_patch_error} full_plan_error={e2}",
-            exc_info=True,
         )
         _ev("stop_reason", {"reason": "replan_parse_failed", "patch_error": str(last_patch_error or ""), "full_plan_error": str(e2)})
         return None, replans_used

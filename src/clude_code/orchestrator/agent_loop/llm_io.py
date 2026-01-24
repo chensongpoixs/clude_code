@@ -13,6 +13,54 @@ if TYPE_CHECKING:
     from .agent_loop import AgentLoop
 
 
+def _ensure_strict_alternation(loop: "AgentLoop") -> None:
+    """
+    在发送请求前，确保消息角色严格交替（最后一道防线）。
+    
+    Gemma 模型要求：system 后必须是 user，之后严格 user/assistant/user/assistant/...
+    """
+    if not loop.messages or len(loop.messages) < 2:
+        return
+    
+    # 分离 system 消息
+    system_msg = loop.messages[0] if loop.messages[0].role == "system" else None
+    start_idx = 1 if system_msg else 0
+    
+    # 重建严格交替的消息列表
+    strict_msgs: list[ChatMessage] = []
+    if system_msg:
+        strict_msgs.append(system_msg)
+    
+    expected_role = "user"  # system 后第一条必须是 user
+    
+    for msg in loop.messages[start_idx:]:
+        if msg.role == expected_role:
+            # 角色正确
+            strict_msgs.append(msg)
+            expected_role = "assistant" if expected_role == "user" else "user"
+        elif msg.role == "user" and expected_role == "assistant":
+            # 连续 user，插入占位 assistant
+            strict_msgs.append(ChatMessage(role="assistant", content="好的。"))
+            strict_msgs.append(msg)
+            expected_role = "assistant"
+        elif msg.role == "assistant" and expected_role == "user":
+            # 连续 assistant 或第一条是 assistant，插入占位 user
+            strict_msgs.append(ChatMessage(role="user", content="请继续。"))
+            strict_msgs.append(msg)
+            expected_role = "user"
+        else:
+            # 连续相同角色，合并
+            if strict_msgs and strict_msgs[-1].role == msg.role:
+                content = strict_msgs[-1].content
+                if isinstance(content, str) and isinstance(msg.content, str):
+                    strict_msgs[-1] = ChatMessage(role=msg.role, content=content + "\n\n" + msg.content)
+    
+    if len(strict_msgs) != len(loop.messages):
+        loop.file_only_logger.debug(f"[FINAL_CHECK] 消息数调整: {len(loop.messages)} -> {len(strict_msgs)}")
+    
+    loop.messages = strict_msgs
+
+
 def normalize_messages_for_llama(
     loop: "AgentLoop",
     stage: str,
@@ -98,37 +146,75 @@ def normalize_messages_for_llama(
             normalized.append(msg)
             last_role = msg.role
 
-    # 第三遍：确保 system 后第一条消息是 user（Gemma 等模型的 chat template 要求）
-    if len(normalized) >= 2:
-        # 判断第一条非 system 消息的位置和角色
-        if normalized[0].role == "system":
-            first_non_system_idx = 1
+    # 第三遍：确保严格交替 user/assistant/user/assistant/...（Gemma 等模型的 chat template 要求）
+    # Gemma chat template 检查: (message['role'] == 'user') != (loop.index0 % 2 == 0)
+    # 即：偶数索引(0,2,4...)必须是 user，奇数索引(1,3,5...)必须是 assistant
+    final_normalized: list[ChatMessage] = []
+    
+    # 分离 system 消息
+    system_msg = None
+    non_system_msgs = []
+    for msg in normalized:
+        if msg.role == "system":
+            system_msg = msg
         else:
-            first_non_system_idx = 0
-        
-        if first_non_system_idx < len(normalized):
-            first_non_system = normalized[first_non_system_idx]
-            if first_non_system.role == "assistant":
-                # 插入占位 user 消息
-                placeholder = ChatMessage(role="user", content="请继续执行任务。")
-                normalized.insert(first_non_system_idx, placeholder)
+            non_system_msgs.append(msg)
+    
+    # [DEBUG] 打印分离后的角色序列
+    loop.file_only_logger.debug(f"[NORMALIZE] 分离后非 system 消息角色: {[m.role for m in non_system_msgs]}")
+    
+    # 确保非 system 消息严格交替
+    strict_alternating: list[ChatMessage] = []
+    expected_role = "user"  # 第一条非 system 消息必须是 user
+    
+    for msg in non_system_msgs:
+        if msg.role == expected_role:
+            # 角色正确，直接添加
+            strict_alternating.append(msg)
+            expected_role = "assistant" if expected_role == "user" else "user"
+        elif msg.role == "user" and expected_role == "assistant":
+            # 期望 assistant 但收到 user，插入占位 assistant 后添加
+            placeholder = ChatMessage(role="assistant", content="好的，继续。")
+            strict_alternating.append(placeholder)
+            strict_alternating.append(msg)
+            expected_role = "assistant"  # 添加了 assistant + user，下一个期望 assistant
+        elif msg.role == "assistant" and expected_role == "user":
+            # 期望 user 但收到 assistant，插入占位 user 后添加
+            placeholder = ChatMessage(role="user", content="请继续。")
+            strict_alternating.append(placeholder)
+            strict_alternating.append(msg)
+            expected_role = "user"  # 添加了 user + assistant，下一个期望 user
+        else:
+            # 连续相同角色，合并到上一条
+            if strict_alternating and strict_alternating[-1].role == msg.role:
+                merged_content = _merge_message_content(strict_alternating[-1].content, msg.content)
+                strict_alternating[-1] = ChatMessage(role=msg.role, content=merged_content)
+    
+    # 组装最终结果：system（如有）+ 严格交替的消息
+    if system_msg:
+        final_normalized.append(system_msg)
+    final_normalized.extend(strict_alternating)
+    
+    # [DEBUG] 打印规范化后的角色序列
+    loop.file_only_logger.debug(f"[NORMALIZE] 规范化后角色: {[m.role for m in final_normalized]}")
+    
+    normalized = final_normalized
 
-    # 更新消息列表
-    if len(normalized) != original_len or loop.messages != normalized:
-        loop.messages = normalized
-        loop._trim_history(max_messages=30)
+    # 总是更新消息列表（确保规范化结果生效）
+    loop.messages = normalized
+    loop._trim_history(max_messages=30)
 
-        if _ev:
-            _ev(
-                "messages_normalized",
-                {
-                    "stage": stage,
-                    "step_id": step_id,
-                    "before": original_len,
-                    "after": len(loop.messages),
-                    "merged_count": original_len - len(loop.messages),
-                }
-            )
+    if _ev and len(normalized) != original_len:
+        _ev(
+            "messages_normalized",
+            {
+                "stage": stage,
+                "step_id": step_id,
+                "before": original_len,
+                "after": len(loop.messages),
+                "merged_count": original_len - len(loop.messages),
+            }
+        )
 
 
 def llm_chat(
@@ -180,20 +266,23 @@ def llm_chat(
         loop.file_only_logger.warning(f"估算 prompt tokens 失败: {ex}", exc_info=True)
         prompt_tokens_est = 0
 
-    # P0 紧急截断：如果 token 使用率 > 95%，强制裁剪到只保留 system + 最近 3 条消息
+    # P0 紧急截断：如果 token 使用率 > 95%，强制裁剪到只保留 system + 最近 4 条消息
+    # 注意：保留偶数条非 system 消息（4 条），确保截断后仍可能满足 user/assistant 交替
     max_tokens = getattr(loop.llm, "max_tokens", 32768) or 32768
     utilization = prompt_tokens_est / max_tokens if max_tokens > 0 else 0
-    if utilization > 0.95 and len(loop.messages) > 4:
+    if utilization > 0.95 and len(loop.messages) > 5:
         loop.logger.warning(
             f"[red]⚠ 紧急截断触发: {prompt_tokens_est} tokens ({utilization*100:.1f}%) > 95% 预算[/red]"
         )
-        # 保留 system + 最近 3 条消息
+        # 保留 system + 最近 4 条消息（偶数条，确保交替）
         system_msg = loop.messages[0] if loop.messages and loop.messages[0].role == "system" else None
-        recent_msgs = loop.messages[-3:]
+        recent_msgs = loop.messages[-4:]
         if system_msg:
             loop.messages = [system_msg] + recent_msgs
         else:
             loop.messages = recent_msgs
+        # 截断后重新规范化，确保消息角色严格交替
+        normalize_messages_for_llama(loop, stage, step_id=step_id, _ev=_ev)
         # 重新估算
         prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
         loop.logger.warning(f"[yellow]紧急截断后: {len(loop.messages)} 条消息, {prompt_tokens_est} tokens[/yellow]")
@@ -231,7 +320,10 @@ def llm_chat(
         # P1-1: 打印失败不影响主流程，但写入 file-only 日志便于排查
         loop.file_only_logger.warning(f"LLM 请求参数记录失败: {ex}", exc_info=True)
 
-    # 2) 发起请求（优先走多厂商 Provider；未注册时回退 loop.llm）
+    # 2) 发起请求前最终确保消息角色交替（防止 _trim_history 破坏规范化结果）
+    _ensure_strict_alternation(loop)
+    
+    # 3) 发起请求（优先走多厂商 Provider；未注册时回退 loop.llm）
     t0 = time.time()
     assistant_text: str
     used_provider_id: str | None = None

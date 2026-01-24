@@ -320,6 +320,9 @@ def apply_plan_patch(
                     raise ValueError(f"禁止删除已完成步骤: {s.id}")
                 meta["removed"] += 1
                 continue
+            # P0 修复：清理对已删除步骤的依赖
+            if s.dependencies:
+                s.dependencies = [d for d in s.dependencies if d not in rm]
             kept.append(s)
         new_plan.steps = kept
 
@@ -473,6 +476,10 @@ def parse_plan_from_text(text: str) -> Plan:
         try:
             obj = json.loads(c)
             if not isinstance(obj, dict):
+                continue
+            # P0 修复：如果是 PlanPatch 格式，跳过（应使用 parse_plan_patch_from_text）
+            if obj.get("type") == "PlanPatch":
+                last_err = "检测到 PlanPatch 格式，请使用 parse_plan_patch_from_text 解析"
                 continue
             plan = Plan.model_validate(obj)
             # 额外校验：步骤 ID 唯一性
