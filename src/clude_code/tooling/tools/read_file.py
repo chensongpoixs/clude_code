@@ -123,13 +123,15 @@ def _strip_comments(text: str, lang: str) -> str:
         return "\n".join(lines)
     
     elif lang in ("js", "ts", "c", "go", "rust"):
-        # C-style: 移除 // 和 /* */ 注释
-        # 简化处理：只移除 // 注释
+        # C-style: 移除 // 和 /* */ 注释（业界最佳实践：完整支持）
+        # 先移除 /* */ 块注释（可能跨行）
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+        # 再移除 // 行注释
         lines = []
         for line in text.splitlines():
             idx = line.find("//")
             if idx >= 0:
-                # 检查是否在字符串中（简化：假设不在）
+                # 检查是否在字符串中（简化：假设不在，实际应该更严格）
                 lines.append(line[:idx].rstrip())
             else:
                 lines.append(line)
@@ -138,18 +140,92 @@ def _strip_comments(text: str, lang: str) -> str:
     return text
 
 
-def _detect_lang(path: str) -> str:
-    """根据文件扩展名检测语言类型。"""
-    ext = Path(path).suffix.lower()
-    lang_map = {
-        ".py": "py",
-        ".js": "js", ".jsx": "js", ".mjs": "js",
-        ".ts": "ts", ".tsx": "ts",
-        ".go": "go",
-        ".rs": "rust",
-        ".c": "c", ".h": "c", ".cpp": "c", ".hpp": "c", ".cc": "c",
-    }
-    return lang_map.get(ext, "unknown")
+# 大文件阈值：超过此大小，按符号读取时先定位再读取
+_LARGE_FILE_THRESHOLD = 1_000_000  # 1MB
+
+
+def _locate_symbol_position(file_path: Path, symbol: str, lang: str) -> int | None:
+    """
+    快速定位符号定义的行号（流式扫描，节省内存）。
+    
+    对于大文件，先快速定位符号位置，再精确提取，避免全量读取。
+    
+    Returns:
+        符号定义的行号（1-based），或 None（未找到）
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            if lang == "py":
+                # Python: 匹配 def symbol 或 class symbol
+                pattern = rf'^\s*(?:def|class|async\s+def)\s+{re.escape(symbol)}\s*[\(:]'
+                for i, line in enumerate(f, 1):
+                    if re.match(pattern, line):
+                        return i
+            elif lang == "c":
+                # C/C++: 匹配函数定义（简化：匹配 symbol( 或 symbol {）
+                pattern = rf'\b{re.escape(symbol)}\s*\([^)]*\)\s*(?:const\s*)?\{{?'
+                for i, line in enumerate(f, 1):
+                    if re.search(pattern, line):
+                        return i
+            elif lang in ("js", "ts"):
+                # JavaScript/TypeScript: 匹配 function symbol 或 const symbol =
+                pattern = rf'(?:function|const|let|var)\s+{re.escape(symbol)}\s*[=\(]'
+                for i, line in enumerate(f, 1):
+                    if re.search(pattern, line):
+                        return i
+            elif lang == "go":
+                # Go: 匹配 func symbol 或 func (receiver) symbol
+                pattern = rf'func\s+(?:\([^)]*\)\s+)?{re.escape(symbol)}\s*\('
+                for i, line in enumerate(f, 1):
+                    if re.search(pattern, line):
+                        return i
+            elif lang == "rust":
+                # Rust: 匹配 fn symbol 或 pub fn symbol
+                pattern = rf'(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(symbol)}\s*[<\(]'
+                for i, line in enumerate(f, 1):
+                    if re.search(pattern, line):
+                        return i
+    except Exception as e:
+        _logger.debug(f"[ReadFile] 定位符号失败: {e}")
+        return None
+    
+    return None
+
+
+def _read_lines_range(file_path: Path, start_line: int, end_line: int | None = None, context_lines: int = 50) -> str:
+    """
+    读取指定行范围的内容（流式读取，内存优化）。
+    
+    Args:
+        file_path: 文件路径
+        start_line: 起始行号（1-based）
+        end_line: 结束行号（1-based，None 表示读取到文件末尾）
+        context_lines: 上下文行数（如果 end_line 为 None，读取 start_line + context_lines 行）
+    
+    Returns:
+        读取的文本内容
+    """
+    lines_read = []
+    start = max(start_line - 1, 0)  # 转换为 0-based
+    end = end_line if end_line is None else end_line  # 保持 1-based，稍后转换
+    
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f, 1):
+                if i < start_line:
+                    continue
+                if end_line is not None and i > end_line:
+                    break
+                if end_line is None and len(lines_read) >= context_lines:
+                    break
+                lines_read.append(line.rstrip('\n\r'))
+    except Exception as e:
+        _logger.debug(f"[ReadFile] 读取行范围失败: {e}")
+        return ""
+    
+    return "\n".join(lines_read)
+
+
 
 
 def _read_file_streaming(
@@ -315,15 +391,38 @@ def read_file(
         lang = _detect_lang(path)
         _logger.debug(f"[ReadFile] 文件大小: {file_size} bytes, 语言: {lang}, 限制: {max_file_read_bytes} bytes")
         
-        # 按符号读取模式（节省 token）
+        # 按符号读取模式（节省 token，业界最佳实践：大文件先定位再读取）
         if symbol:
-            _logger.debug(f"[ReadFile] 按符号读取模式: symbol={symbol}")
-            source = p.read_text(encoding="utf-8", errors="replace")
+            _logger.debug(f"[ReadFile] 按符号读取模式: symbol={symbol}, file_size={file_size} bytes")
             
-            if lang == "py":
-                extracted = _extract_python_symbol(source, symbol, skip_docstring=skip_docstring)
-            else:
+            # 优化：大文件先定位符号位置，再精确读取（避免全量读取）
+            if file_size > _LARGE_FILE_THRESHOLD and lang != "py":
+                # 非 Python 文件：先定位，再读取相关范围
+                _logger.debug(f"[ReadFile] 大文件优化：先定位符号位置（文件大小 {file_size} bytes > {_LARGE_FILE_THRESHOLD} bytes）")
+                symbol_line = _locate_symbol_position(p, symbol, lang)
+                if symbol_line is None:
+                    return ToolResult(False, error={
+                        "code": "E_SYMBOL_NOT_FOUND",
+                        "message": f"Symbol '{symbol}' not found in {path}"
+                    })
+                
+                # 读取符号定义范围（前后各 200 行，通常足够）
+                source = _read_lines_range(p, max(1, symbol_line - 50), symbol_line + 200)
                 extracted = _extract_symbol_by_regex(source, symbol, lang)
+                
+                if extracted is None:
+                    # 回退：如果局部读取失败，尝试全量读取（但记录警告）
+                    _logger.warning(f"[ReadFile] 局部读取失败，回退到全量读取: {path}")
+                    source = p.read_text(encoding="utf-8", errors="replace")
+                    extracted = _extract_symbol_by_regex(source, symbol, lang)
+            else:
+                # 小文件或 Python 文件：全量读取（Python AST 需要完整文件）
+                source = p.read_text(encoding="utf-8", errors="replace")
+                
+                if lang == "py":
+                    extracted = _extract_python_symbol(source, symbol, skip_docstring=skip_docstring)
+                else:
+                    extracted = _extract_symbol_by_regex(source, symbol, lang)
             
             if extracted is None:
                 return ToolResult(False, error={

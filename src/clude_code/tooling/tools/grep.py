@@ -18,7 +18,6 @@ Token 消耗	非常省	非常费
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
@@ -33,6 +32,61 @@ from ...config.tools_config import get_search_config
 
 # 工具模块 logger（延迟初始化）
 _logger = get_tool_logger(__name__)
+
+# 预览内容最大长度（统一限制，节省 Token）
+_MAX_PREVIEW_LENGTH = 200
+
+
+def _parse_vimgrep_line(line: str) -> dict[str, Any] | None:
+    """
+    解析 ripgrep --vimgrep 格式的输出行。
+    
+    格式: file:line:col:content
+    Windows 路径示例: C:\path\to\file.cpp:123:4:content
+    
+    使用正则表达式从右侧解析，处理 Windows 路径中的冒号。
+    """
+    line = line.rstrip('\n\r')
+    if not line:
+        return None
+    
+    # 使用正则表达式匹配：从右侧找到 line:col:content 模式
+    # 匹配格式: (\d+):(\d+):(.+)$
+    match = re.match(r'^(.+?):(\d+):(\d+):(.+)$', line)
+    if match:
+        file_path, line_num, col, content = match.groups()
+        return {
+            "path": file_path,
+            "line": int(line_num),
+            "preview": content[:_MAX_PREVIEW_LENGTH] + ("..." if len(content) > _MAX_PREVIEW_LENGTH else ""),
+        }
+    
+    # 回退：无列号格式 file:line:content
+    match = re.match(r'^(.+?):(\d+):(.+)$', line)
+    if match:
+        file_path, line_num, content = match.groups()
+        return {
+            "path": file_path,
+            "line": int(line_num),
+            "preview": content[:_MAX_PREVIEW_LENGTH] + ("..." if len(content) > _MAX_PREVIEW_LENGTH else ""),
+        }
+    
+    # 最后的回退：简单 split（可能失败，但总比没有好）
+    parts = line.rsplit(":", 3)
+    if len(parts) >= 4:
+        file_path, line_num, col, content = parts[0], parts[1], parts[2], parts[3]
+        try:
+            return {
+                "path": file_path,
+                "line": int(line_num) if line_num.isdigit() else 0,
+                "preview": content[:_MAX_PREVIEW_LENGTH] + ("..." if len(content) > _MAX_PREVIEW_LENGTH else ""),
+            }
+        except ValueError:
+            return None
+    
+    return None
+
+
 
 def _get_lang_exts(cfg: Any) -> dict[str, list[str]]:
     """从配置获取 language->extensions 映射（并做最小兜底）。"""
@@ -284,40 +338,33 @@ def _rg_grep(
     hits: list[dict[str, Any]] = []
     truncated = False
 
-    # 解析 vimgrep 格式输出
+    # 解析 vimgrep 格式输出（优化版：使用正则表达式处理 Windows 路径）
     if cp.stdout:
         for line in cp.stdout:
-            line = line.rstrip('\n\r')
-            if not line:
-                continue
+            parsed = _parse_vimgrep_line(line)
+            if parsed:
+                hits.append(parsed)
             
-            # vimgrep 格式: file:line:col:content
-            # 使用 split 限制为 4 部分（content 可能包含 :）
-            parts = line.split(":", 3)
-            
-            if len(parts) >= 4:
-                file_path, line_num, col, content = parts[0], parts[1], parts[2], parts[3]
-                hits.append({
-                    "path": file_path,
-                    "line": int(line_num) if line_num.isdigit() else 0,
-                    "preview": content[:200],  # 限制预览长度
-                })
-            elif len(parts) == 3:
-                # 无列号格式（某些情况下）
-                file_path, line_num, content = parts[0], parts[1], parts[2]
-                hits.append({
-                    "path": file_path,
-                    "line": int(line_num) if line_num.isdigit() else 0,
-                    "preview": content[:200],
-                })
-
             if len(hits) >= max_hits:
                 truncated = True
+                # 正确终止进程：先 terminate，再 wait，最后 kill（如果需要）
                 cp.terminate()
+                try:
+                    cp.wait(timeout=1.0)  # 等待进程结束，最多1秒
+                except subprocess.TimeoutExpired:
+                    cp.kill()  # 强制终止
+                    cp.wait()  # 等待 kill 完成
                 break
 
-    # 等待进程结束，获取 stderr
-    _, stderr = cp.communicate()
+    # 等待进程结束，获取 stderr（如果还没有等待）
+    if not truncated:
+        _, stderr = cp.communicate()
+    else:
+        # 如果已经终止，读取剩余 stderr
+        try:
+            _, stderr = cp.communicate(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            stderr = ""
     if cp.returncode not in (0, 1):
         return ToolResult(False, error={
             "code": "E_RG",
@@ -361,7 +408,9 @@ def _python_grep(*, workspace_root: Path, pattern: str, path: str, language: str
         for i, line in enumerate(content.splitlines(), start=1):
             if rx.search(line):
                 rel = str(fp.resolve().relative_to(workspace_root.resolve()))
-                hits.append({"path": rel, "line": i, "preview": line})
+                # 统一预览长度限制（与 vimgrep 模式一致）
+                preview = line[:_MAX_PREVIEW_LENGTH] + ("..." if len(line) > _MAX_PREVIEW_LENGTH else "")
+                hits.append({"path": rel, "line": i, "preview": preview})
                 if len(hits) >= max_hits:
                     return ToolResult(True, payload={"pattern": pattern, "engine": "python", "hits": hits, "truncated": True})
 

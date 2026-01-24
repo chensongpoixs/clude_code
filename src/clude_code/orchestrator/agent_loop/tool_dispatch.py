@@ -188,7 +188,13 @@ class ToolSpec:
 
 
 def _h_list_dir(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
-    return loop.tools.list_dir(path=args.get("path", "."))
+    return loop.tools.list_dir(
+        path=args.get("path", "."),
+        max_items=args.get("max_items"),
+        include_size=args.get("include_size", False),
+        show_hidden=args.get("show_hidden", False),
+        file_pattern=args.get("file_pattern"),
+    )
 
 
 def _h_read_file(loop: "AgentLoop", args: dict[str, Any]) -> ToolResult:
@@ -319,16 +325,21 @@ def _spec_list_dir() -> ToolSpec:
     """ToolSpec：list_dir（只读）。"""
     return ToolSpec(
         name="list_dir",
-        summary="列出目录内容（只读）。",
+        summary="列出目录内容（只读，默认过滤隐藏文件）。",
         description=(
             "用于查看某个目录下有哪些文件/子目录（List Directory）。\n"
             "- 适合：先 list_dir 再决定 read_file/grep/glob_file_search。\n"
             "- 注意：path 必须是工作区内的相对路径。\n"
+            "- 优化特性：默认过滤隐藏文件（以 `.` 开头），节省 Token。\n"
             "- 参数说明：只支持 `path` 参数（相对路径），不支持 `max_depth` 等递归深度参数。\n"
-            "- 如需递归搜索文件，请使用 `glob_file_search` 工具。"
+            "- 如需递归搜索文件，请使用 `glob_file_search` 工具。\n"
+            "- 可选参数：`file_pattern`（如 `*.py`）用于过滤文件类型。"
         ),
         args_schema=_obj_schema(
-            properties={"path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"}},
+            properties={
+                "path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"},
+                "file_pattern": {"type": "string", "description": "文件类型过滤模式（如 `*.py`, `*.cpp`），可选"},
+            },
             required=[],
         ),
         example_args={"path": "."},
