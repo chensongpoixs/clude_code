@@ -11,7 +11,7 @@ from typing import AsyncGenerator, Callable, Dict, List, Optional, Union
 import httpx
 from pydantic import BaseModel
 
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 from clude_code.observability.logger import get_logger
 
 

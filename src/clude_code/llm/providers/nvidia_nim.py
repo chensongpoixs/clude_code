@@ -13,7 +13,7 @@ from typing import Any
 
 from ..base import LLMProvider, ModelInfo, ProviderConfig
 from ..registry import ProviderRegistry
-from ..llama_cpp_http import ChatMessage
+from ..http_client import ChatMessage
 
 logger = logging.getLogger(__name__)
 

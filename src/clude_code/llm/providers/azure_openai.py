@@ -16,7 +16,7 @@ from ..registry import ProviderRegistry
 from .openai_compat import OpenAICompatProvider
 
 if TYPE_CHECKING:
-    from ..llama_cpp_http import ChatMessage
+    from ..http_client import ChatMessage
 
 logger = logging.getLogger(__name__)
 

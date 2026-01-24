@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+"""
+通用 HTTP 客户端（OpenAI-compatible）。
+
+背景：
+- 历史上该模块实现位于 `llama_cpp_http.py`
+- 但其能力并非 “llama.cpp 专用”，而是可复用于多种 OpenAI-compatible 服务
+
+迁移策略：
+- 新代码应优先从 `clude_code.llm.http_client` 导入
+- `clude_code.llm.llama_cpp_http` 作为兼容层继续保留（re-export）
+"""
+
+from dataclasses import dataclass
 from typing import Any, Literal, Union
 
 import httpx
@@ -25,24 +37,15 @@ MultimodalContent = list[ContentPart]
 class ChatMessage:
     """
     聊天消息（支持纯文本和多模态）。
-    
+
     content 可以是：
     - str: 纯文本消息
     - list[dict]: 多模态消息（OpenAI Vision API 格式）
-    
-    示例：
-        # 纯文本
-        ChatMessage(role="user", content="你好")
-        
-        # 多模态（文本 + 图片）
-        ChatMessage(role="user", content=[
-            {"type": "text", "text": "这张图是什么？"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
-        ])
     """
+
     role: Role
     content: Union[str, MultimodalContent]
-    
+
     def __hash__(self) -> int:
         # 为了兼容旧代码中可能的 hash 需求
         if isinstance(self.content, str):
@@ -90,43 +93,43 @@ class LlamaCppHttpClient:
         # API Key 优先级：参数 > 环境变量（按 provider 检测）> 空
         # 支持的环境变量：OPENAI_API_KEY / SILICONFLOW_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_API_KEY
         self.api_key = api_key or self._detect_api_key_from_env(base_url)
-        
+
         # 模型切换回调（用于通知监听者）
         self._on_model_changed: list[callable] = []
-    
+
     # ============================================================
     # 动态模型切换 API
     # ============================================================
-    
+
     def set_model(self, model: str) -> None:
         """
         动态切换模型。
-        
+
         参数:
             model: 新的模型名称/ID
         """
         old_model = self.model
         self.model = model
-        
+
         # 触发回调
         for callback in self._on_model_changed:
             try:
                 callback(old_model, model)
             except Exception as e:
                 logger.warning(f"模型切换回调执行失败: {e}")
-    
+
     def get_model(self) -> str:
         """获取当前模型名称"""
         return self.model
-    
+
     def on_model_changed(self, callback: callable) -> None:
         """
         注册模型变更回调。
-        
+
         回调签名: callback(old_model: str, new_model: str) -> None
         """
         self._on_model_changed.append(callback)
-    
+
     def _detect_api_key_from_env(self, base_url: str) -> str:
         """根据 base_url 自动检测对应的 API Key 环境变量。"""
         url_lower = base_url.lower()
@@ -218,14 +221,15 @@ class LlamaCppHttpClient:
         model = self.model
         if not model:
             model = self.try_get_first_model_id() or "llama.cpp"
-        
+
         # 转换消息格式：Claude Vision → OpenAI Vision
         from .image_utils import convert_to_openai_vision_format
+
         converted_messages = []
         for m in messages:
             converted_content = convert_to_openai_vision_format(m.content)
             converted_messages.append({"role": m.role, "content": converted_content})
-        
+
         payload: dict[str, Any] = {
             "model": model,
             "messages": converted_messages,
@@ -238,7 +242,10 @@ class LlamaCppHttpClient:
             with httpx.Client(timeout=self.timeout_s) as client:
                 r = client.post(url, json=payload, headers=headers)
                 if r.status_code >= 400:
-                    logger.warning(f"llama.cpp OpenAI-compatible request failed: status={r.status_code} url={url} payload={payload} body={r.text}");
+                    logger.warning(
+                        "llama.cpp OpenAI-compatible request failed: "
+                        f"status={r.status_code} url={url} payload={payload} body={r.text}"
+                    )
                     # Surface response body — llama.cpp often explains which field is invalid.
                     body = r.text
                     raise RuntimeError(
@@ -247,14 +254,20 @@ class LlamaCppHttpClient:
                     )
                 data = r.json()
         except httpx.TimeoutException as e:
-            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload},  request timed out: {e}");
+            logger.warning(
+                "llama.cpp OpenAI-compatible request timed out: "
+                f"url={url} timeout_s={self.timeout_s} payload={payload} err={e}"
+            )
             raise RuntimeError(
                 "llama.cpp OpenAI-compatible request failed: "
                 f"timeout url={url} (timeout_s={self.timeout_s})"
             ) from e
         except httpx.RequestError as e:
             # 业界常见：代理/证书/连接失败。这里把根因抛给上层用于友好提示。
-            logger.warning(f"llama.cpp OpenAI-compatible url={url}, timeout_s={self.timeout_s}, payload={payload}, request error: {e}");
+            logger.warning(
+                "llama.cpp OpenAI-compatible request error: "
+                f"url={url} timeout_s={self.timeout_s} payload={payload} err={e}"
+            )
             raise RuntimeError(
                 "llama.cpp OpenAI-compatible request failed: "
                 f"request_error url={url} err={type(e).__name__}: {e}"
@@ -268,7 +281,7 @@ class LlamaCppHttpClient:
             try:
                 return data["choices"][0]["text"]
             except Exception as e:
-                logger.warning(f"无法解析 llama.cpp OpenAI-compatible 响应: {e} 数据: {data}", exc_info=True);
+                logger.warning(f"无法解析 llama.cpp OpenAI-compatible 响应: {e} 数据: {data}", exc_info=True)
                 raise RuntimeError(f"unexpected response format: {data}") from e
 
     def _chat_completion(self, messages: list[ChatMessage]) -> str:

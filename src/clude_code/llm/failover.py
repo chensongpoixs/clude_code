@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .base import LLMProvider
-    from .llama_cpp_http import ChatMessage
+    from .http_client import ChatMessage
 
 logger = logging.getLogger(__name__)
 

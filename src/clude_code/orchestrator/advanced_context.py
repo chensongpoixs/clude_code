@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 
 
 class ContextPriority(Enum):

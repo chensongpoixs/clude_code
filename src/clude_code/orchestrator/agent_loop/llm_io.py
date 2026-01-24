@@ -6,7 +6,7 @@ import inspect
 import time
 from typing import Any, Callable, TYPE_CHECKING
 
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 from clude_code.observability.usage import estimate_tokens
 
 if TYPE_CHECKING:
@@ -213,10 +213,45 @@ def llm_chat(
         # P1-1: 打印失败不影响主流程，但写入 file-only 日志便于排查
         loop.file_only_logger.warning(f"LLM 请求参数记录失败: {ex}", exc_info=True)
 
-    # 2) 发起请求
+    # 2) 发起请求（优先走多厂商 Provider；未注册时回退 loop.llm）
     t0 = time.time()
-    assistant_text = loop.llm.chat(loop.messages)
+    assistant_text: str
+    used_provider_id: str | None = None
+    used_provider_base_url: str | None = None
+    used_provider_model: str | None = None
+    try:
+        # ModelManager 是全局单例；Slash Commands 也会对其进行切换
+        from clude_code.llm import get_model_manager
+
+        mm = get_model_manager()
+        provider = mm.get_provider()
+        if provider is not None:
+            used_provider_id = mm.get_current_provider_id() or getattr(provider, "PROVIDER_ID", None)
+            used_provider_base_url = getattr(getattr(provider, "config", None), "base_url", "") or None
+            used_provider_model = provider.current_model or None
+
+            # 重要：model=None 时由 provider 自行选择（通常为 current_model 或 default_model）
+            assistant_text = provider.chat(
+                loop.messages,
+                model=used_provider_model,
+                temperature=getattr(loop.llm, "temperature", 0.2),
+                max_tokens=getattr(loop.llm, "max_tokens", 4096),
+            )
+        else:
+            assistant_text = loop.llm.chat(loop.messages)
+    except Exception:
+        # 任何异常不影响主流程：回退 loop.llm（避免 provider 注册/配置问题导致整体不可用）
+        assistant_text = loop.llm.chat(loop.messages)
+
     elapsed_ms = int((time.time() - t0) * 1000)
+
+    # 把“本次实际使用的 provider 信息”挂到 loop 上，供日志打印（不改动 loop.llm 本身）
+    try:
+        loop._active_provider_id = used_provider_id
+        loop._active_provider_base_url = used_provider_base_url
+        loop._active_provider_model = used_provider_model
+    except Exception:
+        pass
 
     # 3) 记录/打印返回数据摘要（不依赖 tool_call，tool_call 在上层解析后另行落盘）
     try:
@@ -350,6 +385,14 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
     lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")
     if include_params:
         try:
+            # provider 元信息（若存在）
+            pid = getattr(loop, "_active_provider_id", None)
+            purl = getattr(loop, "_active_provider_base_url", None)
+            pmodel = getattr(loop, "_active_provider_model", None)
+            if pid or purl or pmodel:
+                lines.append(
+                    f"provider_id={pid} provider_base_url={purl} provider_model={pmodel}"
+                )
             lines.append(
                 f"model={loop.llm.model} api_mode={loop.llm.api_mode} max_tokens={loop.llm.max_tokens} "
                 f"temperature={loop.llm.temperature} base_url={loop.llm.base_url} "

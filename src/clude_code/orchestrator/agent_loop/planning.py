@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, TYPE_CHECKING
 
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan, PlanStep
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.prompts import read_prompt

@@ -4,7 +4,7 @@ import json
 
 from typing import Any, Callable, TYPE_CHECKING
 
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 from clude_code.tooling.local_tools import ToolResult
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.orchestrator.planner import Plan

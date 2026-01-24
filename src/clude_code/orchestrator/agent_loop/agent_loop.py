@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
 from clude_code.config.config import CludeConfig
-from clude_code.llm.llama_cpp_http import ChatMessage, LlamaCppHttpClient
+from clude_code.llm.http_client import ChatMessage, LlamaCppHttpClient
 from clude_code.llm.model_manager import ModelManager, get_model_manager
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger

@@ -216,7 +216,7 @@ class IntentClassifier:
                 )
 
         # P1-4: 第二步 - LLM 深度语义分类
-        from clude_code.llm.llama_cpp_http import ChatMessage
+        from clude_code.llm.http_client import ChatMessage
         try:
             prompt = _render_prompt(
                 "user/stage/intent_classify.j2", 

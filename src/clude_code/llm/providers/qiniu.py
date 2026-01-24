@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, Iterator
 
 from ..base import LLMProvider, ModelInfo, ProviderConfig
 from ..registry import ProviderRegistry
-from ..llama_cpp_http import ChatMessage
+from ..http_client import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +39,20 @@ class QiniuProvider(LLMProvider):
         "qiniu-llm-v1": ModelInfo(
             id="qiniu-llm-v1",
             name="七牛 LLM v1",
+            provider="qiniu",
             context_window=8192,
         ),
     }
     
-    def __init__(self, config: ProviderConfig | None = None):
+    def __init__(self, config: ProviderConfig):
         super().__init__(config)
-        self._access_key = os.getenv("QINIU_ACCESS_KEY", "")
+        self._access_key = config.api_key or os.getenv("QINIU_ACCESS_KEY", "")
+        # 兼容保留（暂未用于签名）
         self._secret_key = os.getenv("QINIU_SECRET_KEY", "")
-        self._base_url = os.getenv("QINIU_LLM_ENDPOINT", self.DEFAULT_BASE_URL)
-        self._model = config.default_model if config else "qiniu-llm-v1"
+        self._base_url = (config.base_url or os.getenv("QINIU_LLM_ENDPOINT", self.DEFAULT_BASE_URL)).rstrip("/")
+        # 统一：以基类 current_model 作为唯一事实源
+        if not (self.current_model or "").strip():
+            self.current_model = config.default_model or "qiniu-llm-v1"
     
     def chat(
         self,
@@ -60,23 +64,26 @@ class QiniuProvider(LLMProvider):
         **kwargs: Any,
     ) -> str:
         """调用七牛云 LLM"""
-        import requests
-        model_id = model or self._model
-        
-        # 转换消息格式（OpenAI 兼容）
-        openai_messages = []
+        import httpx
+        model_id = model or self.current_model or "qiniu-llm-v1"
+
+        # 转换消息格式（OpenAI 兼容，含多模态）
+        from ..image_utils import convert_to_openai_vision_format
+
+        openai_messages: list[dict[str, Any]] = []
         for msg in messages:
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            openai_messages.append({
-                "role": msg.role,
-                "content": content,
-            })
-        
-        headers = {
-            "Authorization": f"QBox {self._access_key}",
-            "Content-Type": "application/json",
-        }
-        
+            openai_messages.append(
+                {
+                    "role": msg.role,
+                    "content": convert_to_openai_vision_format(msg.content),
+                }
+            )
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        # 注意：此处鉴权仅作占位/兼容；真实 Qiniu LLM 鉴权可能需要 AK/SK 签名。
+        if self._access_key:
+            headers["Authorization"] = f"QBox {self._access_key}"
+
         payload = {
             "model": model_id,
             "messages": openai_messages,
@@ -85,15 +92,17 @@ class QiniuProvider(LLMProvider):
         }
         
         try:
-            response = requests.post(
-                f"{self._base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=120,
-            )
-            response.raise_for_status()
-            
-            result = response.json()
+            with httpx.Client(timeout=120) as client:
+                response = client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                if response.status_code >= 400:
+                    body = response.text[:2000]
+                    raise RuntimeError(f"七牛云请求失败: HTTP {response.status_code} body={body}")
+
+                result = response.json()
             
             # OpenAI 兼容格式
             if "choices" in result:
@@ -104,20 +113,97 @@ class QiniuProvider(LLMProvider):
         except Exception as e:
             logger.error(f"七牛云请求失败: {e}")
             raise
+
+    async def chat_async(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> str:
+        """
+        异步聊天（兼容实现）。
+
+        七牛云当前实现基于同步 HTTP 请求；这里使用线程池降级以满足接口契约。
+        """
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.chat,
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
+    def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """
+        流式聊天（降级实现）。
+
+        七牛云若不支持服务端 SSE/stream，这里用“单段 yield”保证调用方可用。
+        """
+        yield self.chat(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
     
     def list_models(self) -> list[ModelInfo]:
-        """列出可用模型"""
+        """
+        列出可用模型。
+
+        业界对齐：
+        - OpenAI-compatible 后端通常提供 GET /models
+        - 若不可用（鉴权/不支持/网络失败），回退到静态列表
+        """
+        import httpx
+
+        headers: dict[str, str] = {}
+        if self._access_key:
+            headers["Authorization"] = f"QBox {self._access_key}"
+        try:
+            with httpx.Client(timeout=30) as client:
+                r = client.get(f"{self._base_url}/models", headers=headers)
+                if r.status_code < 400:
+                    data = r.json() or {}
+                    items = data.get("data") if isinstance(data, dict) else None
+                    if isinstance(items, list):
+                        out: list[ModelInfo] = []
+                        for it in items:
+                            if not isinstance(it, dict):
+                                continue
+                            mid = str(it.get("id", "")).strip()
+                            if not mid:
+                                continue
+                            out.append(ModelInfo(id=mid, name=mid, provider="qiniu"))
+                        if out:
+                            return out
+        except Exception:
+            pass
+
         return list(self.MODELS.values())
     
     def get_model_info(self, model_id: str) -> ModelInfo | None:
-        """获取模型信息"""
+        """获取模型信息（兼容：优先静态表）"""
         return self.MODELS.get(model_id)
-    
+
+    # 兼容旧接口（若外部仍调用 set_model/get_model）
     def set_model(self, model_id: str) -> None:
-        """设置当前模型"""
-        self._model = model_id
-    
+        self.current_model = model_id
+
     def get_model(self) -> str:
-        """获取当前模型"""
-        return self._model
+        return self.current_model
 

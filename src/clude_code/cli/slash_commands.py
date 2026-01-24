@@ -45,6 +45,10 @@ def _print_help(ctx: SlashContext) -> None:
     ctx.console.print("[bold cyan]── 厂商/模型 ──[/bold cyan]")
     ctx.console.print("- `/providers`：列出所有可用厂商（支持 21+ 厂商）")
     ctx.console.print("- `/provider [id]`：查看或切换当前厂商")
+    ctx.console.print("- `/provider-config [id]`：查看厂商配置（脱敏）")
+    ctx.console.print("- `/provider-configs`：列出所有厂商配置摘要（脱敏）")
+    ctx.console.print("- `/provider-config-set <id> base_url=... api_key=... enabled=true [default_model=...] [timeout_s=...] [set_default=true] [extra.k=v]`：会话内写入厂商配置（更新 ~/.clude/.clude.yaml）")
+    ctx.console.print("- `CLI: clude providers set <id> --base-url ... --api-key ...`：命令行写入厂商配置（更新 ~/.clude/.clude.yaml）")
     ctx.console.print("- `/models`：列出当前厂商的可用模型")
     ctx.console.print("- `/model [id]`：查看或切换当前模型")
     ctx.console.print("[bold cyan]── 多模态 ──[/bold cyan]")
@@ -83,6 +87,11 @@ def _show_config(ctx: SlashContext) -> None:
     ctx.console.print(f"- llm.base_url: {c.llm.base_url}")
     ctx.console.print(f"- llm.api_mode: {c.llm.api_mode}")
     ctx.console.print(f"- llm.model: {c.llm.model}")
+    try:
+        eff = c.get_effective_provider_id()
+        ctx.console.print(f"- llm.effective_provider: {eff}")
+    except Exception:
+        pass
     ctx.console.print(f"- policy.allow_network: {c.policy.allow_network}")
     ctx.console.print(f"- policy.confirm_write: {c.policy.confirm_write}")
     ctx.console.print(f"- policy.confirm_exec: {c.policy.confirm_exec}")
@@ -91,6 +100,277 @@ def _show_config(ctx: SlashContext) -> None:
     denied = getattr(c.policy, "disallowed_tools", [])
     ctx.console.print(f"- policy.allowed_tools: {allowed}")
     ctx.console.print(f"- policy.disallowed_tools: {denied}")
+    ctx.console.print("")
+
+
+def _provider_configs(ctx: SlashContext, provider_id: str | None = None) -> None:
+    """
+    查看厂商配置（脱敏）。
+    - /provider-configs：列出所有
+    - /provider-config <id>：查看单个
+    """
+    from rich.table import Table
+    from clude_code.config.config import normalize_provider_id
+
+    providers_cfg = getattr(ctx.cfg, "providers", None)
+    if not providers_cfg or not hasattr(providers_cfg, "to_public_dict"):
+        ctx.console.print("[yellow]未找到 providers 配置（请升级配置文件或运行 /config 查看）[/yellow]")
+        return
+
+    # 以 ProviderRegistry 为“全集”，再把配置（如果存在）合并进去
+    all_providers: list[dict[str, Any]] = []
+    try:
+        from clude_code.llm.registry import ProviderRegistry
+
+        all_providers = ProviderRegistry.list_providers()
+    except Exception:
+        all_providers = []
+
+    pub = providers_cfg.to_public_dict(include_disabled=True)
+    default_pid = normalize_provider_id(pub.get("default", ""))
+
+    def _get_registry_meta(pid: str) -> dict[str, str]:
+        for p in all_providers:
+            if p.get("id") == pid:
+                return {
+                    "name": str(p.get("name", pid)),
+                    "type": str(p.get("type", "")),
+                    "region": str(p.get("region", "")),
+                }
+        return {"name": pid, "type": "", "region": ""}
+
+    if provider_id:
+        pid = normalize_provider_id(provider_id)
+        cfg = pub.get(pid)
+        meta = _get_registry_meta(pid)
+        if cfg is None:
+            # 未配置：仍然展示 registry 元信息和如何配置
+            ctx.console.print(f"[bold]{pid} 配置（未配置，脱敏）[/bold]")
+            ctx.console.print(f"- name: {meta.get('name', pid)}")
+            ctx.console.print(f"- type: {meta.get('type', '')}")
+            ctx.console.print(f"- region: {meta.get('region', '')}")
+            ctx.console.print("")
+            ctx.console.print("[dim]该厂商尚未在配置文件中出现。你可以在 ~/.clude/.clude.yaml 中添加：[/dim]")
+            ctx.console.print(f"[dim]providers:\\n  {pid}:\\n    enabled: true\\n    base_url: \"...\"\\n    api_key: \"...\"\\n    default_model: \"...\"[/dim]")
+            ctx.console.print("")
+            return
+
+        ctx.console.print(f"[bold]{pid} 配置（脱敏）[/bold]")
+        ctx.console.print(f"- name: {meta.get('name', pid)}")
+        ctx.console.print(f"- type: {meta.get('type', '')}")
+        ctx.console.print(f"- region: {meta.get('region', '')}")
+        for k, v in (cfg or {}).items():
+            ctx.console.print(f"- {k}: {v}")
+        ctx.console.print("")
+        return
+
+    # list all
+    title = f"厂商配置（脱敏） default={default_pid} (registry={len(all_providers)} config={len(pub)-1})"
+    table = Table(title=title)
+    table.add_column("厂商", style="cyan")
+    table.add_column("名称", style="white")
+    table.add_column("enabled", justify="center")
+    table.add_column("base_url")
+    table.add_column("default_model")
+    table.add_column("timeout_s", justify="right")
+    table.add_column("api_key", style="dim")
+    table.add_column("配置状态", style="magenta")
+
+    # Registry 为空时退回只展示配置（旧逻辑）
+    if not all_providers:
+        pids = [k for k in pub.keys() if k != "default"]
+        for pid in sorted(pids):
+            cfg = pub.get(pid, {}) or {}
+            table.add_row(
+                ("★ " + pid) if pid == default_pid else pid,
+                pid,
+                str(cfg.get("enabled", False)),
+                str(cfg.get("base_url", "")),
+                str(cfg.get("default_model", "")),
+                str(cfg.get("timeout_s", "")),
+                str(cfg.get("api_key", "")),
+                "configured",
+            )
+        ctx.console.print(table)
+        ctx.console.print("[dim]提示：/provider-config <id> 可查看单个厂商完整配置（脱敏）[/dim]")
+        ctx.console.print("")
+        return
+
+    # 以 registry 作为全集展示
+    for p in all_providers:
+        pid = str(p.get("id", "")).strip()
+        if not pid:
+            continue
+        cfg = pub.get(pid)
+        name = str(p.get("name", pid))
+        if cfg is None:
+            enabled = False
+            base_url = ""
+            default_model = ""
+            timeout_s = ""
+            api_key = ""
+            status = "not_configured"
+        else:
+            enabled = bool(cfg.get("enabled", False))
+            base_url = str(cfg.get("base_url", ""))
+            default_model = str(cfg.get("default_model", ""))
+            timeout_s = str(cfg.get("timeout_s", ""))
+            api_key = str(cfg.get("api_key", ""))
+            status = "configured"
+
+        table.add_row(
+            ("★ " + pid) if pid == default_pid else pid,
+            name,
+            str(enabled),
+            base_url,
+            default_model,
+            timeout_s,
+            api_key,
+            status,
+        )
+
+    ctx.console.print(table)
+    ctx.console.print("[dim]提示：/provider-config <id> 可查看单个厂商完整配置（脱敏）。配置状态 not_configured 表示配置文件未显式配置该厂商。[/dim]")
+    ctx.console.print("")
+
+
+def _provider_config_set(ctx: SlashContext, args: list[str]) -> None:
+    """
+    会话内写入厂商配置（更新 ~/.clude/.clude.yaml）。
+
+    用法：
+      /provider-config-set <id> base_url=... api_key=... enabled=true default_model=... timeout_s=120 set_default=true extra.n_ctx=32768
+
+    说明：
+    - 参数采用 key=value（避免复杂的命令行 flag 解析）
+    - api_key 写入配置文件明文，但回显时脱敏
+    """
+    from clude_code.config import get_config_manager
+    from clude_code.config.config import ProviderConfigItem, normalize_provider_id
+
+    if not args:
+        ctx.console.print("[yellow]用法: /provider-config-set <id> base_url=... api_key=... enabled=true ...[/yellow]")
+        return
+
+    pid = normalize_provider_id(args[0].strip())
+    kvs = args[1:]
+
+    def _mask(s: str) -> str:
+        if not s:
+            return ""
+        if len(s) <= 8:
+            return "***"
+        return f"{s[:4]}***{s[-4:]}"
+
+    def _parse_bool(v: str) -> bool:
+        vv = v.strip().lower()
+        if vv in {"1", "true", "yes", "y", "on"}:
+            return True
+        if vv in {"0", "false", "no", "n", "off"}:
+            return False
+        raise ValueError("bool 值应为 true/false/1/0")
+
+    # 解析 key=value
+    data: dict[str, str] = {}
+    extras: dict[str, str] = {}
+    for kv in kvs:
+        if "=" not in kv:
+            ctx.console.print(f"[yellow]忽略无效参数（需要 key=value）: {kv}[/yellow]")
+            continue
+        k, v = kv.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if not k:
+            continue
+        if k.startswith("extra."):
+            extras[k[6:]] = v
+        else:
+            data[k] = v
+
+    cm = get_config_manager()
+    cfg = cm.config
+
+    # 取当前项（不存在则创建）
+    item = cfg.providers.get_item(pid) if hasattr(cfg.providers, "get_item") else None
+    if item is None:
+        item = ProviderConfigItem()
+
+    # 应用变更
+    if "enabled" in data:
+        try:
+            item.enabled = _parse_bool(data["enabled"])
+        except Exception as e:
+            ctx.console.print(f"[red]enabled 解析失败: {e}[/red]")
+            return
+    if "base_url" in data:
+        item.base_url = data["base_url"]
+    if "api_key" in data:
+        item.api_key = data["api_key"]
+    if "default_model" in data:
+        item.default_model = data["default_model"]
+    if "timeout_s" in data:
+        try:
+            item.timeout_s = int(data["timeout_s"])
+        except Exception:
+            ctx.console.print("[red]timeout_s 必须是整数[/red]")
+            return
+    if "api_version" in data:
+        item.api_version = data["api_version"]
+    if "organization" in data:
+        item.organization = data["organization"]
+
+    # extra（轻量类型转换）
+    for k, v in extras.items():
+        vv = v
+        if vv.lower() in {"true", "false"}:
+            item.extra[k] = (vv.lower() == "true")
+        else:
+            try:
+                if "." in vv:
+                    item.extra[k] = float(vv)
+                else:
+                    item.extra[k] = int(vv)
+            except Exception:
+                item.extra[k] = vv
+
+    # 写回 items
+    if not hasattr(cfg.providers, "items") or not isinstance(cfg.providers.items, dict):
+        cfg.providers.items = {}
+    cfg.providers.items[pid] = item
+
+    # set_default
+    if "set_default" in data:
+        try:
+            if _parse_bool(data["set_default"]):
+                cfg.providers.default = pid
+                cfg.llm.provider = pid  # legacy 同步
+        except Exception as e:
+            ctx.console.print(f"[red]set_default 解析失败: {e}[/red]")
+            return
+
+    cm.save_config()
+
+    # 同步到当前会话 cfg（避免立即 /provider-configs 看到旧值）
+    try:
+        ctx.cfg.providers.items = cfg.providers.items
+        ctx.cfg.providers.default = cfg.providers.default
+        ctx.cfg.llm.provider = cfg.llm.provider
+    except Exception:
+        pass
+
+    ctx.console.print(f"[green]✓ 已写入厂商配置: {pid}（已保存到 ~/.clude/.clude.yaml）[/green]")
+    ctx.console.print(f"- enabled: {item.enabled}")
+    ctx.console.print(f"- base_url: {item.base_url}")
+    ctx.console.print(f"- default_model: {item.default_model}")
+    ctx.console.print(f"- timeout_s: {item.timeout_s}")
+    if item.api_version:
+        ctx.console.print(f"- api_version: {item.api_version}")
+    if item.organization:
+        ctx.console.print(f"- organization: {item.organization}")
+    if item.api_key:
+        ctx.console.print(f"- api_key: {_mask(item.api_key)}")
+    if item.extra:
+        ctx.console.print(f"- extra: {item.extra}")
     ctx.console.print("")
 
 
@@ -278,17 +558,26 @@ def _switch_provider(ctx: SlashContext, provider_id: str | None) -> None:
     # 切换厂商
     try:
         from clude_code.llm import get_model_manager, ProviderRegistry, ProviderConfig
+        from clude_code.config.config import normalize_provider_id
+
         mm = get_model_manager()
+        pid = normalize_provider_id(provider_id)
         
         # 检查厂商是否已注册到 ModelManager
-        if provider_id not in [p.get("id") for p in mm.list_providers()]:
+        if pid not in [p.get("id") for p in mm.list_providers()]:
             # 尝试从 Registry 获取并注册
-            if ProviderRegistry.has_provider(provider_id):
+            if ProviderRegistry.has_provider(pid):
                 # 从配置获取厂商配置
-                provider_cfg_item = getattr(ctx.cfg.providers, provider_id, None)
+                provider_cfg_item = None
+                try:
+                    if hasattr(ctx.cfg, "providers") and hasattr(ctx.cfg.providers, "get_item"):
+                        provider_cfg_item = ctx.cfg.providers.get_item(pid)
+                except Exception:
+                    provider_cfg_item = None
+
                 if provider_cfg_item:
                     config = ProviderConfig(
-                        name=provider_id,
+                        name=pid,
                         api_key=provider_cfg_item.api_key,
                         base_url=provider_cfg_item.base_url,
                         api_version=provider_cfg_item.api_version,
@@ -297,22 +586,31 @@ def _switch_provider(ctx: SlashContext, provider_id: str | None) -> None:
                         extra=provider_cfg_item.extra,
                     )
                 else:
-                    config = ProviderConfig(name=provider_id)
+                    config = ProviderConfig(name=pid)
                 
-                provider = ProviderRegistry.get_provider(provider_id, config)
-                mm.register_provider(provider_id, provider)
+                provider = ProviderRegistry.get_provider(pid, config)
+                mm.register_provider(pid, provider)
             else:
                 # 列出可用厂商
                 from clude_code.llm import list_providers
                 available = [p.get("id") for p in list_providers()]
-                ctx.console.print(f"[red]✗ 未知厂商: {provider_id}[/red]")
+                ctx.console.print(f"[red]✗ 未知厂商: {pid}[/red]")
                 ctx.console.print(f"[dim]可用厂商: {', '.join(available[:10])}...[/dim]")
                 return
         
         # 执行切换
-        success, message = mm.switch_provider(provider_id)
+        success, message = mm.switch_provider(pid)
         if success:
             ctx.console.print(f"[green]✓ {message}[/green]")
+            # 同步到会话 cfg（避免“已切换但 cfg 仍显示旧值”）
+            try:
+                ctx.cfg.llm.provider = pid
+                # 切换厂商后，默认把会话模型同步为当前厂商模型（避免继续显示/使用旧模型）
+                cm = mm.get_current_model()
+                if cm:
+                    ctx.cfg.llm.model = cm
+            except Exception:
+                pass
             # 显示当前模型
             current_model = mm.get_current_model()
             if current_model:
@@ -602,6 +900,15 @@ def handle_slash_command(ctx: SlashContext, text: str) -> bool:
         return True
     if cmd == "/models":
         _list_models(ctx)
+        return True
+    if cmd == "/provider-configs":
+        _provider_configs(ctx, None)
+        return True
+    if cmd == "/provider-config":
+        _provider_configs(ctx, args[0] if args else None)
+        return True
+    if cmd == "/provider-config-set":
+        _provider_config_set(ctx, args)
         return True
     if cmd == "/providers":
         _list_providers(ctx)

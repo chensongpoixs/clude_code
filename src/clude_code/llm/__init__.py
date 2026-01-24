@@ -7,7 +7,12 @@ LLM 客户端与适配器（LLM Clients and Adapters）
 - DeepSeek / Moonshot / 智谱（国内）
 """
 
-from .llama_cpp_http import ChatMessage, LlamaCppHttpClient
+from __future__ import annotations
+
+import importlib
+import sys
+
+from .http_client import ChatMessage, LlamaCppHttpClient
 from .image_utils import (
     load_image_from_path,
     load_image_from_url,
@@ -24,6 +29,15 @@ from .auto_router import AutoRouter, TaskType, Priority, RoutingDecision, auto_s
 
 # 自动加载厂商实现
 from . import providers  # noqa: F401
+
+# ------------------------------------------------------------------
+# Backward-compat module alias
+# - 目的：删除物理文件 `llama_cpp_http.py` 后仍允许旧 import 路径工作
+# - 行为：import clude_code.llm.llama_cpp_http 等价于 import clude_code.llm.http_client
+# ------------------------------------------------------------------
+_legacy_mod_name = __name__ + ".llama_cpp_http"
+if _legacy_mod_name not in sys.modules:
+    sys.modules[_legacy_mod_name] = importlib.import_module(__name__ + ".http_client")
 
 __all__ = [
     # 原有导出

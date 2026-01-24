@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .llama_cpp_http import ChatMessage
+    from .http_client import ChatMessage
 
 
 @dataclass
@@ -139,7 +139,6 @@ class LLMProvider(ABC):
         """
         pass
     
-    @abstractmethod
     async def chat_async(
         self,
         messages: list["ChatMessage"],
@@ -150,21 +149,23 @@ class LLMProvider(ABC):
         **kwargs: Any,
     ) -> str:
         """
-        异步聊天。
-        
-        Args:
-            messages: 消息列表
-            model: 模型 ID（None 使用默认）
-            temperature: 温度
-            max_tokens: 最大输出 token
-            **kwargs: 厂商特定参数
-        
-        Returns:
-            助手回复文本
+        异步聊天（默认降级实现）。
+
+        业界常见：并非所有厂商都天然支持 async 接口；为了提升可用性，这里提供默认实现：
+        - 使用 asyncio.to_thread 调用同步 chat()
+        - 子类如有原生 async 能力可覆盖该方法
         """
-        pass
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.chat,
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
     
-    @abstractmethod
     def chat_stream(
         self,
         messages: list["ChatMessage"],
@@ -175,19 +176,18 @@ class LLMProvider(ABC):
         **kwargs: Any,
     ) -> Iterator[str]:
         """
-        流式聊天。
-        
-        Args:
-            messages: 消息列表
-            model: 模型 ID（None 使用默认）
-            temperature: 温度
-            max_tokens: 最大输出 token
-            **kwargs: 厂商特定参数
-        
-        Yields:
-            助手回复文本片段
+        流式聊天（默认降级实现）。
+
+        如果厂商不支持服务端 streaming，这里以“单段 yield”降级保证调用方可用。
+        子类如支持真正 streaming，可覆盖该方法返回 token/片段流。
         """
-        pass
+        yield self.chat(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
     
     @abstractmethod
     def list_models(self) -> list[ModelInfo]:

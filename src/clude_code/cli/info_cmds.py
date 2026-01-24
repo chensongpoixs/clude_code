@@ -5,7 +5,7 @@ from rich.table import Table
 import typer
 
 from clude_code.orchestrator.agent_loop.tool_dispatch import iter_tool_specs
-from clude_code.llm.llama_cpp_http import LlamaCppHttpClient
+from clude_code.llm.http_client import LlamaCppHttpClient
 from clude_code.config.config import CludeConfig
 
 console = Console()

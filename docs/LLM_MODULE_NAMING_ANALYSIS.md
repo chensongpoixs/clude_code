@@ -140,7 +140,7 @@ clude_code/llm/
 
 ### 4.3 改进空间
 
-1. ⚠️ `llama_cpp_http.py` 历史命名，可考虑重命名为 `http_client.py`（低优先级）
+1. ✅ `llama_cpp_http.py` 已以兼容层方式迁移到 `http_client.py`（P3 已完成）
 2. ✅ `text_embedding.py` 实际是 HuggingFace TEI 服务 Provider（命名合理）
 3. ✅ 品牌名遵循官方写法（HuggingFace, GPUStack 等）
 
@@ -182,7 +182,7 @@ http_client.py      # 通用 HTTP 客户端
 
 | 变更 | 影响 | 优先级 | 状态 |
 |------|------|--------|------|
-| 重命名 `llama_cpp_http.py` → `http_client.py` | 大 | P3 | 可选 |
+| 重命名 `llama_cpp_http.py` → `http_client.py` | 大 | P3 | ✅ 已完成（兼容层迁移） |
 | 添加 CI 命名检查 | 小 | P2 | 推荐 |
 | 完善 Provider 模板 | 小 | P1 | 推荐 |
 

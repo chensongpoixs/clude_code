@@ -36,7 +36,7 @@ class ConfigWizard:
             "本地开发": {
                 "description": "适合本地开发环境，注重隐私保护",
                 "config": {
-                    "llm.provider": "llama_cpp_http",
+                    "llm.provider": "llama_cpp",
                     "llm.base_url": "http://127.0.0.1:8899",
                     "llm.api_mode": "openai_compat",
                     "policy.allow_network": False,
@@ -368,11 +368,11 @@ class ConfigWizard:
         console.print("\n[bold]配置 LLM:[/bold]")
         
         # 选择提供商
-        providers = ["llama_cpp_http", "openai", "anthropic", "ollama", "siliconflow"]
+        providers = ["llama_cpp", "openai", "anthropic", "ollama", "siliconflow"]
         console.print("可用 LLM 提供商:")
         for i, provider in enumerate(providers, 1):
             desc = {
-                "llama_cpp_http": "本地 llama.cpp 服务",
+                "llama_cpp": "本地 llama.cpp 服务",
                 "openai": "OpenAI API",
                 "anthropic": "Anthropic Claude",
                 "ollama": "Ollama 本地服务",
@@ -388,7 +388,7 @@ class ConfigWizard:
             console.print("[red]无效选择，请输入 1-5。[/red]")
         
         # 根据提供商配置不同参数
-        if self.config.llm.provider == "llama_cpp_http":
+        if self.config.llm.provider == "llama_cpp":
             self._configure_llama_cpp()
         elif self.config.llm.provider == "openai":
             self._configure_openai()
@@ -792,7 +792,7 @@ class ConfigWizard:
         
         try:
             # 根据不同的提供商使用不同的测试方法
-            if self.config.llm.provider == "llama_cpp_http":
+            if self.config.llm.provider == "llama_cpp":
                 self._test_llama_cpp_connection()
             elif self.config.llm.provider == "openai":
                 self._test_openai_connection()
@@ -806,7 +806,7 @@ class ConfigWizard:
     
     def _test_llama_cpp_connection(self) -> None:
         """测试 llama.cpp 连接"""
-        from clude_code.llm.llama_cpp_http import LlamaCppHttpClient, ChatMessage
+        from clude_code.llm.http_client import LlamaCppHttpClient, ChatMessage
         
         client = LlamaCppHttpClient(
             base_url=self.config.llm.base_url,

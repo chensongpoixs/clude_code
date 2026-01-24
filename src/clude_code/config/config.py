@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+from pydantic import ConfigDict, model_validator, model_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from collections import OrderedDict
 
@@ -47,10 +48,13 @@ _logger = logging.getLogger(__name__)
 @brief 大模型配置（LLM Configuration）
 """
 class LLMConfig(BaseModel):
-    provider: str = Field(default="llama_cpp_http")
+    # 默认厂商：llama.cpp（与 ProvidersConfig.default 对齐）
+    provider: str = Field(default="llama_cpp")
     base_url: str = Field(default="http://127.0.0.1:8899")
     api_mode: str = Field(default="openai_compat")  # openai_compat | completion
-    api_key: str = Field(default="sk-dyckqqvdemtemktluddtnefeqrepoqdoyvyjaqbwcysuidom")
+    # 安全：不要在代码里硬编码任何真实/可用的 API Key。
+    # 推荐通过环境变量或 ~/.clude/.clude.yaml 配置注入。
+    api_key: str = Field(default="")
     # Aider（代码助手）对接 llama.cpp OpenAI 兼容接口（OpenAI Compatible API）示例：
     # aider --openai-api-base http://127.0.0.1:8899/v1 --openai-api-key no-key --model ggml-org/gemma-3-12b-it-GGUF
     #model: str = Field(default="GLM-4.6V-Flash-GGUF")  # llama.cpp may ignore; keep for compatibility
@@ -105,65 +109,165 @@ class ProviderConfigItem(BaseModel):
 @brief 管理多个 LLM 厂商的配置
 """
 class ProvidersConfig(BaseModel):
-    default: str = Field(default="openai_compat", description="默认厂商")
-    
-    # 国际主流
-    openai: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o",
-    ))
-    anthropic: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://api.anthropic.com",
-        default_model="claude-3-5-sonnet-latest",
-    ))
-    azure_openai: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        default_model="gpt-4o",
-    ))
-    google_gemini: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://generativelanguage.googleapis.com/v1beta",
-        default_model="gemini-1.5-pro",
-    ))
-    
-    # 国内厂商
-    deepseek: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://api.deepseek.com/v1",
-        default_model="deepseek-chat",
-    ))
-    moonshot: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://api.moonshot.cn/v1",
-        default_model="moonshot-v1-8k",
-    ))
-    zhipu: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://open.bigmodel.cn/api/paas/v4",
-        default_model="glm-4",
-    ))
-    siliconflow: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://api.siliconflow.cn/v1",
-        default_model="deepseek-ai/DeepSeek-V3",
-    ))
-    qianwen: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        default_model="qwen-turbo",
-    ))
-    
-    # 本地部署
-    ollama: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        enabled=True,
-        base_url="http://127.0.0.1:11434",
-        default_model="llama3.2",
-    ))
-    llama_cpp: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        enabled=True,
-        base_url="http://127.0.0.1:8899",
-        default_model="gemma-3-12b-it",
-    ))
-    
-    # 通用兼容
-    openai_compat: ProviderConfigItem = Field(default_factory=lambda: ProviderConfigItem(
-        enabled=True,
-        base_url="http://127.0.0.1:8899",
-        default_model="deepseek-ai/DeepSeek-V3",
-    ))
+    """
+    多厂商配置（Multi-Provider Configuration）
+
+    设计目标：
+    - 支持“任意厂商 id”作为 key（不需要在代码里为每个厂商写一个字段）
+    - YAML 结构保持业界习惯：
+
+      providers:
+        default: llama_cpp
+        openai:
+          base_url: ...
+          api_key: ...
+        llama_cpp:
+          base_url: ...
+          extra: ...
+
+    兼容：
+    - 兼容旧版本把厂商作为字段写在 providers 下（openai/anthropic/...）
+    - 兼容历史 provider id：llama_cpp_http -> llama_cpp
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # 默认厂商：llama.cpp（业界习惯：default 指向具体 provider_id）
+    default: str = Field(default="llama_cpp", description="默认厂商（provider_id）")
+
+    # 任意厂商配置（动态）
+    items: Dict[str, ProviderConfigItem] = Field(default_factory=dict, description="所有厂商配置（按 provider_id）")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_shape(cls, data: Any) -> Any:
+        """
+        兼容旧 YAML 结构：
+        providers:
+          default: xxx
+          openai: { ... }
+          anthropic: { ... }
+
+        统一收敛到：
+          items: { openai: ProviderConfigItem(...), ... }
+        """
+        if not isinstance(data, dict):
+            return data
+
+        raw_default = data.get("default", "llama_cpp")
+        raw_items = data.get("items")
+
+        items: dict[str, Any] = {}
+        if isinstance(raw_items, dict):
+            items.update(raw_items)
+
+        for k, v in list(data.items()):
+            if k in {"default", "items"}:
+                continue
+            # 将 providers 下的任意 key 视为 provider_id
+            if isinstance(v, dict):
+                items[k] = v
+
+        out = {"default": raw_default, "items": items}
+        return out
+
+    @model_serializer(mode="wrap")
+    def _dump_as_flat(self, handler):
+        """
+        输出时保持业界 YAML 结构（flatten items 到 providers 下）。
+        """
+        base = handler(self)
+        # base 形如 {"default": ..., "items": {...}}
+        out: dict[str, Any] = {"default": normalize_provider_id(base.get("default", ""))}
+        items = base.get("items") or {}
+        if isinstance(items, dict):
+            for k, v in items.items():
+                out[str(k)] = v
+        return out
+
+    @classmethod
+    def default_items(cls) -> Dict[str, ProviderConfigItem]:
+        """项目内置的默认厂商配置（用于初始化配置文件）。"""
+        return {
+            # 国际主流
+            "openai": ProviderConfigItem(base_url="https://api.openai.com/v1", default_model="gpt-4o"),
+            "anthropic": ProviderConfigItem(base_url="https://api.anthropic.com", default_model="claude-3-5-sonnet-latest"),
+            "azure_openai": ProviderConfigItem(default_model="gpt-4o"),
+            "google_gemini": ProviderConfigItem(base_url="https://generativelanguage.googleapis.com/v1beta", default_model="gemini-1.5-pro"),
+            # 国内厂商
+            "deepseek": ProviderConfigItem(base_url="https://api.deepseek.com/v1", default_model="deepseek-chat"),
+            "moonshot": ProviderConfigItem(base_url="https://api.moonshot.cn/v1", default_model="moonshot-v1-8k"),
+            "zhipu": ProviderConfigItem(base_url="https://open.bigmodel.cn/api/paas/v4", default_model="glm-4"),
+            "siliconflow": ProviderConfigItem(base_url="https://api.siliconflow.cn/v1", default_model="deepseek-ai/DeepSeek-V3"),
+            "qianwen": ProviderConfigItem(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", default_model="qwen-turbo"),
+            # 本地部署
+            "ollama": ProviderConfigItem(enabled=True, base_url="http://127.0.0.1:11434", default_model="llama3.2"),
+            "llama_cpp": ProviderConfigItem(enabled=True, base_url="http://127.0.0.1:8899", default_model="gemma-3-12b-it"),
+            # 通用兼容
+            "openai_compat": ProviderConfigItem(enabled=True, base_url="http://127.0.0.1:8899", default_model="deepseek-ai/DeepSeek-V3"),
+        }
+
+    def list_items(self) -> dict[str, ProviderConfigItem]:
+        """列出所有 ProviderConfigItem（按 provider_id）。"""
+        out: dict[str, ProviderConfigItem] = {}
+        # items 优先
+        if isinstance(self.items, dict):
+            out.update(self.items)
+        # 兼容：如果 items 为空，则补入内置默认（避免空表）
+        if not out:
+            out.update(self.default_items())
+        return out
+
+    def get_item(self, provider_id: str) -> ProviderConfigItem | None:
+        """获取单个 provider 的配置（不存在返回 None）。"""
+        pid = normalize_provider_id(provider_id)
+        return self.list_items().get(pid)
+
+    def to_public_dict(self, *, include_disabled: bool = True) -> dict[str, Any]:
+        """
+        导出可展示的配置（脱敏）。
+
+        - api_key 默认只展示前 4 + 后 4（中间用 ***）
+        - extra 原样保留（用于诊断），但建议不要在 extra 中放 secret
+        """
+        def mask(s: str) -> str:
+            if not s:
+                return ""
+            if len(s) <= 8:
+                return "***"
+            return f"{s[:4]}***{s[-4:]}"
+
+        out: dict[str, Any] = {"default": normalize_provider_id(self.default)}
+        items = self.list_items()
+        for pid, cfg in items.items():
+            if (not include_disabled) and (not cfg.enabled):
+                continue
+            out[pid] = {
+                "enabled": cfg.enabled,
+                "api_key": mask(cfg.api_key),
+                "base_url": cfg.base_url,
+                "api_version": cfg.api_version,
+                "organization": cfg.organization,
+                "default_model": cfg.default_model,
+                "timeout_s": cfg.timeout_s,
+                "extra": cfg.extra,
+            }
+        return out
+
+
+# ============================================================
+# 配置规范化（compat / normalize）
+# ============================================================
+
+_PROVIDER_ID_ALIASES: dict[str, str] = {
+    # 历史值：曾与模块名 llama_cpp_http.py 强耦合；现统一为 llama_cpp
+    "llama_cpp_http": "llama_cpp",
+}
+
+
+def normalize_provider_id(provider_id: str) -> str:
+    """将历史 provider_id 映射为当前标准 provider_id。"""
+    return _PROVIDER_ID_ALIASES.get(provider_id, provider_id)
 
 
 """
@@ -469,6 +573,22 @@ class CludeConfig(BaseSettings):
     repo_map: RepoMapToolConfig = RepoMapToolConfig()
     skill: SkillToolConfig = SkillToolConfig()
     task: TaskToolConfig = TaskToolConfig()
+
+    def get_effective_provider_id(self) -> str:
+        """
+        获取当前生效的 provider_id（业界常用规则）：
+        1) 优先 providers.default（多厂商体系）
+        2) 其次 legacy llm.provider（单厂商体系）
+        3) 最终 normalize（兼容历史值）
+        """
+        pid = ""
+        try:
+            pid = getattr(self.providers, "default", "") or ""
+        except Exception:
+            pid = ""
+        if not pid:
+            pid = getattr(self.llm, "provider", "") or ""
+        return normalize_provider_id(pid or "llama_cpp")
 
 """
 扩展配置（Extended Configuration）

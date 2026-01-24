@@ -279,24 +279,73 @@ class ShortcutHandler:
         """显示帮助面板"""
         from rich.table import Table
         from rich.panel import Panel
+        from rich.text import Text
+        from rich.console import Group
 
-        table = Table(title="可用快捷键", show_header=True)
-        table.add_column("快捷键", style="cyan", width=12)
-        table.add_column("功能", style="white")
-        table.add_column("分类", style="yellow", width=10)
+        shortcuts_table = Table(title="可用快捷键", show_header=True)
+        shortcuts_table.add_column("快捷键", style="cyan", width=12)
+        shortcuts_table.add_column("功能", style="white")
+        shortcuts_table.add_column("分类", style="yellow", width=10)
 
         for key, shortcut in self.shortcuts.items():
             if shortcut.enabled:
-                table.add_row(key, shortcut.description, shortcut.category)
+                shortcuts_table.add_row(key, shortcut.description, shortcut.category)
+
+        # Slash commands（会话内）
+        slash_table = Table(title="Slash Commands（会话内）", show_header=True)
+        slash_table.add_column("命令", style="cyan")
+        slash_table.add_column("说明", style="white")
+        slash_table.add_row("/help", "显示帮助（本面板）")
+        slash_table.add_row("/clear", "清空会话上下文（保留 system prompt）")
+        slash_table.add_row("/config", "显示当前配置摘要")
+        slash_table.add_row("/providers", "列出所有可用厂商（注册表）")
+        slash_table.add_row("/provider <id>", "切换当前厂商")
+        slash_table.add_row("/provider-configs", "列出所有厂商配置摘要（脱敏）")
+        slash_table.add_row("/provider-config <id>", "查看单个厂商配置（脱敏）")
+        slash_table.add_row(
+            "/provider-config-set <id> base_url=... api_key=... enabled=true",
+            "会话内写入厂商配置（脱敏展示；可加 default_model/timeout_s/set_default/extra.*）",
+        )
+        slash_table.add_row("/models", "列出当前厂商可用模型")
+        slash_table.add_row("/model <id>", "切换模型")
+        slash_table.add_row("/image <path|url>", "预加载图片（下次输入自动附加）")
+        slash_table.add_row("/permissions", "查看/设置权限与工具 allow/deny")
+        slash_table.add_row("/tools", "列出工具")
+        slash_table.add_row("/doctor", "环境诊断")
+
+        # CLI commands（命令行）
+        cli_text = Text(
+            "CLI（命令行，写入配置文件）:\n"
+            "- clude providers set <id> --base-url ... --api-key ... [--enabled] [--default-model ...] [--set-default]\n"
+            "- clude providers show [id]\n",
+            style="dim",
+        )
 
         panel = Panel(
-            table,
+            Group(shortcuts_table, slash_table, cli_text),
             title="帮助信息",
             border_style="blue",
             padding=(1, 2)
         )
 
         self.console.print(panel)
+        # 兜底：某些终端/Live UI 场景下，Panel 内 Group 可能被裁剪或用户只看到第一段。
+        # 这里再额外输出一个“命令与配置速查”面板，确保可见“配置厂商 URL/API Key”的命令。
+        cmd_panel = Panel(
+            Group(
+                slash_table,
+                Text(
+                    "\n配置厂商 URL/API Key（会写入 ~/.clude/.clude.yaml，显示时脱敏）：\n"
+                    "  clude providers set <id> --base-url <url> --api-key <key> --enabled [--default-model <model>] [--set-default]\n"
+                    "  clude providers show [id]\n",
+                    style="dim",
+                ),
+            ),
+            title="命令与配置速查",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+        self.console.print(cmd_panel)
         self.console.print()
 
     def _show_config_panel(self) -> None:

@@ -16,7 +16,7 @@ from clude_code.core.async_manager import AsyncTaskManager, get_async_manager
 from clude_code.llm.streaming_client import StreamingLLMClient, CachedStreamingLLMClient
 from clude_code.plugins.ui.enhanced_live_view import EnhancedLiveDisplay, SimpleProgressDisplay, TaskType
 from clude_code.orchestrator.agent_loop import AgentLoop
-from clude_code.llm.llama_cpp_http import ChatMessage
+from clude_code.llm.http_client import ChatMessage
 from clude_code.tooling.local_tools import ToolResult
 
 

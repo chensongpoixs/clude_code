@@ -1,7 +1,7 @@
 import logging
 from rich.prompt import Prompt
 from clude_code.config.config import CludeConfig
-from clude_code.llm.llama_cpp_http import LlamaCppHttpClient
+from clude_code.llm.http_client import LlamaCppHttpClient
 
 def select_model_interactively(cfg: CludeConfig, logger: logging.Logger) -> None:
     """

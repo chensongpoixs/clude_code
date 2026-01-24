@@ -14,7 +14,7 @@ llm/
 ├── cost_tracker.py      # 成本追踪
 ├── failover.py          # 故障转移
 ├── image_utils.py       # 图片处理工具
-├── llama_cpp_http.py    # 通用 HTTP 客户端 (ChatMessage)
+├── http_client.py       # 通用 HTTP 客户端 (ChatMessage)
 ├── streaming_client.py  # 流式客户端
 ├── providers/           # 厂商实现 (47+)
 │   ├── llama_cpp.py     # llama.cpp (默认)
@@ -98,3 +98,4 @@ response = provider.chat(messages)
 - [命名规范分析](../../docs/LLM_MODULE_NAMING_ANALYSIS.md)
 - [多厂商设计文档](../../docs/FEATURE_MULTI_PROVIDER_DESIGN.md)
 - [llama.cpp Provider](../../docs/IMPL_LLAMA_CPP_PROVIDER.md)
+- [删除 llama_cpp_http.py 方案](../../docs/IMPL_REMOVE_LLAMA_CPP_HTTP_MODULE.md)

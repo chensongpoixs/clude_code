@@ -35,7 +35,6 @@ src/clude_code/knowledge/embedder.py
 src/clude_code/knowledge/indexer_service.py
 src/clude_code/knowledge/vector_store.py
 src/clude_code/llm/__init__.py
-src/clude_code/llm/llama_cpp_http.py
 src/clude_code/llm/streaming_client.py
 src/clude_code/lsp/__init__.py
 src/clude_code/lsp/client.py

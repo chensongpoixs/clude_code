@@ -18,7 +18,7 @@ import logging
 from typing import TYPE_CHECKING, Callable, Any
 
 if TYPE_CHECKING:
-    from clude_code.llm.llama_cpp_http import LlamaCppHttpClient
+    from clude_code.llm.http_client import LlamaCppHttpClient
     from clude_code.llm.base import LLMProvider, ProviderConfig, ModelInfo
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,17 @@ class ModelManager:
         if model:
             provider = self._providers[provider_id]
             provider.current_model = model
+        else:
+            # 兜底：确保切换后 current_model 不为空（避免继续沿用旧厂商/旧模型的“错觉”）
+            provider = self._providers[provider_id]
+            if not (provider.current_model or "").strip():
+                try:
+                    models = provider.list_models()
+                    if models:
+                        provider.current_model = models[0].id
+                except Exception:
+                    # list_models 可能依赖网络/鉴权；失败则保持为空，由 provider.chat 自行选择
+                    pass
         
         return True, f"已切换到厂商: {provider_id}"
     
