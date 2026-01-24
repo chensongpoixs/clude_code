@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Iterator
 
 from ..base import LLMProvider, ModelInfo, ProviderConfig
@@ -51,7 +52,14 @@ class QiniuProvider(LLMProvider):
         self._access_key = config.api_key or os.getenv("QINIU_ACCESS_KEY", "")
         # 兼容保留（暂未用于签名）
         self._secret_key = os.getenv("QINIU_SECRET_KEY", "")
-        self._base_url = (config.base_url or os.getenv("QINIU_LLM_ENDPOINT", self.DEFAULT_BASE_URL)).rstrip("/")
+        
+        # 规范化 base_url：确保以 /v1 或其他版本号结尾（OpenAI-compatible API 标准）
+        raw_url = (config.base_url or os.getenv("QINIU_LLM_ENDPOINT", self.DEFAULT_BASE_URL)).rstrip("/")
+        # 如果 URL 不以 /v 开头的版本号结尾（如 /v1, /v2），自动添加 /v1
+        if not re.search(r'/v\d+$', raw_url):
+            raw_url = raw_url + "/v1"
+        self._base_url = raw_url
+        
         # 统一：以基类 current_model 作为唯一事实源
         if not (self.current_model or "").strip():
             self.current_model = config.default_model or "qiniu-llm-v1"
