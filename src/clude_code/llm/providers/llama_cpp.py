@@ -52,7 +52,7 @@ class LlamaCppProvider(LLMProvider):
     PROVIDER_ID = "llama_cpp"
     PROVIDER_NAME = "llama.cpp (本地)"
     PROVIDER_TYPE = "local"
-    REGION = "本地"
+    REGION = "通用"
     
     # 默认参数
     DEFAULT_BASE_URL = "http://127.0.0.1:8899"
