@@ -21,6 +21,7 @@ from rich.console import Console
 
 from clude_code.config.config import CludeConfig
 from clude_code.cli.custom_commands import load_custom_commands
+from clude_code.llm.image_utils import load_image_from_path, load_image_from_url
 
 
 @dataclass
@@ -42,6 +43,7 @@ def _print_help(ctx: SlashContext) -> None:
     ctx.console.print("- `/config`：显示当前配置摘要")
     ctx.console.print("- `/model [id]`：查看或切换当前模型（本会话生效）")
     ctx.console.print("- `/models`：列出所有可用模型")
+    ctx.console.print("- `/image <path|url>`：预加载图片，下次输入时自动附加")
     ctx.console.print("- `/permissions`：查看权限与工具 allow/deny")
     ctx.console.print("- `/permissions network on|off`：开关网络权限（影响 exec 策略评估）")
     ctx.console.print("- `/permissions allow <tool...>`：设置允许工具名单（空=不限制）")
@@ -143,6 +145,46 @@ def _list_models(ctx: SlashContext) -> None:
             ctx.console.print(f"  - {m}")
     ctx.console.print("")
     ctx.console.print(f"[dim]共 {len(models)} 个模型，用 /model <id> 切换[/dim]")
+
+
+def _load_image(ctx: SlashContext, path_or_url: str | None) -> bool:
+    """
+    处理 /image 命令：预加载图片。
+    
+    图片会被缓存到 ChatHandler._pending_images，下次用户输入时自动附加。
+    
+    Returns:
+        True 如果成功加载
+    """
+    if not path_or_url:
+        ctx.console.print("[yellow]用法: /image <path|url>[/yellow]")
+        ctx.console.print("[dim]示例: /image screenshot.png[/dim]")
+        ctx.console.print("[dim]示例: /image https://example.com/image.png[/dim]")
+        return False
+    
+    # 加载图片
+    if path_or_url.startswith(('http://', 'https://')):
+        img = load_image_from_url(path_or_url)
+    else:
+        img = load_image_from_path(path_or_url)
+    
+    if not img:
+        ctx.console.print(f"[red]✗ 无法加载图片: {path_or_url}[/red]")
+        return False
+    
+    # 存储到 agent（通过回调或属性）
+    # 注意：这里需要访问 ChatHandler 的 _pending_images/_pending_image_paths
+    # 由于 SlashContext 只有 agent，我们通过 agent 的属性来传递
+    if not hasattr(ctx.agent, "_pending_images"):
+        ctx.agent._pending_images = []
+    ctx.agent._pending_images.append(img)
+    if not hasattr(ctx.agent, "_pending_image_paths"):
+        ctx.agent._pending_image_paths = []
+    ctx.agent._pending_image_paths.append(path_or_url)
+    
+    ctx.console.print(f"[green]✓ 图片已预加载: {path_or_url}[/green]")
+    ctx.console.print("[dim]下次输入时将自动附加此图片[/dim]")
+    return True
 
 
 def _permissions(ctx: SlashContext, args: list[str]) -> None:
@@ -381,6 +423,9 @@ def handle_slash_command(ctx: SlashContext, text: str) -> bool:
         return True
     if cmd == "/models":
         _list_models(ctx)
+        return True
+    if cmd == "/image":
+        _load_image(ctx, args[0] if args else None)
         return True
     if cmd == "/permissions":
         _permissions(ctx, args)

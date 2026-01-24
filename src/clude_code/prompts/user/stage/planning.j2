@@ -36,6 +36,47 @@
   "verification_policy": "run_verify"
 }
 
+# Critical Constraints（关键约束）
+
+## 1. 禁止在规划阶段执行工具
+- ❌ 错误: {"tool": "xxx", "args": {...}}
+- ✅ 正确: {"type": "FullPlan", "title": "...", "steps": [...]}
+
+## 2. 图片分析场景处理
+- 如果用户输入包含图片（消息中有 image 类型内容），需要分析图片：
+  * 在 steps 中规划 `analyze_image` 步骤
+  * 不要直接输出工具调用 JSON
+  * 将图片路径作为步骤的参数说明
+
+## 3. 示例：包含图片的规划
+用户输入: "分析这个架构设计图"（包含图片）
+正确输出:
+{
+  "type": "FullPlan",
+  "title": "分析架构设计图并提供建议",
+  "steps": [
+    {
+      "id": "step_1",
+      "description": "使用 analyze_image 分析图片内容，提取架构组件、数据流和关键信息",
+      "expected_output": "图片中的架构组件列表、数据流向说明",
+      "dependencies": [],
+      "tools_expected": ["analyze_image"]
+    },
+    {
+      "id": "step_2",
+      "description": "基于图片分析结果，评估架构的优缺点",
+      "expected_output": "架构评估报告，包含优势、瓶颈和改进建议",
+      "dependencies": ["step_1"],
+      "tools_expected": ["display"]
+    }
+  ]
+}
+
 # Input
 目标：{{ input_text }}
 
+# Final Output Requirements（最终输出要求）
+1. 只输出一个 JSON 对象
+2. JSON 的 `type` 字段必须是 `"FullPlan"`
+3. 必须包含 `title` 和 `steps` 字段
+4. 不要输出任何解释、思考过程、markdown 代码块或工具调用

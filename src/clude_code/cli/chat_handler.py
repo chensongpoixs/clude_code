@@ -1,5 +1,6 @@
 from typing import Any
 import json
+import re
 from pathlib import Path
 import typer
 from rich.console import Console
@@ -18,6 +19,7 @@ from clude_code.cli.cli_logging import get_cli_logger
 from clude_code.cli.slash_commands import SlashContext, handle_slash_command
 from clude_code.cli.session_store import save_session
 from clude_code.cli.custom_commands import load_custom_commands, expand_custom_command
+from clude_code.llm.image_utils import load_image_from_path, load_image_from_url
 
 # 使用主题化的控制台
 console = Console(theme=CLAUDE_THEME)
@@ -50,6 +52,68 @@ class ChatHandler:
 
         # 自定义命令（.clude/commands/*.md）
         self._custom_commands = load_custom_commands(self.cfg.workspace_root)
+        
+        # 图片缓存（用于 /image 命令预加载）
+        self._pending_images: list[dict[str, Any]] = []
+        self._pending_image_paths: list[str] = []
+
+    def _extract_images_from_input(self, user_input: str) -> tuple[str, list[dict[str, Any]], list[str]]:
+        """
+        从用户输入中提取图片路径/URL。
+        
+        支持格式：
+        - @image:path/to/image.png
+        - @image:https://example.com/image.png
+        
+        Returns:
+            (clean_text, images, image_paths)
+        """
+        images: list[dict[str, Any]] = []
+        image_paths: list[str] = []
+        clean_text = user_input
+        
+        # 匹配 @image:path 模式
+        pattern = r'@image:([^\s]+)'
+        matches = re.findall(pattern, user_input)
+        
+        for path_or_url in matches:
+            # 移除匹配的文本
+            clean_text = clean_text.replace(f'@image:{path_or_url}', '')
+            
+            if path_or_url.startswith(('http://', 'https://')):
+                # URL
+                img = load_image_from_url(path_or_url)
+                if img:
+                    images.append(img)
+                    image_paths.append(path_or_url)
+                    console.print(f"[dim]✓ 已加载图片: {path_or_url[:50]}...[/dim]")
+                else:
+                    console.print(f"[yellow]⚠ 无法加载图片: {path_or_url}[/yellow]")
+            else:
+                # 本地路径
+                img = load_image_from_path(path_or_url)
+                if img:
+                    images.append(img)
+                    image_paths.append(path_or_url)
+                    console.print(f"[dim]✓ 已加载图片: {path_or_url}[/dim]")
+                else:
+                    console.print(f"[yellow]⚠ 无法加载图片: {path_or_url}[/yellow]")
+        
+        # 合并预加载的图片（来自 /image 命令，存储在 agent 中）
+        pending = getattr(self.agent, "_pending_images", None) or self._pending_images
+        pending_paths = getattr(self.agent, "_pending_image_paths", None) or self._pending_image_paths
+        if pending:
+            images.extend(pending)
+            image_paths.extend(pending_paths)
+            console.print(f"[dim]✓ 已附加 {len(pending)} 张预加载图片[/dim]")
+            if hasattr(self.agent, "_pending_images"):
+                self.agent._pending_images = []
+            if hasattr(self.agent, "_pending_image_paths"):
+                self.agent._pending_image_paths = []
+            self._pending_images.clear()
+            self._pending_image_paths.clear()
+        
+        return clean_text.strip(), images, image_paths
 
     def select_model_interactively(self) -> None:
         """调用公共工具进行交互式模型选择，并同步更新 AgentLoop。"""
@@ -208,10 +272,13 @@ class ChatHandler:
                             old_policy[k] = getattr(p, k, None)
                             setattr(p, k, v)
 
+                    # 提取图片（@image:path 语法）
+                    user_text, images, image_paths = self._extract_images_from_input(user_text)
+                    
                     if live:
-                        self._run_with_live(user_text, debug=self.debug_mode, live_ui=live_ui)
+                        self._run_with_live(user_text, debug=self.debug_mode, live_ui=live_ui, images=images, image_paths=image_paths)
                     else:
-                        self._run_simple(user_text, debug=self.debug_mode)
+                        self._run_simple(user_text, debug=self.debug_mode, images=images, image_paths=image_paths)
                 finally:
                     if old_policy:
                         p = self.cfg.policy
@@ -269,7 +336,15 @@ class ChatHandler:
         else:
             typer.echo(getattr(turn, "assistant_text", ""))
 
-    def _run_with_live(self, user_text: str, debug: bool, *, live_ui: str = "classic") -> None:
+    def _run_with_live(
+        self,
+        user_text: str,
+        debug: bool,
+        *,
+        live_ui: str = "classic",
+        images: list[dict[str, Any]] | None = None,
+        image_paths: list[str] | None = None,
+    ) -> None:
         """带 50 行实时面板的执行模式，支持动画和增强确认。"""
         # P0-2：统一入口，UI 可选但事件协议与 AgentLoop 共享，避免双主链路分裂
         ui_mode = (live_ui or "classic").strip().lower()
@@ -323,7 +398,14 @@ class ChatHandler:
                     except Exception:
                         pass
 
-                turn = self.agent.run_turn(user_text, confirm=_confirm, debug=True, on_event=on_event_wrapper)
+                turn = self.agent.run_turn(
+                    user_text,
+                    confirm=_confirm,
+                    debug=True,
+                    on_event=on_event_wrapper,
+                    images=images,
+                    image_paths=image_paths,
+                )
                 self._last_trace_id = getattr(turn, "trace_id", None)
                 self._log_turn_end(turn)
                 try:
@@ -352,14 +434,27 @@ class ChatHandler:
                 self.cli_logger.exception("AgentLoop 运行异常 (Live)")
                 raise typer.Exit(code=1)
 
-    def _run_simple(self, user_text: str, debug: bool) -> None:
+    def _run_simple(
+        self,
+        user_text: str,
+        debug: bool,
+        *,
+        images: list[dict[str, Any]] | None = None,
+        image_paths: list[str] | None = None,
+    ) -> None:
         """普通命令行输出模式。"""
         self._log_turn_start(user_text, debug=debug, live=False)
         try:
             def _confirm(msg: str) -> bool:
                 return Confirm.ask(msg, default=False)
 
-            turn = self.agent.run_turn(user_text, confirm=_confirm, debug=debug)
+            turn = self.agent.run_turn(
+                user_text,
+                confirm=_confirm,
+                debug=debug,
+                images=images,
+                image_paths=image_paths,
+            )
             self._last_trace_id = getattr(turn, "trace_id", None)
             self._log_turn_end(turn)
             try:

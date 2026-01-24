@@ -255,6 +255,8 @@ class AgentLoop:
         confirm: Callable[[str], bool],
         debug: bool = False,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        images: list[dict[str, Any]] | None = None,
+        image_paths: list[str] | None = None,
     ) -> AgentTurn:
         """
         执行一轮完整的 Agent 对话循环（ReAct 模式）。
@@ -277,6 +279,7 @@ class AgentLoop:
             confirm: 确认回调函数（用于写文件/执行命令前的用户确认）
             debug: 是否启用调试模式（写入 trace.jsonl）
             on_event: 可选的事件回调（用于实时 UI 更新，如 --live 模式）
+            images: 可选的图片列表（OpenAI Vision API 格式）
         
         返回:
             AgentTurn 对象，包含最终回复、工具使用标志、追踪ID和事件列表
@@ -321,6 +324,10 @@ class AgentLoop:
         self._current_ev = _ev
         self._current_trace_id = trace_id
 
+        # 记录最近一次用户输入的图片路径，供工具回退使用
+        if image_paths:
+            self._last_image_paths = list(image_paths)
+
         # 仅在本会话首次 turn 发出“项目记忆加载状态”事件，供 live UI 展示
         if not getattr(self, "_project_memory_emitted", False):
             try:
@@ -359,7 +366,7 @@ class AgentLoop:
             )
 
         self.logger.info(f"[bold cyan]发送给 LLM 的 user_content[/bold cyan] len={len(user_content)}")
-        # 透传 user_content（用于“对话/输出”窗格复刻 chat 默认日志）
+        # 透传 user_content（用于"对话/输出"窗格复刻 chat 默认日志）
         _ev(
             "user_content_built",
             {
@@ -367,9 +374,21 @@ class AgentLoop:
                 "truncated": len(user_content) > 2000,
                 "messages_count": len(self.messages) + 1,  # 即将 append
                 "planning_prompt_included": bool(planning_prompt),
+                "has_images": bool(images),
+                "images_count": len(images) if images else 0,
             },
         )
-        self.messages.append(ChatMessage(role="user", content=user_content))
+        
+        # 构建消息内容（支持多模态）
+        if images:
+            # 多模态消息：文本 + 图片
+            multimodal_content: list[dict[str, Any]] = [{"type": "text", "text": user_content}]
+            multimodal_content.extend(images)
+            self.messages.append(ChatMessage(role="user", content=multimodal_content))
+            self.logger.info(f"[dim]已附加 {len(images)} 张图片到用户消息[/dim]")
+        else:
+            # 纯文本消息
+            self.messages.append(ChatMessage(role="user", content=user_content))
         self._trim_history(max_messages=30)
         self.logger.debug(f"[dim]当前消息历史长度: {len(self.messages)}[/dim]")
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal, Union
 
 import httpx
 import logging
@@ -16,11 +16,38 @@ logger = logging.getLogger(__name__)
 # - 因此这里必须包含 assistant，否则类型标注会误导后续维护/静态检查
 Role = Literal["system", "user", "assistant"]  # 未来可扩展 "tool"
 
+# 多模态内容类型（OpenAI Vision API 格式）
+ContentPart = dict[str, Any]  # {"type": "text", "text": "..."} 或 {"type": "image_url", "image_url": {...}}
+MultimodalContent = list[ContentPart]
 
-@dataclass(frozen=True)
+
+@dataclass
 class ChatMessage:
+    """
+    聊天消息（支持纯文本和多模态）。
+    
+    content 可以是：
+    - str: 纯文本消息
+    - list[dict]: 多模态消息（OpenAI Vision API 格式）
+    
+    示例：
+        # 纯文本
+        ChatMessage(role="user", content="你好")
+        
+        # 多模态（文本 + 图片）
+        ChatMessage(role="user", content=[
+            {"type": "text", "text": "这张图是什么？"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+        ])
+    """
     role: Role
-    content: str
+    content: Union[str, MultimodalContent]
+    
+    def __hash__(self) -> int:
+        # 为了兼容旧代码中可能的 hash 需求
+        if isinstance(self.content, str):
+            return hash((self.role, self.content))
+        return hash((self.role, str(self.content)[:100]))
 
 
 # 支持的 LLM Provider（供文档和类型提示）
@@ -191,9 +218,17 @@ class LlamaCppHttpClient:
         model = self.model
         if not model:
             model = self.try_get_first_model_id() or "llama.cpp"
+        
+        # 转换消息格式：Claude Vision → OpenAI Vision
+        from .image_utils import convert_to_openai_vision_format
+        converted_messages = []
+        for m in messages:
+            converted_content = convert_to_openai_vision_format(m.content)
+            converted_messages.append({"role": m.role, "content": converted_content})
+        
         payload: dict[str, Any] = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": converted_messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": False,

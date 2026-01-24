@@ -49,6 +49,38 @@ def normalize_messages_for_llama(
     normalized: list[ChatMessage] = []
     last_role = None
 
+    def _merge_message_content(existing_content, new_content):
+        """
+        合并消息内容，支持字符串和多模态内容。
+        """
+        if isinstance(existing_content, str) and isinstance(new_content, str):
+            # 两个都是字符串
+            return existing_content + "\n\n" + new_content
+        elif isinstance(existing_content, list) and isinstance(new_content, str):
+            # existing 是多模态，new 是字符串 - 追加文本
+            # 找到最后一个文本部分，或者添加新文本部分
+            merged = existing_content.copy()
+            if merged and isinstance(merged[-1], dict) and merged[-1].get("type") == "text":
+                # 合并到最后一个文本部分
+                merged[-1]["text"] += "\n\n" + new_content
+            else:
+                # 添加新的文本部分
+                merged.append({"type": "text", "text": new_content})
+            return merged
+        elif isinstance(existing_content, str) and isinstance(new_content, list):
+            # existing 是字符串，new 是多模态 - 转换为多模态格式
+            merged = [{"type": "text", "text": existing_content}]
+            merged.extend(new_content)
+            return merged
+        elif isinstance(existing_content, list) and isinstance(new_content, list):
+            # 两个都是多模态 - 合并
+            merged = existing_content.copy()
+            merged.extend(new_content)
+            return merged
+        else:
+            # 其他情况，直接使用新内容
+            return new_content
+
     for msg in filtered:
         if not normalized:
             # 第一条消息直接添加
@@ -56,17 +88,33 @@ def normalize_messages_for_llama(
             last_role = msg.role
         elif msg.role == last_role:
             # 连续相同角色，合并内容
+            merged_content = _merge_message_content(normalized[-1].content, msg.content)
             normalized[-1] = ChatMessage(
                 role=last_role,
-                content=normalized[-1].content + "\n\n" + msg.content
+                content=merged_content
             )
         else:
             # 不同角色，直接添加
             normalized.append(msg)
             last_role = msg.role
 
+    # 第三遍：确保 system 后第一条消息是 user（Gemma 等模型的 chat template 要求）
+    if len(normalized) >= 2:
+        # 判断第一条非 system 消息的位置和角色
+        if normalized[0].role == "system":
+            first_non_system_idx = 1
+        else:
+            first_non_system_idx = 0
+        
+        if first_non_system_idx < len(normalized):
+            first_non_system = normalized[first_non_system_idx]
+            if first_non_system.role == "assistant":
+                # 插入占位 user 消息
+                placeholder = ChatMessage(role="user", content="请继续执行任务。")
+                normalized.insert(first_non_system_idx, placeholder)
+
     # 更新消息列表
-    if len(normalized) != original_len:
+    if len(normalized) != original_len or loop.messages != normalized:
         loop.messages = normalized
         loop._trim_history(max_messages=30)
 

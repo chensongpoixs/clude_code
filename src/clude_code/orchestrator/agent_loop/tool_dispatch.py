@@ -1263,6 +1263,72 @@ def _spec_get_weather_forecast() -> ToolSpec:
     )
 
 
+def _h_analyze_image(loop: Any, args: dict[str, Any]) -> ToolResult:
+    """处理 analyze_image 工具调用。"""
+    from clude_code.tooling.tools.analyze_image import analyze_image
+    path = args.get("path", "")
+    question = args.get("question", "请描述这张图片的内容")
+
+    # 如果路径无效，尝试回退到最近一次用户输入的图片路径
+    if not path or (isinstance(path, str) and not path.startswith(("http://", "https://")) and not Path(path).exists()):
+        last_paths = getattr(loop, "_last_image_paths", None) or []
+        fallback_path = None
+        for p in last_paths:
+            if isinstance(p, str):
+                if p.startswith(("http://", "https://")):
+                    fallback_path = p
+                    break
+                if Path(p).exists():
+                    fallback_path = p
+                    break
+        if fallback_path:
+            logger.info(f"[AnalyzeImage] 路径回退: {path} -> {fallback_path}")
+            path = fallback_path
+
+    return analyze_image(
+        path=path,
+        question=question,
+    )
+
+
+def _spec_analyze_image() -> ToolSpec:
+    """
+    ToolSpec：analyze_image（分析图片）
+    
+    加载并分析图片内容，支持本地路径和 URL。
+    """
+    return ToolSpec(
+        name="analyze_image",
+        summary="加载并分析图片内容",
+        description="加载图片（本地路径或 URL）并准备给 LLM 分析。支持 PNG、JPG、GIF、WebP 等格式。",
+        args_schema=_obj_schema(
+            properties={
+                "path": {
+                    "type": "string",
+                    "description": "图片路径（本地路径或 URL）"
+                },
+                "question": {
+                    "type": "string",
+                    "default": "请描述这张图片的内容",
+                    "description": "对图片的提问"
+                }
+            },
+            required=["path"],
+        ),
+        example_args={"path": "screenshot.png", "question": "这个 UI 设计有什么问题？"},
+        side_effects={"network"},  # URL 图片需要网络
+        external_bins_required=set(),
+        external_bins_optional=set(),
+        visible_in_prompt=True,
+        callable_by_model=True,
+        exec_command_key=None,
+        handler=_h_analyze_image,
+        category="vision",
+        timeout_seconds=30,
+        version="1.0.0",
+    )
+
+
 def iter_tool_specs() -> Iterable[ToolSpec]:
     """
     返回所有工具规范（保持稳定顺序）。
@@ -1291,6 +1357,7 @@ def iter_tool_specs() -> Iterable[ToolSpec]:
     yield _spec_get_task_status()
     yield _spec_get_weather()
     yield _spec_get_weather_forecast()
+    yield _spec_analyze_image()
 
 
 # 注册表驱动（业界版）：同一份注册表 = tool dispatch + tool prompt/help 的来源

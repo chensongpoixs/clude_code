@@ -103,12 +103,16 @@ def execute_single_step_iteration(
     # 兜底工具：分析类步骤默认使用 display
     tools_for_prompt = ", ".join(step.tools_expected) if step.tools_expected else "display（输出分析结果）"
     
+    image_paths = getattr(loop, "_last_image_paths", None) or []
+    image_paths_hint = "\n".join(str(p) for p in image_paths) if image_paths else ""
+
     step_prompt = render_prompt(
         "user/stage/execute_step.j2",
         step_id=step.id,
         step_description=step.description,
         tools_expected=tools_for_prompt,
         is_analysis_step=is_analysis_step,
+        image_paths=image_paths_hint,
     ).strip()
     loop.messages.append(ChatMessage(role="user", content=step_prompt))
     loop._trim_history(max_messages=30)
