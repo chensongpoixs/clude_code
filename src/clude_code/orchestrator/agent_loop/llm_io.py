@@ -142,7 +142,7 @@ def llm_chat(
     llama.cpp 调用统一出口：先做 messages 规范化，再发起 HTTP 请求。
 
     业界做法：
-    - 统一出口处打印/落盘“请求参数 + 请求数据摘要 + 返回数据摘要”，便于复盘 400/500/超时问题。
+    - 统一出口处打印/落盘"请求参数 + 请求数据摘要 + 返回数据摘要"，便于复盘 400/500/超时问题。
     - 避免在多个调用点各自打印造成遗漏或输出不一致。
     """
     normalize_messages_for_llama(loop, stage, step_id=step_id, _ev=_ev)
@@ -152,6 +152,24 @@ def llm_chat(
         loop._last_llm_step_id = step_id
     except Exception:
         pass
+    
+    # 提前记录 provider 信息（用于日志输出正确的当前 provider，避免拿到上一次的）
+    try:
+        from clude_code.llm import get_model_manager
+        mm = get_model_manager()
+        current_provider = mm.get_provider()
+        if current_provider:
+            loop._last_provider_id = mm.get_current_provider_id()
+            loop._last_provider_base_url = getattr(current_provider, "config", None) and getattr(current_provider.config, "base_url", "") or ""
+            loop._last_provider_model = current_provider.current_model
+        else:
+            loop._last_provider_id = ""
+            loop._last_provider_base_url = ""
+            loop._last_provider_model = ""
+    except Exception:
+        loop._last_provider_id = ""
+        loop._last_provider_base_url = ""
+        loop._last_provider_model = ""
 
     # 0) 估算 prompt tokens（轻量，不依赖服务端 usage）
     prompt_tokens_est = 0
@@ -239,8 +257,9 @@ def llm_chat(
             )
         else:
             assistant_text = loop.llm.chat(loop.messages)
-    except Exception:
-        # 任何异常不影响主流程：回退 loop.llm（避免 provider 注册/配置问题导致整体不可用）
+    except Exception as e:
+        # 记录异常便于排查，然后回退 loop.llm（避免 provider 注册/配置问题导致整体不可用）
+        loop.file_only_logger.warning(f"Provider 调用失败，回退到 loop.llm: {e}", exc_info=True)
         assistant_text = loop.llm.chat(loop.messages)
 
     elapsed_ms = int((time.time() - t0) * 1000)
@@ -385,10 +404,10 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
     lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")
     if include_params:
         try:
-            # provider 元信息（若存在）
-            pid = getattr(loop, "_active_provider_id", None)
-            purl = getattr(loop, "_active_provider_base_url", None)
-            pmodel = getattr(loop, "_active_provider_model", None)
+            # provider 元信息（使用 _last_provider_* 因为它是在 LLM 调用前设置的）
+            pid = getattr(loop, "_last_provider_id", None)
+            purl = getattr(loop, "_last_provider_base_url", None)
+            pmodel = getattr(loop, "_last_provider_model", None)
             if pid or purl or pmodel:
                 lines.append(
                     f"provider_id={pid} provider_base_url={purl} provider_model={pmodel}"

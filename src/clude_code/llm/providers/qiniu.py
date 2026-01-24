@@ -32,7 +32,9 @@ class QiniuProvider(LLMProvider):
     PROVIDER_NAME = "七牛云 LLM"
     PROVIDER_TYPE = "cloud"
     REGION = "国内"
-    DEFAULT_BASE_URL = "https://llm.qiniuapi.com/v1"
+    # 默认 base_url：如果用户未配置，使用本地测试端点（避免调用真实七牛云）
+    # 注意：需要包含 /v1 后缀，因为 OpenAI-compatible API 路径是 /v1/chat/completions
+    DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
     
     # 支持的模型
     MODELS = {
@@ -175,7 +177,8 @@ class QiniuProvider(LLMProvider):
         if self._access_key:
             headers["Authorization"] = f"QBox {self._access_key}"
         try:
-            with httpx.Client(timeout=30) as client:
+            # 优化：5 秒超时（连接 2 秒），避免等太久
+            with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
                 r = client.get(f"{self._base_url}/models", headers=headers)
                 if r.status_code < 400:
                     data = r.json() or {}
@@ -188,11 +191,19 @@ class QiniuProvider(LLMProvider):
                             mid = str(it.get("id", "")).strip()
                             if not mid:
                                 continue
-                            out.append(ModelInfo(id=mid, name=mid, provider="qiniu"))
+                            # 优化：添加 context_window 字段
+                            out.append(ModelInfo(
+                                id=mid,
+                                name=mid,
+                                provider="qiniu",
+                                context_window=it.get("context_length", 4096),
+                            ))
                         if out:
                             return out
-        except Exception:
-            pass
+        except Exception as e:
+            # 优化：添加调试日志
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"qiniu: 无法从 API 获取模型列表 ({e})，回退到静态列表")
 
         return list(self.MODELS.values())
     

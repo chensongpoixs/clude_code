@@ -572,21 +572,34 @@ def _switch_provider(ctx: SlashContext, provider_id: str | None) -> None:
                 try:
                     if hasattr(ctx.cfg, "providers") and hasattr(ctx.cfg.providers, "get_item"):
                         provider_cfg_item = ctx.cfg.providers.get_item(pid)
-                except Exception:
+                except Exception as e:
+                    if ctx.debug:
+                        ctx.console.print(f"[dim]读取配置异常: {e}[/dim]")
                     provider_cfg_item = None
 
+                def _mask_key(key: str) -> str:
+                    """脱敏 API key"""
+                    if not key or len(key) < 8:
+                        return "(空)"
+                    return f"{key[:4]}***{key[-4:]}"
+
                 if provider_cfg_item:
+                    # 使用配置文件的值
                     config = ProviderConfig(
                         name=pid,
-                        api_key=provider_cfg_item.api_key,
-                        base_url=provider_cfg_item.base_url,
-                        api_version=provider_cfg_item.api_version,
-                        default_model=provider_cfg_item.default_model,
-                        timeout_s=provider_cfg_item.timeout_s,
-                        extra=provider_cfg_item.extra,
+                        api_key=provider_cfg_item.api_key or "",
+                        base_url=provider_cfg_item.base_url or "",
+                        api_version=provider_cfg_item.api_version or "",
+                        default_model=provider_cfg_item.default_model or "",
+                        timeout_s=provider_cfg_item.timeout_s or 120,
+                        extra=provider_cfg_item.extra or {},
                     )
+                    ctx.console.print(f"[dim]📝 使用配置文件: base_url={config.base_url or '(默认)'}, model={config.default_model or '(自动)'}, api_key={_mask_key(config.api_key)}[/dim]")
                 else:
+                    # 使用代码默认值
                     config = ProviderConfig(name=pid)
+                    ctx.console.print(f"[yellow]⚠ 配置文件未配置 {pid}，将使用代码默认值[/yellow]")
+                    ctx.console.print(f"[dim]💡 提示：运行 /provider-config-set {pid} base_url=... api_key=... 可自定义配置[/dim]")
                 
                 provider = ProviderRegistry.get_provider(pid, config)
                 mm.register_provider(pid, provider)
@@ -602,22 +615,42 @@ def _switch_provider(ctx: SlashContext, provider_id: str | None) -> None:
         success, message = mm.switch_provider(pid)
         if success:
             ctx.console.print(f"[green]✓ {message}[/green]")
-            # 同步到会话 cfg（避免“已切换但 cfg 仍显示旧值”）
+            
+            # 同步会话配置（增强版：同步 provider/model/base_url，并验证结果）
             try:
+                current_provider = mm.get_provider()
+                current_model = mm.get_current_model()
+                
+                # 提取 provider 配置（避免重复获取）
+                provider_cfg = getattr(current_provider, "config", None) if current_provider else None
+                provider_base_url = getattr(provider_cfg, "base_url", None) if provider_cfg else None
+                
+                # 同步核心字段
                 ctx.cfg.llm.provider = pid
-                # 切换厂商后，默认把会话模型同步为当前厂商模型（避免继续显示/使用旧模型）
-                cm = mm.get_current_model()
-                if cm:
-                    ctx.cfg.llm.model = cm
+                ctx.cfg.llm.model = current_model or ""
+                
+                # 同步 base_url（如果 provider 有配置）
+                if provider_base_url:
+                    ctx.cfg.llm.base_url = provider_base_url
+                
+                # 显示同步结果（详细版）
+                ctx.console.print(f"[dim]✓ 会话配置已同步[/dim]")
+                ctx.console.print(f"[dim]  • 厂商: {ctx.cfg.llm.provider}[/dim]")
+                ctx.console.print(f"[dim]  • 模型: {current_model or '(未设置)'}[/dim]")
+                ctx.console.print(f"[dim]  • 端点: {provider_base_url or '(默认)'}[/dim]")
+                
+            except Exception as e:
+                ctx.console.print(f"[yellow]⚠ 配置同步失败: {e}[/yellow]")
+                if ctx.debug:
+                    import traceback
+                    ctx.console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            
+            # 显示可用模型数
+            try:
+                models = mm.list_models()
+                ctx.console.print(f"[dim]可用模型: {len(models)} 个[/dim]")
             except Exception:
                 pass
-            # 显示当前模型
-            current_model = mm.get_current_model()
-            if current_model:
-                ctx.console.print(f"[dim]当前模型: {current_model}[/dim]")
-            # 显示可用模型数
-            models = mm.list_models()
-            ctx.console.print(f"[dim]可用模型: {len(models)} 个[/dim]")
         else:
             ctx.console.print(f"[yellow]⚠ {message}[/yellow]")
     except Exception as e:
