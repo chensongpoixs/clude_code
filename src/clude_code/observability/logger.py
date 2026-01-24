@@ -64,6 +64,8 @@ class FileLineFileHandler(RotatingFileHandler):
     文件输出处理器，支持自动滚动，格式与控制台一致。
     
     格式：级别     [文件名:行号] 级别 - 消息内容
+    
+    业界最佳实践：重写 doRollover() 以处理 Windows 文件锁定问题
     """
     
     def __init__(
@@ -84,6 +86,54 @@ class FileLineFileHandler(RotatingFileHandler):
         
         formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
         self.setFormatter(formatter)
+        # 标记是否已经警告过轮转失败
+        self._rotation_warned = False
+    
+    def doRollover(self) -> None:
+        """
+        重写轮转逻辑，处理 Windows 文件锁定问题。
+        
+        业界最佳实践：
+        - 捕获 PermissionError，降级到直接写入（不轮转）
+        - 避免中断服务（参考 Django/Python logging 官方文档）
+        """
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        
+        try:
+            # 尝试执行轮转（父类逻辑）
+            super().doRollover()
+        except PermissionError as e:
+            # Windows 文件锁定问题：降级到直接写入，不中断服务
+            if not self._rotation_warned:
+                # 只在第一次出现时警告，避免刷屏
+                import warnings
+                warnings.warn(
+                    f"日志轮转失败（文件被锁定，Windows环境常见问题）: {e}。日志将继续写入原文件（可能超过 {self.maxBytes} 字节）。",
+                    RuntimeWarning,
+                    stacklevel=3
+                )
+                self._rotation_warned = True
+            
+            # 重新打开文件（追加模式，不轮转）
+            # 这样日志会继续写入，虽然可能超过 maxBytes，但不影响功能
+            self.stream = self._open()
+        except Exception as e:
+            # 其他异常也降级处理，确保日志写入不中断
+            if not self._rotation_warned:
+                import warnings
+                warnings.warn(
+                    f"日志轮转失败: {e}。日志将继续写入原文件。",
+                    RuntimeWarning,
+                    stacklevel=3
+                )
+                self._rotation_warned = True
+            # 重新打开文件
+            try:
+                self.stream = self._open()
+            except Exception:
+                pass  # 如果打开也失败，忽略（不影响主程序）
     
     def emit(self, record: logging.LogRecord) -> None:
         # 获取调用日志的文件名和行号
@@ -102,39 +152,8 @@ class FileLineFileHandler(RotatingFileHandler):
             record.filename = Path(record.pathname).name
             record.lineno_caller = record.lineno
         
-        # 调用父类方法，捕获Windows文件锁定异常（业界最佳实践）
-        try:
-            super().emit(record)
-        except PermissionError as e:
-            # Windows文件锁定问题：记录警告但不中断日志写入
-            # 业界做法：降级到直接写入，不中断服务（参考Django/Python logging官方文档）
-            import warnings
-            import sys
-            # 只在第一次出现时警告，避免刷屏
-            if not hasattr(self, '_rotation_warned'):
-                warnings.warn(
-                    f"日志轮转失败（文件被锁定，Windows环境常见问题）: {e}。日志将继续写入原文件。",
-                    RuntimeWarning,
-                    stacklevel=2
-                )
-                self._rotation_warned = True
-            
-            # 尝试直接写入（不轮转）
-            try:
-                # 关闭当前流，重新打开（避免轮转）
-                if self.stream:
-                    self.stream.close()
-                    self.stream = None
-                self.stream = self._open()
-                # 直接写入格式化后的记录
-                msg = self.format(record)
-                if self.stream:
-                    self.stream.write(msg + self.terminator)
-                    self.flush()
-            except Exception:
-                # 如果仍然失败，忽略（不影响核心功能）
-                # 业界做法：日志失败不应影响主程序运行
-                pass
+        # 调用父类方法（现在 doRollover 已经重写，会正确处理异常）
+        super().emit(record)
 
 """
 获取配置好的日志记录器。

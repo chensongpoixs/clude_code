@@ -495,18 +495,23 @@ def emit(self, record: logging.LogRecord) -> None:
 1. ✅ `list_dir`: 明确说明不支持 `max_depth`，建议使用 `glob_file_search`
 2. ✅ `question`: 添加文件列表选择示例，明确说明使用 `options` 参数
 
-#### ✅ 修复3：日志轮转异常处理
+#### ✅ 修复3：日志轮转异常处理（已更新）
 
-**实施位置**: `src/clude_code/observability/logger.py:88-130`
+**实施位置**: `src/clude_code/observability/logger.py:92-136`
 
 **业界做法**:
-- Python logging官方: 捕获 `PermissionError`，降级到直接写入
-- Django logging: 使用 `WatchedFileHandler` 或捕获轮转异常
+- Python logging官方: 重写 `doRollover()` 方法，直接控制轮转逻辑
+- Django logging: 捕获 `PermissionError`，降级到直接写入
 
 **实施内容**:
-1. ✅ 捕获 `PermissionError`，记录警告但不中断日志写入
-2. ✅ 降级到直接写入（不轮转）
+1. ✅ 重写 `doRollover()` 方法，直接控制轮转逻辑
+2. ✅ 捕获 `PermissionError`，降级到直接写入（不轮转）
 3. ✅ 避免重复警告（使用 `_rotation_warned` 标志）
+4. ✅ 确保日志写入不中断（即使轮转失败）
+
+**关键改进**:
+- **之前**: 在 `emit()` 中捕获异常，但 Python logging 模块内部已经处理了异常并输出到 stderr
+- **现在**: 重写 `doRollover()` 方法，在轮转逻辑中直接处理异常，避免 Python logging 模块输出 "--- Logging error ---"
 
 ### 4.3 问题分类与解决状态
 
