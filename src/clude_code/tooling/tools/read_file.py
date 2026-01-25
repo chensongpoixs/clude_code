@@ -14,6 +14,38 @@ from ...config.tools_config import get_file_config
 _logger = get_tool_logger(__name__)
 
 
+
+def _detect_lang(path: str) -> str:
+    """
+    根据文件路径检测语言类型，返回简短的语言代码。
+    
+    Args:
+        path: 文件路径
+        
+    Returns:
+        简短的语言代码，如 "py", "js", "ts", "c", "go", "rust" 等
+    """
+    p = (path or "").lower()
+    for ext, lang in (
+        (".py", "py"),
+        (".js", "js"),
+        (".jsx", "js"),
+        (".ts", "ts"),
+        (".tsx", "ts"),
+        (".go", "go"),
+        (".rs", "rust"),
+        (".java", "java"),
+        (".c", "c"),
+        (".h", "c"),
+        (".cpp", "cpp"),
+        (".cc", "cpp"),
+        (".cxx", "cpp"),
+        (".hpp", "cpp"),
+    ):
+        if p.endswith(ext):
+            return lang
+    return "unknown"
+
 def _extract_python_symbol(source: str, symbol: str, skip_docstring: bool = True) -> str | None:
     """
     使用 AST 提取 Python 文件中指定的函数/类定义。

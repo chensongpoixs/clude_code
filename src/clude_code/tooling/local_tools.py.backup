@@ -28,16 +28,8 @@ class LocalTools:
         self.max_file_read_bytes = max_file_read_bytes
         self.max_output_bytes = max_output_bytes
 
-    def list_dir(self, path: str = ".", max_items: int | None = None, include_size: bool = False, show_hidden: bool = False, file_pattern: str | None = None) -> ToolResult:
-        return _list_dir_impl(
-            workspace_root=self.workspace_root, 
-            path=path, 
-            max_items=max_items, 
-            include_size=include_size, 
-            show_hidden=show_hidden, 
-            file_pattern=file_pattern
-        )
-
+    def list_dir(self, path: str = ".") -> ToolResult:
+        return _list_dir_impl(workspace_root=self.workspace_root, path=path)
 
     def read_file(self, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
         return _read_file_impl(

@@ -117,8 +117,7 @@ prompt_profiles:
     prompts:
       system:
         base: { ref: "system/core/global.md", version: "1.0.0" }
-        domain: { ref: "system/role/analyst.md", version: "1.0.0" }
-        task: { ref: "system/context/runtime.j2", version: "1.0.0" }
+        domain: { ref: "system/role/general_chat.md", version: "1.0.0" }
       user_prompt:
         task: { ref: "user/intent/chat/general_chat.j2", version: "1.0.0" }
 

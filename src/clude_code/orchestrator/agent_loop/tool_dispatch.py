@@ -338,6 +338,9 @@ def _spec_list_dir() -> ToolSpec:
         args_schema=_obj_schema(
             properties={
                 "path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"},
+                "max_items": {"type": ["integer", "null"], "minimum": 1, "description": "最大返回条目数量，默认 100"},
+                "include_size": {"type": "boolean", "default": False, "description": "是否包含文件大小信息"},
+                "show_hidden": {"type": "boolean", "default": False, "description": "是否显示隐藏文件（以.开头）"},
                 "file_pattern": {"type": "string", "description": "文件类型过滤模式（如 `*.py`, `*.cpp`），可选"},
             },
             required=[],

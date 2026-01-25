@@ -1,0 +1,102 @@
+--- a/src/clude_code/orchestrator/agent_loop/execution.py
++++ b/src/clude_code/orchestrator/agent_loop/execution.py
+@@ -127,15 +127,18 @@ def execute_single_step_iteration(
+     a_strip = assistant.strip()
+ 
+     # P0-2：优先解析结构化控制协议（JSON Envelope / JSON 信封）
++    # 注意：必须先检查控制信号，避免被工具调用解析误判
+     ctrl = try_parse_control_envelope(a_strip)
+     if ctrl is not None and ctrl.control == "step_done":
+         loop.messages.append(ChatMessage(role="assistant", content=assistant))
+         loop._trim_history(max_messages=30)
+         step.status = "done"
++        loop.logger.info(f"[green]✓ 步骤通过控制信号完成[/green] [步骤] {step.id}")
+         _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
+         loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
+         _ev("plan_step_done", {"step_id": step.id})
+         loop.logger.info(f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description}")
+         _ev("control_signal", {"control": "step_done", "step_id": step.id})
+         return "STEP_DONE", False, False
+@@ -169,24 +172,58 @@ def execute_single_step_iteration(
+         return "REPLAN", False, False
+ 
+-    tool_call = _try_parse_tool_call(assistant)
++    # 工具调用解析：排除控制信号的误判
++    tool_call = _try_parse_tool_call(a_strip)
++    if tool_call is not None and tool_call.get("control") in ["step_done", "replan"]:
++        # 防止控制信号被误判为工具调用
++        loop.logger.warning(f"[yellow]⚠ 控制信号被误判为工具调用，修正处理[/yellow] [信号] {tool_call.get('control')} [步骤] {step.id}")
++        if tool_call.get("control") == "step_done":
++            loop.messages.append(ChatMessage(role="assistant", content=assistant))
++            loop._trim_history(max_messages=30)
++            step.status = "done"
++            _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
++            loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
++            _ev("plan_step_done", {"step_id": step.id})
++            loop.logger.info(f"[green]✓ 步骤完成（修正后）[/green] [步骤] {step.id}")
++            return "STEP_DONE", False, False
++        elif tool_call.get("control") == "replan":
++            loop.messages.append(ChatMessage(role="assistant", content=assistant))
++            loop._trim_history(max_messages=30)
++            step.status = "failed"
++            _ev("plan_step_status_changed", {"step_id": step.id, "status": "failed"})
++            loop.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
++            _ev("plan_step_replan_requested", {"step_id": step.id})
++            loop.logger.warning(f"[yellow]⚠ 步骤请求重规划（修正后）[/yellow] [步骤] {step.id}")
++            return "REPLAN", False, False
++
++    tool_call = _try_parse_tool_call(assistant)
+     if tool_call is None:
++        # 检查是否是自然语言完成声明
++        completion_keywords = ["完成", "已完成", "完成了", "finished", "done", "completed", "任务完成"]
++        if any(keyword in a_strip.lower() for keyword in completion_keywords):
++            loop.logger.info(f"[green]✓ 检测到自然语言完成声明，自动完成步骤[/green] [步骤] {step.id}")
++            loop.messages.append(ChatMessage(role="assistant", content=assistant))
++            loop._trim_history(max_messages=30)
++            step.status = "done"
++            _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
++            loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
++            _ev("plan_step_done", {"step_id": step.id})
++            return "STEP_DONE", False, False
++        
+         loop.messages.append(ChatMessage(role="assistant", content=assistant))
+         loop._trim_history(max_messages=30)
+         
+         # P2 修复：错误消息去重，避免重试循环导致消息雪崩
+-        error_prompt = read_prompt("user/stage/invalid_step_output_retry.md").strip()
++        error_prompt = render_prompt(
++            "user/stage/force_control_signal.md",
++            last_output=assistant[:200],
++            expected_format='{"control":"step_done"} 或 {"control":"replan","reason":"原因"}'
++        ).strip()
+         last_user_msg = next((m for m in reversed(loop.messages) if m.role == "user"), None)
+-        if last_user_msg and "你的输出既不是工具调用" in last_user_msg.content:
++        if last_user_msg and "必须输出控制信号" in last_user_msg.content:
+             # 已有错误提示，不再追加（避免雪崩）
+             loop.logger.debug("[dim]跳过重复错误提示（已存在）[/dim]")
+         else:
+             loop.messages.append(ChatMessage(role="user", content=error_prompt))
+             loop._trim_history(max_messages=30)
+         return None, False, False
+@@ -207,10 +244,30 @@ def execute_single_step_iteration(
+ 
+     result, did_modify_code = handle_tool_call_in_step(loop, name, args, step, trace_id, keywords, confirm, _ev, _tool_result_to_message)
+     if result is None:
+         return None, False, True
++    
++    # 智能步骤完成推断：对于简单查询类步骤，如果工具调用成功且步骤目标已达成，自动完成
++    if result.ok:
++        is_simple_query = (
++            (not step.tools_expected or len(step.tools_expected) <= 1) and
++            any(keyword in step.description.lower() for keyword in ["列出", "显示", "查看", "检查", "获取", "list", "show", "get", "check"])
++        )
++        
++        if is_simple_query:
++            loop.logger.info(f"[green]✓ 简单查询步骤自动完成[/green] [步骤] {step.id} [工具] {name}")
++            step.status = "done"
++            _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
++            loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
++            _ev("plan_step_done", {"step_id": step.id})
++            return "STEP_DONE", did_modify_code, True
++    
+     return None, did_modify_code, True

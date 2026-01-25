@@ -6,6 +6,7 @@ from typing import Any, Callable, TYPE_CHECKING
 from clude_code.llm.http_client import ChatMessage
 from clude_code.orchestrator.state_m import AgentState
 from clude_code.tooling.local_tools import ToolResult
+from .control_protocol import try_parse_control_envelope
 
 if TYPE_CHECKING:
     from .agent_loop import AgentLoop
@@ -66,6 +67,22 @@ def execute_react_fallback_loop(
         loop.logger.debug(f"[dim]LLM 响应长度: {len(assistant)} 字符[/dim]")
 
         tool_call = _try_parse_tool_call(assistant)
+        
+        # P0-2: 优先解析控制协议（JSON Envelope / JSON 信封）
+        ctrl = try_parse_control_envelope(assistant)
+        if ctrl is not None and ctrl.control == "step_done":
+            loop.logger.info("[green]✓ 检测到控制信号：步骤完成[/green]")
+            loop.messages.append(ChatMessage(role="assistant", content=assistant))
+            loop.audit.write(trace_id=trace_id, event="control_step_done", data={"reason": ctrl.reason})
+            _ev("control_signal", {"control": "step_done"})
+            loop._trim_history(max_messages=30)
+            from .models import AgentTurn
+            return AgentTurn(
+                assistant_text="步骤完成",
+                tool_used=tool_used,
+                trace_id=trace_id,
+                events=events,
+            )
 
         if tool_call is None:
             loop.logger.info("[bold green]✓ LLM 返回最终回复（无工具调用）[/bold green]")
