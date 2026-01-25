@@ -13,6 +13,9 @@ from typing import Dict, List, Any
 from ..logger_helper import get_tool_logger
 from ...config.tools_config import get_repo_map_config
 
+# 工具模块 logger（延迟初始化）
+_logger = get_tool_logger(__name__)
+
 def _get_cache_key(workspace_root: Path) -> str:
     """生成缓存键（基于工作区路径）。"""
     return hashlib.md5(str(workspace_root.resolve()).encode()).hexdigest()
