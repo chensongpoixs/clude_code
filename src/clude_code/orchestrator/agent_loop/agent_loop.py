@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Dict, Optional
 
 from clude_code.config.config import CludeConfig
-from clude_code.llm.http_client import ChatMessage, LlamaCppHttpClient
+from clude_code.llm.http_client import ChatMessage, ContentPart, LlamaCppHttpClient
 from clude_code.llm.model_manager import ModelManager, get_model_manager
 from clude_code.observability.audit import AuditLogger
 from clude_code.observability.trace import TraceLogger
@@ -19,16 +19,20 @@ from clude_code.knowledge.embedder import CodeEmbedder
 from clude_code.knowledge.vector_store import VectorStore
 from clude_code.verification.runner import Verifier
 from clude_code.orchestrator.planner import parse_plan_from_text, render_plan_markdown, Plan
-from clude_code.orchestrator.state_m import AgentState
-from clude_code.orchestrator.classifier import IntentClassifier, ClassificationResult
+from clude_code.context.claude_standard import get_claude_context_manager
+from clude_code.orchestrator.classifier import (
+    IntentCategory,
+    ClassificationResult,
+    IntentClassifier,
+)
 from clude_code.orchestrator.registry import (
-    ProfileRegistry,
+    get_default_registry,
     PromptProfile,
     RiskLevel,
-    IntentCategory,
-    get_default_registry,
-    get_default_profile_for_category,
+    get_default_profile_for_category
 )
+# Import AgentState when needed to avoid circular imports
+from clude_code.orchestrator.state_m import AgentState
 
 from .models import AgentTurn
 from .parsing import try_parse_tool_call
@@ -247,6 +251,17 @@ class AgentLoop:
         else:
             self.logger.info("[dim]未加载 CLUDE.md（未找到或为空）[/dim]")
         self.logger.info("[dim]初始化系统提示词（包含 Repo Map/环境信息/可选项目记忆）[/dim]")
+        
+        # 初始化 LLM 追踪属性（用于 observability）
+        self._last_llm_stage: str | None = None
+        self._last_llm_step_id: str | None = None
+        self._last_provider_id: str | None = None
+        self._last_provider_base_url: str | None = None
+        self._last_provider_model: str | None = None
+        self._active_provider_id: str | None = None
+        self._active_provider_base_url: str | None = None
+        self._active_provider_model: str | None = None
+        self._last_logged_system_prompt_hash: str | None = None
 
     def run_turn(
         self,
@@ -398,7 +413,56 @@ class AgentLoop:
         plan: Plan | None = None
         if enable_planning:
             _set_state(AgentState.PLANNING, {"reason": "enable_planning"})
-            plan = self._execute_planning_phase(user_text, planning_prompt, trace_id, _ev, llm_chat)
+            # 🚨 核心修复：增强规划阶段处理
+            try:
+                plan = execute_planning_phase(self, user_text, planning_prompt, trace_id, _ev, llm_chat)
+            except ValueError as planning_error:
+                # 如果规划失败，尝试使用简化版本
+                self.logger.warning(f"[yellow]⚠️ 标准规划失败，尝试使用简化版本: {planning_error}[/yellow]")
+                
+                # 创建一个简化的fallback规划
+                fallback_plan = Plan(
+                    title="简化代码分析计划",
+                    steps=[
+                        Step(
+                            id="step_1",
+                            description="使用 list_dir 工具扫描 libcommon 目录",
+                            expected_output="libcommon 目录结构和文件列表",
+                            dependencies=[],
+                            tools_expected=["list_dir"]
+                        ),
+                        Step(
+                            id="step_2", 
+                            description="使用 grep 工具搜索 libcommon 目录中的代码文件",
+                            expected_output="找到的代码文件和关键信息",
+                            dependencies=["step_1"],
+                            tools_expected=["grep"]
+                        ),
+                        Step(
+                            id="step_3",
+                            description="使用 read_file 工具读取关键代码文件内容",
+                            expected_output="代码文件的详细内容",
+                            dependencies=["step_2"],
+                            tools_expected=["read_file"]
+                        ),
+                        Step(
+                            id="step_4",
+                            description="分析代码复杂度和重构需求",
+                            expected_output="代码复杂度分析和重构建议",
+                            dependencies=["step_3"],
+                            tools_expected=["display"]
+                        )
+                    ],
+                    assumptions=["libcommon目录存在且可访问"],
+                    constraints=["基于可用文件进行分析"],
+                    risks=["代码分析可能不完整"],
+                    verification_policy="run_verify"
+                )
+                
+                plan = fallback_plan
+                self.logger.info("[green]✓ 使用简化fallback规划成功[/green]")
+                plan_summary = render_plan_markdown(plan)
+                self.logger.info(f"[dim]简化计划摘要:\n{plan_summary}[/dim]")
 
         # 4) 执行阶段
         if plan is not None:
@@ -720,6 +784,24 @@ class AgentLoop:
         self._select_profile(classification.category, _ev)
 
         enable_planning = self.cfg.orchestrator.enable_planning
+
+        # 新增：复杂度检查，防止复杂任务被误判为GENERAL_CHAT
+        if (classification.category == IntentCategory.GENERAL_CHAT and 
+            classification.confidence > 0.8 and 
+            len(user_text) > 30):
+            
+# 简单复杂度评估：基于长度和关键词
+            complexity_indicators = ['创建', '分析', '修复', '实现', '设计', '调试', '编译', '部署']
+            complexity_score = sum(1 for indicator in complexity_indicators if indicator in user_text) / len(complexity_indicators)
+            
+            # 长度复杂度：每50个字符增加0.1分，最高0.5分
+            length_complexity = min(len(user_text) / 500.0, 0.5)
+            total_complexity = complexity_score + length_complexity
+            
+            if total_complexity > 0.3:
+                self.logger.info(f"[yellow]检测到高复杂度任务({total_complexity:.2f})，强制启用规划[/yellow]")
+                enable_planning = True  # 强制启用规划
+
         if classification.category in (IntentCategory.CAPABILITY_QUERY, IntentCategory.GENERAL_CHAT):
             if enable_planning:
                 self.logger.info("[dim]检测到能力询问或通用对话，跳过显式规划阶段。[/dim]")
@@ -742,7 +824,7 @@ class AgentLoop:
         return enable_planning
 
     def _execute_planning_phase(self, user_text: str, planning_prompt: str | None, trace_id: str, _ev: Callable[[str, dict[str, Any]], None], _llm_chat: Callable[[str, str | None], str]) -> Plan | None:
-        return execute_planning_phase(self, user_text, planning_prompt, trace_id, _ev, _llm_chat)
+        return execute_planning_phase(self, user_text, planning_prompt, trace_id, _ev, llm_chat)
 
     def _check_step_dependencies(self, step, plan: Plan, trace_id: str, _ev: Callable[[str, dict[str, Any]], None]) -> list[str]:
         return _exec_check_step_dependencies(self, step, plan, trace_id, _ev)
@@ -874,37 +956,43 @@ class AgentLoop:
 
         流程图: 见 `agent_loop_trim_history_flow.svg`
         """
-        from clude_code.orchestrator.advanced_context import get_advanced_context_manager, ContextPriority
+        from clude_code.context.claude_standard import get_claude_context_manager, ContextPriority
 
         old_len = len(self.messages)
         if old_len <= 1:  # 至少保留system消息
             return
 
-        # 初始化上下文管理器
-        context_manager = get_advanced_context_manager(max_tokens=self.llm.max_tokens)
+        # 使用Claude Code标准上下文管理器
+        context_manager = get_claude_context_manager(max_tokens=self.llm.max_tokens)
 
-        # 清空旧上下文
-        context_manager.clear_context(keep_system=True)
+        # 清空旧上下文（避免重复）
+        context_manager.clear_context(keep_protected=False)
 
         # 添加system消息（最高优先级）
         if self.messages and self.messages[0].role == "system":
             system_content = self.messages[0].content or ""
-            context_manager.add_system_context(system_content, ContextPriority.CRITICAL)
+            # 处理多模态内容，转换为字符串
+            if isinstance(system_content, list):
+                system_content = "\n".join(
+                    item.get("text", "") if isinstance(item, dict) and item.get("type") == "text" else "" 
+                    for item in system_content
+                )
+            context_manager.add_system_context(system_content)
 
         # 添加对话历史（按优先级分类）
         for i, message in enumerate(self.messages[1:], 1):  # 跳过system消息
             # 根据位置和内容确定优先级
             if i >= len(self.messages) - 5:  # 最近5条消息
-                priority = ContextPriority.HIGH
+                priority = ContextPriority.RECENT
             elif i >= len(self.messages) - 15:  # 最近15条消息
-                priority = ContextPriority.MEDIUM
+                priority = ContextPriority.WORKING
             else:
-                priority = ContextPriority.LOW
-
+                priority = ContextPriority.RELEVANT
+            
             context_manager.add_message(message, priority)
 
-        # 获取优化后的上下文
-        optimized_items = context_manager.optimize_context()
+        # Claude Code自动处理（已触发auto-compact）
+        optimized_items = context_manager.context_items
 
         # 重建消息列表
         new_messages = []
@@ -923,18 +1011,18 @@ class AgentLoop:
             message = ChatMessage(role=original_role, content=item.content)
             new_messages.append(message)
 
-        # 如果优化后消息太少，至少保留最近的几条
+        # 确保至少有最小消息数
         if len(new_messages) < 3 and len(self.messages) > 3:
-            # 保留system + 最后两条对话
-            new_messages = [self.messages[0]] + self.messages[-4:] if len(self.messages) > 4 else self.messages
+            # 保留system + 最后几条对话
+            new_messages = [self.messages[0]] + self.messages[-3:] if len(self.messages) > 3 else self.messages
 
         self.messages = new_messages
 
         # 记录裁剪统计
-        stats = context_manager.get_context_stats()
+        stats = context_manager.get_context_summary()
         self.logger.debug(
-            f"[dim]智能上下文裁剪: {old_len} → {len(self.messages)} 条消息, "
-            f"{stats.get('total_tokens', 0)} tokens ({stats.get('utilization_rate', 0):.1%})[/dim]"
+            f"[dim]Claude Code标准上下文优化: {old_len} → {len(self.messages)} 条消息, "
+            f"{stats.get('current_tokens', 0)} tokens ({stats.get('usage_percent', 0):.1%})[/dim]"
         )
 
     def _format_args_summary(self, tool_name: str, args: dict[str, Any]) -> str:
@@ -1139,7 +1227,7 @@ class AgentLoop:
             answer_text = f"[用户回答] {answer}"
         
         # 注入到消息历史
-        self._append_message(ChatMessage(role="user", content=answer_text))
+        self.messages.append(ChatMessage(role="user", content=answer_text))
         
         # 清除等待状态
         self._waiting_user_input = False

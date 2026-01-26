@@ -1,0 +1,71 @@
+# 🚀 Clude Code - 极限性能配置
+# 专为极限性能测试优化
+
+# LLM 配置 - 超极限优化
+llm:
+  provider: llama_cpp_http
+  base_url: http://127.0.0.1:8899
+  api_mode: openai_compat
+  model: gemma-3-12b-it-Q4_K_M
+  temperature: 0.0        # 超极限：零温度，最快响应
+  max_tokens: 5120        # 超极限：最小token数量
+  timeout_s: 30           # 超极限：极速超时控制
+  api_key: ""
+
+# 策略配置 - 极限优化
+policy:
+  allow_network: false
+  confirm_write: false
+  confirm_exec: true
+  allowed_tools: []
+  disallowed_tools: []
+
+# 资源限制 - 极限优化
+limits:
+  max_output_bytes: 25000    # 超极限：最小输出限制
+  max_file_read_bytes: 25000  # 超极限：最小文件读取限制
+
+# 编排器配置 - 超极限优化
+orchestrator:
+  enabled: true
+  enable_explicit_planning: false  # 超极限：关闭显式规划
+  max_plan_steps: 2              # 超极限：最少步骤数
+  max_step_tool_calls: 1         # 超极限：单工具调用
+  max_replans: 1                 # 超极限：最小重规划
+  planning_retry: 0              # 超极限：无重试
+
+# 日志配置 - 性能优化
+logging:
+  log_to_console: false   # 极限：关闭控制台日志
+  level: ERROR            # 极限：只记录错误
+  file_path: .clude/logs/clude.log
+  max_bytes: 5242880     # 极限：小日志文件
+  backup_count: 2
+  log_format: "[%(asctime)s] %(levelname)s %(message)s"
+  date_format: "%H:%M:%S"
+
+# 工具配置 - 极限优化
+tools:
+  file:
+    enabled: true
+    log_to_file: false   # 极限：关闭工具日志
+  directory:
+    enabled: true
+    log_to_file: false
+  command:
+    enabled: true
+    timeout_s: 20       # 极限：进一步快速超时
+    log_to_file: false
+  search:
+    enabled: true
+    timeout_s: 15       # 极限：极速超时
+    max_results: 50      # 极限：更少结果
+    log_to_file: false
+  weather:
+    enabled: true
+    api_key: "1959a5732178d790d56e0d313d1fe2e6"
+    default_units: metric
+    default_lang: zh_cn
+    timeout_s: 15        # 极限：最快超时
+    cache_ttl_s: 600     # 极限：长缓存
+    log_to_file: false

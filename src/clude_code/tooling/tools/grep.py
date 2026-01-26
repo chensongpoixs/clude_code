@@ -132,7 +132,7 @@ def _get_python_max_file_bytes(cfg: Any) -> int:
 - max_hits: 最大返回命中数
 返回： ToolResult，包含匹配结果列表
 """
-def grep(*, workspace_root: Path, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
+def grep(*, workspace_root: Path, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 100) -> ToolResult:
 
     # 检查工具是否启用
     config = get_search_config()

@@ -1,0 +1,71 @@
+# Clude Code 配置文件 - 测试环境配置
+# 已修改以允许文件创建，用于测试
+
+# LLM 配置
+llm:
+  provider: llama_cpp_http    # 默认使用本地 llama.cpp 服务
+  base_url: http://127.0.0.1:8899
+  api_mode: openai_compat     # openai_compat（推荐）/ completion（llama.cpp 原生）
+  model: gemma-3-12b-it-Q4_K_M
+  temperature: 0.0    # 优化：最低温度，最快响应
+  max_tokens: 40960   # 优化：大幅减少token数量
+  timeout_s: 90        # 优化：更快超时控制
+  api_key: ""                 # API 密钥（OpenAI/Azure 等需要认证的服务填写）
+
+# 策略配置 - 修复：允许文件创建用于测试
+policy:
+  allow_network: false
+  confirm_write: false      # 修复：禁用写入确认，允许自动创建文件
+  confirm_exec: true
+  allowed_tools: []      # 空=不限制；否则仅允许列出的工具
+  disallowed_tools: []   # 禁止的工具名单
+
+# 编排器配置 - 极限性能优化
+orchestrator:
+  enabled: true
+  enable_explicit_planning: true
+  max_plan_steps: 8    # 极限优化：减少计划步骤数
+  max_step_tool_calls: 3  # 极限优化：最大化速度
+  max_replans: 3        # 极限优化：平衡速度和可靠性
+  planning_retry: 1
+
+# 资源限制 - 极限性能优化
+limits:
+  max_output_bytes: 250000    # 极限优化：进一步减少输出限制
+  max_file_read_bytes: 250000  # 极限优化：进一步减少文件读取限制
+
+# 日志配置
+logging:
+  log_to_console: true
+  level: DEBUG             # 调试模式，记录详细信息
+  file_path: .clude/logs/clude.log
+  max_bytes: 10485760
+  backup_count: 5
+  log_format: "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+# 工具配置
+tools:
+  file:
+    enabled: true
+    log_to_file: true
+  directory:
+    enabled: true
+    log_to_file: true
+  command:
+    enabled: true
+    timeout_s: 60  # 修复：增加命令执行超时时间
+    log_to_file: true
+  search:
+    enabled: true
+    timeout_s: 60  # 修复：增加搜索超时时间
+    max_results: 1000
+    log_to_file: true
+  weather:
+    enabled: true
+    api_key: "1959a5732178d790d56e0d313d1fe2e6"
+    default_units: metric
+    default_lang: zh_cn
+    timeout_s: 20  # 修复：增加超时时间
+    cache_ttl_s: 300
+    log_to_file: true

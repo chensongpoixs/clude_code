@@ -68,11 +68,11 @@ if tool_call is None:
 
 ### 场景1：LLM 完成任务但不说"完成"
 ```
-LLM: {"tool": "list_dir", "args": {"path": ".", "limit": 3}}
+LLM: {"tool": "list_dir", "args": {"path": ".", "max_items": 3}}
 系统: [执行工具，返回结果]
 LLM: 我已经成功列出了目录内容。
 系统: [无法识别为控制信号或工具调用，返回错误提示]
-LLM: {"tool": "list_dir", "args": {"path": ".", "limit": 3}}  # 重复调用
+LLM: {"tool": "list_dir", "args": {"path": ".", "max_items": 3}}  # 重复调用
 系统: [再次执行工具]
 ```
 

@@ -102,7 +102,7 @@ def simulate_fixed_execution_flow():
         {
             "name": "场景1：LLM完成但不输出控制信号",
             "steps": [
-                ("工具调用", '{"tool": "list_dir", "args": {"path": ".", "limit": 3}}'),
+                ("工具调用", '{"tool": "list_dir", "args": {"path": ".", "max_items": 3}}'),
                 ("自然语言完成", "我已经成功列出了目录内容"),
                 ("自动推断", "→ 检测到完成声明，自动完成步骤"),
             ]
@@ -110,7 +110,7 @@ def simulate_fixed_execution_flow():
         {
             "name": "场景2：控制信号格式错误", 
             "steps": [
-                ("工具调用", '{"tool": "list_dir", "args": {"path": ".", "limit": 3}}'),
+                ("工具调用", '{"tool": "list_dir", "args": {"path": ".", "max_items": 3}}'),
                 ("错误格式", '{control: step_done}'),
                 ("强制重试", "→ 返回强制控制信号提示"),
                 ("正确格式", '{"control":"step_done"}'),

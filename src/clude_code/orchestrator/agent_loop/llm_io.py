@@ -138,7 +138,7 @@ def normalize_messages_for_llama(
             # 连续相同角色，合并内容
             merged_content = _merge_message_content(normalized[-1].content, msg.content)
             normalized[-1] = ChatMessage(
-                role=last_role,
+                role=msg.role,  # 使用当前消息的角色，确保类型正确
                 content=merged_content
             )
         else:
@@ -260,7 +260,7 @@ def llm_chat(
     # 0) 估算 prompt tokens（轻量，不依赖服务端 usage）
     prompt_tokens_est = 0
     try:
-        prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
+        prompt_tokens_est = sum(estimate_tokens(str(m.content)) for m in (loop.messages or []))
     except Exception as ex:
         # P1-1: 异常写入 file-only 日志，便于排查
         loop.file_only_logger.warning(f"估算 prompt tokens 失败: {ex}", exc_info=True)
@@ -284,7 +284,7 @@ def llm_chat(
         # 截断后重新规范化，确保消息角色严格交替
         normalize_messages_for_llama(loop, stage, step_id=step_id, _ev=_ev)
         # 重新估算
-        prompt_tokens_est = sum(estimate_tokens(m.content) for m in (loop.messages or []))
+        prompt_tokens_est = sum(estimate_tokens(str(m.content)) for m in (loop.messages or []))
         loop.logger.warning(f"[yellow]紧急截断后: {len(loop.messages)} 条消息, {prompt_tokens_est} tokens[/yellow]")
 
     # 1) 记录/打印请求参数（model 等）与请求数据摘要

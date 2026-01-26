@@ -67,14 +67,17 @@ class IntentClassifier:
         # 编码任务类
         (IntentCategory.CODING_TASK, {
             "写代码", "修改代码", "重构", "优化代码", "实现", "添加功能",
-            "fix bug", "修复", "implement", "create function", "add feature"
-        }, 0.85),
+            "分析代码结构", "生成报告", "模块设计", "架构重构", "接口开发",
+            "fix bug", "修复", "implement", "create function", "add feature",
+            "数据库设计", "性能优化", "安全加固", "单元测试", "集成测试",
+            "创建文件", "创建", "文件", "file", "write", "程序", "代码",
+        }, 0.92),  # 提高置信度从0.85到0.92
         
         # 错误诊断类
         (IntentCategory.ERROR_DIAGNOSIS, {
             "报错", "error", "bug", "调试", "debug", "失败", "异常",
             "traceback", "exception", "为什么不工作", "doesn't work"
-        }, 0.85),
+        }, 0.92),  # 提高置信度从0.85到0.92
         
         # 仓库分析类
         (IntentCategory.REPO_ANALYSIS, {
@@ -86,7 +89,7 @@ class IntentClassifier:
         (IntentCategory.DOCUMENTATION_TASK, {
             "写文档", "生成文档", "添加注释", "readme", "docstring",
             "document", "写注释"
-        }, 0.85),
+        }, 0.92),  # 提高置信度从0.85到0.92
         
         # 技术咨询类
         (IntentCategory.TECHNICAL_CONSULTING, {
@@ -104,11 +107,11 @@ class IntentClassifier:
         (IntentCategory.SECURITY_CONSULTING, {
             "安全", "漏洞", "security", "vulnerability", "xss", "sql注入",
             "加密", "认证"
-        }, 0.85),
+        }, 0.92),  # 提高置信度从0.85到0.92
     ]
     
     # P1-4: 关键词分类置信度阈值（低于此值走 LLM）
-    _KEYWORD_CONFIDENCE_THRESHOLD = 0.90
+    _KEYWORD_CONFIDENCE_THRESHOLD = 0.88  # 降低阈值，让更多任务走LLM精确分类
 
     def __init__(self, llm_client: Any, file_only_logger: Any = None):
         self.llm = llm_client
@@ -268,3 +271,41 @@ class IntentClassifier:
         self._last_category = IntentCategory.UNCERTAIN
         return ClassificationResult(category=IntentCategory.UNCERTAIN, reason="Fallback to default")
 
+
+    def evaluate_task_complexity(self, user_text: str) -> float:
+        """
+        评估任务复杂度，返回0-1之间的值
+        考虑因素：关键词数量、步骤数、涉及的技术栈等
+        """
+        complexity_score = 0.0
+        text_lower = user_text.lower()
+        
+        # 1. 复杂任务关键词数量得分
+        complex_keywords = {
+            "分析", "设计", "实现", "开发", "重构", "优化", "集成", "部署",
+            "测试", "调试", "修复", "创建", "生成", "构建", "配置"
+        }
+        complex_found = sum(1 for kw in complex_keywords if kw in text_lower)
+        complexity_score += min(complex_found * 0.15, 0.4)
+        
+        # 2. 多步骤模式得分
+        import re
+        step_patterns = [
+            r"分析.*并.*", r"设计.*实现", r"重构.*优化", 
+            r"开发.*测试", r"创建.*部署", r"集成.*验证"
+        ]
+        for pattern in step_patterns:
+            if re.search(pattern, text_lower):
+                complexity_score += 0.2
+                break
+        
+        # 3. 技术栈关键词得分
+        tech_keywords = ["数据库", "API", "微服务", "Docker", "CI/CD", "测试", "部署", "监控"]
+        tech_found = sum(1 for kw in tech_keywords if kw in text_lower)
+        complexity_score += min(tech_found * 0.1, 0.3)
+        
+        # 4. 长度得分（长文本通常更复杂）
+        if len(user_text) > 50:
+            complexity_score += 0.1
+        
+        return min(complexity_score, 1.0)

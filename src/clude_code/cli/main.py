@@ -113,7 +113,7 @@ def chat(
         fmt = (output_format or "text").strip().lower()
         if fmt not in {"text", "json"}:
             raise typer.BadParameter("--output-format 必须为 text 或 json")
-        handler.run_print(prompt, debug=debug, output_format=fmt, yes=yes)
+        handler.run_print(prompt, debug=True, output_format=fmt, yes=yes)
         return
 
     # 交互模式：忽略 prompt（如需“先执行一次再进入 REPL”，后续可扩展）

@@ -56,13 +56,13 @@ def test_step_execution_flow():
     # Simulate LLM responses for different iterations
     llm_responses = [
         # First iteration - tool call
-        '{"tool": "list_dir", "args": {"path": ".", "limit": 3}}',
+        '{"tool": "list_dir", "args": {"path": ".", "max_items": 3}}',
         
         # Second iteration - should be step_done but might be problematic
         'I have listed the directory contents successfully.',
         
         # Third iteration - another tool call (this would be the problem)
-        '{"tool": "list_dir", "args": {"path": ".", "limit": 3}}',
+        '{"tool": "list_dir", "args": {"path": ".", "max_items": 3}}',
         
         # Correct step_done response
         '{"control":"step_done"}',

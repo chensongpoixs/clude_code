@@ -3,7 +3,7 @@
 参考Claude Code，实现智能的token预算管理和上下文优化
 """
 import tiktoken
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -11,12 +11,22 @@ from clude_code.llm.http_client import ChatMessage
 
 
 class ContextPriority(Enum):
-    """上下文优先级"""
-    CRITICAL = 5  # 系统提示词、核心指令
-    HIGH = 4      # 当前任务相关信息
-    MEDIUM = 3    # 最近的对话历史
-    LOW = 2       # 旧的历史信息
-    TRIVIAL = 1   # 可以丢弃的信息
+    """上下文优先级 (参考OpenAI、Claude等业界标准)"""
+    CRITICAL = 5  # 系统提示词、核心指令 (不可丢弃)
+    HIGH = 4      # 当前任务相关信息 (优先保留)
+    MEDIUM = 3    # 最近的对话历史 (可压缩)
+    LOW = 2       # 旧的历史信息 (可丢弃)
+    TRIVIAL = 1   # 可以丢弃的信息 (最先丢弃)
+    
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
+    
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        return NotImplemented
 
 
 @dataclass
@@ -70,25 +80,41 @@ class AdvancedContextManager:
 
         # 压缩策略
         self.compression_enabled = True
-        self.compression_threshold = 0.8  # 当使用率超过80%时开始压缩
+        self.compression_threshold = 0.85  # 当使用率超过85%时开始压缩（减少过度压缩）  # 当使用率超过80%时开始压缩
 
-    def add_message(self, message: ChatMessage, priority: ContextPriority = ContextPriority.MEDIUM) -> None:
+    def add_message(self, message: Union[ChatMessage, str], priority: ContextPriority = ContextPriority.MEDIUM) -> None:
         """添加消息到上下文"""
-        category = message.role
-        content = message.content or ""
+        if isinstance(message, str):
+            # 处理字符串消息
+            category = "user" if not message.startswith("System:") else "system"
+            content = message
+            original_role = category
+        else:
+            # 处理ChatMessage对象
+            category = message.role
+            content = message.content or ""
+            original_role = message.role
 
-        # 处理工具调用结果
-        if hasattr(message, 'tool_calls') and message.tool_calls:
-            category = "tool_call"
-            # 简化工具调用显示
-            tool_info = f"调用工具: {len(message.tool_calls)}个工具"
-            content = f"{tool_info}\n{self._summarize_tool_calls(message.tool_calls)}"
+            # ChatMessage没有tool_calls属性，移除相关检查
+        
+        # 处理多模态内容，统一转换为字符串
+        if isinstance(content, list):
+            # 提取文本内容，忽略图片等其他媒体
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+            content = "\n".join(text_parts)
+        elif not isinstance(content, str):
+            content = str(content)
 
         context_item = ContextItem(
             content=content,
             priority=priority,
             category=category,
-            metadata={"original_role": message.role}
+            metadata={"original_role": original_role}
         )
 
         self.context_items.append(context_item)
@@ -158,8 +184,32 @@ class AdvancedContextManager:
         remaining_tokens = self.window.available_tokens - used_tokens
 
         if remaining_tokens <= 0:
-            # 空间不足，只保留最关键的内容
-            return optimized_items[:1] if optimized_items else []
+            # 空间不足，强制压缩最关键的内容
+            if not optimized_items:
+                return []
+            
+            # 按优先级排序，确保最重要的内容保留
+            optimized_items.sort(key=lambda x: (x.priority.value, x.created_at), reverse=True)
+            
+            # 尝试逐个强制压缩直到适应token预算
+            final_items = []
+            used_tokens = 0
+            
+            for item in optimized_items:
+                if used_tokens >= self.window.available_tokens:
+                    break
+                    
+                # 如果单个项目就超限，强制压缩
+                if item.token_count > self.window.available_tokens:
+                    compressed_item = self._force_compress_item(item, self.window.available_tokens - used_tokens)
+                    if compressed_item:
+                        final_items.append(compressed_item)
+                        used_tokens += compressed_item.token_count
+                else:
+                    final_items.append(item)
+                    used_tokens += item.token_count
+            
+            return final_items
 
         # 3. 选择性保留中等优先级内容
         medium_items = [item for item in self.context_items
@@ -209,6 +259,72 @@ class AdvancedContextManager:
                 priority=max(item.priority, ContextPriority.LOW),  # 降低优先级
                 category="tool_result_compressed",
                 metadata={**item.metadata, "compressed": True}
+            )
+            compressed_item.calculate_tokens(self.encoding_name)
+            return compressed_item
+
+        return None  # 无法压缩
+
+    def _force_compress_item(self, item: ContextItem, max_tokens: int) -> Optional[ContextItem]:
+        """强制压缩单个上下文项，确保不超过token限制"""
+        if max_tokens <= 0:
+            return None
+            
+        # 对于系统消息，保留开头部分
+        if item.category == "system":
+            truncated = self._truncate_content(item.content, max_tokens)
+            if truncated:
+                compressed_item = ContextItem(
+                    content=f"[系统消息截断] {truncated}",
+                    priority=item.priority,
+                    category="system_compressed",
+                    metadata={**item.metadata, "compressed": True, "original_length": item.token_count}
+                )
+                compressed_item.calculate_tokens(self.encoding_name)
+                return compressed_item
+        
+        # 对于对话内容，更激进地截断
+        elif item.category in ("assistant", "user"):
+            # 保留更少的内容，确保不超过限制
+            truncated = self._truncate_content(item.content, max(10, max_tokens - 20))
+            if truncated:
+                compressed_item = ContextItem(
+                    content=f"[强制压缩] {truncated}",
+                    priority=item.priority,
+                    category=f"{item.category}_force_compressed",
+                    metadata={**item.metadata, "compressed": True, "original_length": item.token_count}
+                )
+                compressed_item.calculate_tokens(self.encoding_name)
+                return compressed_item
+        
+        # 对于工具结果，完全简化
+        elif item.category == "tool_result":
+            tool_name = item.metadata.get("tool_name", "unknown")
+            compressed_content = f"[工具结果] {tool_name}: 已执行"
+            compressed_item = ContextItem(
+                content=compressed_content,
+                priority=ContextPriority.LOW,  # 降低优先级
+                category="tool_result_minimal",
+                metadata={**item.metadata, "compressed": True, "original_length": item.token_count}
+            )
+            compressed_item.calculate_tokens(self.encoding_name)
+            return compressed_item
+        
+        # 通用最小化压缩
+        else:
+            category_desc = {
+                "tool_call": "工具调用",
+                "tool_result_compressed": "工具结果",
+                "assistant_compressed": "助手回复",
+                "user_compressed": "用户输入"
+            }.get(item.category, item.category)
+            
+            compressed_content = f"[{category_desc}] 已处理"
+            compressed_item = ContextItem(
+                content=compressed_content,
+                priority=ContextPriority.LOW,
+                category="minimal",
+                metadata={**item.metadata, "compressed": True, "original_length": item.token_count}
             )
             compressed_item.calculate_tokens(self.encoding_name)
             return compressed_item

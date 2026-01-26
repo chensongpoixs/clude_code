@@ -180,6 +180,32 @@ def execute_single_step_iteration(
         loop.logger.warning(f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description}")
         return "REPLAN", False, False
 
+    # P0-2 修复：优先解析控制信号，防止被误判为工具调用
+    ctrl = try_parse_control_envelope(assistant)
+    if ctrl is not None:
+        if ctrl.control == "step_done":
+            loop.logger.info(f"[green]✓ 检测到控制信号：步骤完成[/green] [步骤] {step.id}")
+            loop.messages.append(ChatMessage(role="assistant", content=assistant))
+            loop._trim_history(max_messages=30)
+            step.status = "done"
+            _ev("plan_step_status_changed", {"step_id": step.id, "status": "done"})
+            loop.audit.write(trace_id=trace_id, event="plan_step_done", data={"step_id": step.id})
+            _ev("plan_step_done", {"step_id": step.id})
+            loop.logger.info(f"[green]✓ 步骤完成[/green] [步骤] {step.id} [描述] {step.description}")
+            _ev("control_signal", {"control": "step_done", "step_id": step.id})
+            return "STEP_DONE", False, False
+        elif ctrl.control == "replan":
+            loop.logger.warning(f"[yellow]⚠ 检测到控制信号：需要重规划[/yellow] [步骤] {step.id} [原因] {ctrl.reason}")
+            loop.messages.append(ChatMessage(role="assistant", content=assistant))
+            loop._trim_history(max_messages=30)
+            step.status = "failed"
+            _ev("plan_step_status_changed", {"step_id": step.id, "status": "failed"})
+            loop.audit.write(trace_id=trace_id, event="plan_step_replan_requested", data={"step_id": step.id})
+            _ev("plan_step_replan_requested", {"step_id": step.id})
+            loop.logger.warning(f"[yellow]⚠ 步骤请求重规划[/yellow] [步骤] {step.id} [描述] {step.description}")
+            _ev("control_signal", {"control": "replan", "step_id": step.id, "reason": ctrl.reason})
+            return "REPLAN", False, False
+
     tool_call = _try_parse_tool_call(assistant)
     if tool_call is None:
         loop.messages.append(ChatMessage(role="assistant", content=assistant))

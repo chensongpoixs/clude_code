@@ -26,7 +26,9 @@ from __future__ import annotations
 """
 
 import json
+import re
 from typing import Any, Dict, List, Optional, Set, Union, Literal
+
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -219,6 +221,34 @@ def parse_plan_patch_from_text(text: str) -> PlanPatch:
     last_err: str | None = None
     for c in candidates:
         try:
+            obj = json.loads(c)
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
+            obj = json.loads(c)
+            if not isinstance(obj, dict):
+                continue
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
+            obj = json.loads(c)
+            if not isinstance(obj, dict):
+                continue
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
+            obj = json.loads(c)
+            if not isinstance(obj, dict):
+                continue
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
+            obj = json.loads(c)
+            if not isinstance(obj, dict):
+                continue
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
+            obj = json.loads(c)
+            if not isinstance(obj, dict):
+                continue
+            # 修复常见的JSON格式问题
+            c = fix_common_json_issues(c)
             obj = json.loads(c)
             if not isinstance(obj, dict):
                 continue
@@ -424,7 +454,14 @@ def _extract_json_candidates(text: Optional[Union[str, bytes]]) -> List[str]:
         text = ""
     elif not isinstance(text, str):
         raise TypeError(f"_extract_json_candidates Expected str, got {type(text).__name__}")
+    # 🚨 修复：检测控制信号，避免误解析
     t = (text or "").strip()
+    
+    # 检查是否是控制信号而非Plan JSON
+    if '"control":"step_done"' in t or '"control":"replan"' in t:
+        # 这是一个控制信号，不是JSON Plan，返回空列表
+        return []
+    
     cands: List[str] = []
     if t.startswith("{") and t.endswith("}"):
         cands.append(t)
@@ -456,20 +493,29 @@ def parse_plan_from_text(text: str) -> Plan:
     从 LLM 文本中解析 Plan（完整计划）。
     
     解析策略：
-    1. 提取 JSON 候选（支持 fenced code block）
-    2. 尝试 Pydantic 校验
-    3. 额外校验步骤 ID 唯一性
-    4. 失败抛 ValueError（包含原因摘要），上层可触发重试或降级
+    1. 🚨 修复：检测控制信号，避免错误解析
+    2. 提取 JSON 候选（支持 fenced code block）
+    3. 尝试 Pydantic 校验
+    4. 额外校验步骤 ID 唯一性
+    5. 失败抛 ValueError（包含原因摘要），上层可触发重试或降级
     
     Args:
         text: LLM 输出的原始文本
-        
+    
     Returns:
         Plan: 解析成功时返回完整计划
-        
+    
     Raises:
         ValueError: 解析失败时抛出，包含最后一个错误信息
     """
+    # 🚨 修复：检测控制信号，避免错误解析
+    text_stripped = text.strip()
+    
+    # 检查是否是控制信号而不是Plan JSON
+    if ('"control":"step_done"' in text_stripped or 
+        '"control":"replan"' in text_stripped):
+        raise ValueError("模型输出的是控制信号而非Plan JSON，需要重新引导模型")
+    
     candidates = _extract_json_candidates(text)
     last_err: str | None = None
     for c in candidates:
@@ -508,3 +554,23 @@ def render_plan_markdown(plan: Plan) -> str:
     return "\n".join(lines)
 
 
+
+
+def fix_common_json_issues(json_str: str) -> str:
+    """
+    修复常见的JSON格式问题
+    """
+    # 1. 修复单引号问题
+    json_str = re.sub(r"'([^']*)'", r'"\1', json_str)
+    
+    # 2. 修复尾随逗号
+    json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+    
+    # 3. 修复未引用的键名
+    json_str = re.sub(r'(\w+)\s*:', r'"\1":', json_str)
+    
+    # 4. 移除注释
+    json_str = re.sub(r'//.*?\n', '\n', json_str)
+    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+    
+    return json_str

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from .types import ToolError, ToolResult
 from .workspace import resolve_in_workspace as _resolve_in_workspace
@@ -110,7 +111,7 @@ class LocalTools:
     返回： ToolResult，包含匹配结果列表
 
     """
-    def grep(self, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 200) -> ToolResult:
+    def grep(self, pattern: str, path: str = ".", language: str = "all", include_glob: str | None = None, ignore_case: bool = False, max_hits: int = 100) -> ToolResult:
         return _grep_impl(workspace_root=self.workspace_root, pattern=pattern, path=path, language=language, include_glob=include_glob, ignore_case=ignore_case, max_hits=max_hits)
 
     def generate_repo_map(self) -> str:
@@ -128,10 +129,10 @@ class LocalTools:
     def ask_question(self, question: str, options: list[str] | None = None, multiple: bool = False, header: str | None = None) -> ToolResult:
         return _ask_question_impl(question=question, options=options, multiple=multiple, header=header)
 
-    def fetch_web_content(self, url: str, format: str = "markdown", timeout: int = 30, use_cache: bool = True, force_refresh: bool = False) -> ToolResult:
+    def fetch_web_content(self, url: str, format: Literal["markdown", "text"] = "markdown", timeout: int = 30, use_cache: bool = True, force_refresh: bool = False) -> ToolResult:
         return _fetch_web_content_impl(url=url, format=format, timeout=timeout, workspace_root=str(self.workspace_root), use_cache=use_cache, force_refresh=force_refresh)
 
-    def websearch(self, query: str, num_results: int = 8, livecrawl: str = "fallback", search_type: str = "auto", context_max_chars: int = 10000) -> ToolResult:
+    def websearch(self, query: str, num_results: int = 8, livecrawl: Literal["fallback", "preferred"] = "fallback", search_type: Literal["auto", "fast", "deep"] = "auto", context_max_chars: int = 10000) -> ToolResult:
         return _websearch_impl(query=query, num_results=num_results, livecrawl=livecrawl, search_type=search_type, context_max_chars=context_max_chars)
 
     def codesearch(self, query: str, tokens_num: int = 5000) -> ToolResult:
