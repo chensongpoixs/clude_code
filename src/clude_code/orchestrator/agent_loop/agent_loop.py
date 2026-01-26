@@ -229,7 +229,8 @@ class AgentLoop:
             self._repo_map = raw_repo_map
         
         self._env_info = f"操作系统: {platform.system()} ({platform.release()})\n当前绝对路径: {self.cfg.workspace_root}"
-        self._tools_section = render_tools_for_system_prompt(include_schema=False)
+        # 渲染工具列表部分（System Prompt 用） schema 可选 开启 更丰富的描述
+        self._tools_section = render_tools_for_system_prompt(include_schema=True)
 
         # Claude Code 对标：自动加载 CLUDE.md 作为项目记忆（只读、失败不阻塞）
         self._project_memory_text, project_memory_meta = load_project_memory(self.cfg.workspace_root)

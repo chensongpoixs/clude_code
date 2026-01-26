@@ -484,13 +484,13 @@ def log_llm_request_params_to_file(loop: "AgentLoop") -> None:
                 loop._last_logged_system_prompt_hash = sys_hash
                 lines.append("===== System Prompt 摘要（有变化）=====")
                 lines.append(f"[系统提示词长度: {sys_len} chars, hash: {sys_hash}]")
-                if sys_len > max_system_chars:
-                    # 截断显示：头部 + 尾部
-                    head = sys_content[:max_system_chars // 2]
-                    tail = sys_content[-(max_system_chars // 2):]
-                    lines.append(f"{head}\n...[省略 {sys_len - max_system_chars} chars]...\n{tail}")
-                else:
-                    lines.append(sys_content)
+                # if sys_len > max_system_chars:
+                #     # 截断显示：头部 + 尾部
+                #     head = sys_content[:max_system_chars // 2]
+                #     tail = sys_content[-(max_system_chars // 2):]
+                #     lines.append(f"{head}\n...[省略 {sys_len - max_system_chars} chars]...\n{tail}")
+                # else:
+                lines.append(sys_content)
             # 如果没变化，不输出系统提示词内容
     
     lines.append("===== 本轮发送给 LLM 的新增 user 文本 =====")

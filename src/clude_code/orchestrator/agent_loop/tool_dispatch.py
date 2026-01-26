@@ -319,16 +319,18 @@ def _spec_list_dir() -> ToolSpec:
     """ToolSpec：list_dir（只读）。"""
     return ToolSpec(
         name="list_dir",
-        summary="列出目录内容（只读）。",
+        summary="列出指定目录下的文件和子目录",
         description=(
             "用于查看某个目录下有哪些文件/子目录（List Directory）。\n"
+			"- 判断文件是否存在.\n"
             "- 适合：先 list_dir 再决定 read_file/grep/glob_file_search。\n"
             "- 注意：path 必须是工作区内的相对路径。\n"
             "- 参数说明：只支持 `path` 参数（相对路径），不支持 `max_depth` 等递归深度参数。\n"
-            "- 如需递归搜索文件，请使用 `glob_file_search` 工具。"
+            "- 如需递归搜索文件，请使用 `glob_file_search` 工具。\n"
+			"- 仅返回目录结构，不返回文件内容"
         ),
         args_schema=_obj_schema(
-            properties={"path": {"type": "string", "default": ".", "description": "相对工作区的目录路径"}},
+            properties={"path": {"type": "string", "default": ".", "description": "要列出的目录路径，. 表示当前工作目录"}},
             required=[],
         ),
         example_args={"path": "."},
@@ -346,11 +348,14 @@ def _spec_read_file() -> ToolSpec:
     """ToolSpec：read_file（只读，支持 offset/limit 分段）。"""
     return ToolSpec(
         name="read_file",
-        summary="读取文件内容（只读，支持 offset/limit 分段）。",
+        summary="读取文件的部分内容（只读，支持 offset/limit 分段）。",
         description=(
             "用于读取工作区内文件内容（Read File）。\n"
             "- 大文件建议用 offset/limit 分段读取，避免上下文刷屏。\n"
-            "- 如需只读取某个函数/类，请用 read_symbol 工具（更节省 token）。"
+            "- 如需只读取某个函数/类，请用 read_symbol 工具（更节省 token）。\n"
+			"典型场景： \n"
+			" - 查看 README、配置文件或大文件的局部内容\n"
+			" - 避免一次性加载过大的文件"
         ),
         args_schema=_obj_schema(
             properties={
@@ -375,12 +380,17 @@ def _spec_read_symbol() -> ToolSpec:
     """ToolSpec：read_symbol（按函数/类读取，跳过注释，节省 token）。"""
     return ToolSpec(
         name="read_symbol",
-        summary="按函数/类名读取代码（跳过注释，节省 token）。",
+        summary="读取代码文件中某个函数、类等的定义",
         description=(
             "用于只读取指定函数或类的定义（Read Symbol）。\n"
             "- 优势：相比 read_file 整个文件，可节省 90%+ 的 token。\n"
-            "- 支持语言：Python（AST 精确提取）、JS/TS/Go/Rust/C（正则匹配）。\n"
-            "- skip_docstring=true 跳过 docstring，skip_comments=true 跳过行注释。"
+            "- 支持语言：Python（AST 精确提取）、JS/TS/Go/Rust/C/CPP/Java（正则匹配）。\n"
+            "- skip_docstring=true 跳过 docstring，skip_comments=true 跳过行注释。\n"
+			"典型场景：\n"
+			"- 快速定位和分析某个函数或类的实现\n"
+			"- 用于重构或代码审查前的理解\n"
+			"注意事项：\n"
+			"- 依赖语言解析能力，符号必须存在"
         ),
         args_schema=_obj_schema(
             properties={
@@ -406,15 +416,17 @@ def _spec_glob_file_search() -> ToolSpec:
     """ToolSpec：glob_file_search（只读）。"""
     return ToolSpec(
         name="glob_file_search",
-        summary="按文件名模式查找文件（只读，支持 ** 递归）。",
+        summary="基于glob模式搜索文件",
         description=(
             "用于按文件名模式快速定位文件（Glob File Search）。\n"
             "- 适合：找某类文件（例如 **/*.md、**/*config*.py）。\n"
-            "- 注意：这是文件名匹配，不是内容搜索；内容搜索请用 grep。"
+            "- 注意：这是文件名匹配，不是内容搜索；内容搜索请用 grep。\n"
+			"典型场景：\n"
+			"- 查找测试文件、文档文件或特定命名规则的文件"
         ),
         args_schema=_obj_schema(
             properties={
-                "glob_pattern": {"type": "string", "description": "glob 模式，例如 **/*.md, **/*.py, **/*.cpp, **/*.c, **/*.h, **/*.cc, **/*.java, **/*.js, **/*.ts, **/*.html, **/*.css, **/*.json, **/*.xml"},
+                "glob_pattern": {"type": "string", "description": "glob 匹配模式，例如 **/*.md, **/*.py, **/*.cpp, **/*.c, **/*.h, **/*.cc, **/*.java, **/*.js, **/*.ts, **/*.html, **/*.css, **/*.json, **/*.xml"},
                 "target_directory": {"type": "string", "default": ".", "description": "搜索根目录（相对工作区）"},
             },
             required=["glob_pattern"],
@@ -436,7 +448,7 @@ ToolSpec：grep（只读；优先 rg）。
 def _spec_grep() -> ToolSpec:
     return ToolSpec(
         name="grep",
-        summary="全能跨语言代码搜索器。",
+        summary="在文件中进行正则搜索（类似 UNIX grep）",
         #summary="代码搜索（优先 rg，fallback Python）。",
         # description=(
         #     "用于在工作区内按正则搜索文本内容（Grep / Ripgrep）。\n"
@@ -460,9 +472,9 @@ def _spec_grep() -> ToolSpec:
                     "enum": ["all", "c", "cpp", "java", "python", "js", "go", "rust"],
                     "description": "编程语言类型，会自动过滤相关的源码和头文件"
                 },
-                "include_glob": {"type": "string", "description": "文件名通配符过滤，如 'test_*.cpp'"},
-                "ignore_case": {"type": "boolean", "default": False},
-                "max_hits": {"type": "integer", "default": 100}
+                "include_glob": {"type": "string", "description": "限定搜索的文件类型，如 'test_*.cpp'"},
+                "ignore_case": {"type": "boolean", "default": False, "description": "是否忽略大小写"},
+                "max_hits": {"type": "integer", "default": 100, "description": "最大命中数量"}
             },
             required=["pattern"],
         ),
@@ -481,7 +493,7 @@ def _spec_apply_patch() -> ToolSpec:
     """ToolSpec：apply_patch（写文件）。"""
     return ToolSpec(
         name="apply_patch",
-        summary="补丁式编辑（写文件，支持 fuzzy）。",
+        summary="对文件内容应用精确或模糊补丁（修改）",
         description=(
             "用于对文件进行“基于上下文的补丁替换”（Apply Patch）。\n"
             "- 建议：old/new 块带足够上下文（前后至少 3-5 行）以保证唯一匹配。\n"
@@ -521,11 +533,13 @@ def _spec_undo_patch() -> ToolSpec:
     """ToolSpec：undo_patch（写文件）。"""
     return ToolSpec(
         name="undo_patch",
-        summary="回滚补丁（写文件，基于 undo_id）。",
+        summary="回滚之前应用的补丁（写文件，基于 undo_id）。",
         description=(
             "用于回滚 apply_patch 产生的变更（Undo Patch）。\n"
             "- 适合：补丁应用错误/需要撤销。\n"
-            "- 注意：force=true 会忽略 hash 冲突检查，可能覆盖你后续手动修改。"
+            "- 注意：force=true 会忽略 hash 冲突检查，可能覆盖你后续手动修改。\n"
+			"典型场景：\n"
+			"- 修改后发现错误，需要恢复原状"
         ),
         args_schema=_obj_schema(
             properties={
@@ -549,7 +563,7 @@ def _spec_write_file() -> ToolSpec:
     """ToolSpec：write_file（写文件）。"""
     return ToolSpec(
         name="write_file",
-        summary="写入文件（写文件）。",
+        summary="写入或覆盖文件内容",
         description=(
             "用于创建/覆盖/追加写入文件（Write File）。\n"
             "- 默认：覆盖写入（wrote）。\n"
@@ -581,12 +595,15 @@ def _spec_run_cmd() -> ToolSpec:
     """ToolSpec：run_cmd（exec）。"""
     return ToolSpec(
         name="run_cmd",
-        summary="执行命令（可能有副作用，受策略约束）。",
+        summary="在指定目录中执行命令行指令（可能有副作用，受策略约束）。",
         description=(
             "用于在工作区内执行命令（Execute Command）。\n"
             "- 适合：运行测试/格式化/构建/一次性诊断命令。\n"
             "- 注意：该工具可能产生副作用（写文件/联网/安装依赖），必须遵守 policy 的确认与限制。\n"
-            "- 建议：命令尽量幂等；输出可能会被 max_output_bytes 截断。"
+            "- 建议：命令尽量幂等；输出可能会被 max_output_bytes 截断。\n"
+			"典型场景：\n"
+			"- 运行测试（pytest、npm test 等）\n"
+			"- 构建或格式化代码"
         ),
         args_schema=_obj_schema(
             properties={
@@ -611,11 +628,15 @@ def _spec_search_semantic() -> ToolSpec:
     """ToolSpec：search_semantic（只读 + search）。"""
     return ToolSpec(
         name="search_semantic",
-        summary="语义检索（向量 RAG，只读）。",
+        summary="基于语义的搜索（向量 RAG，只读）",
+		description =("典型场景：\n"
+					  "- 查找“用户认证逻辑”等概念性代码\n"
+					  "- 比 grep 更适合理解型搜索"
+		),
         args_schema=_obj_schema(
             properties={
                 "query": {"type": "string", "description": "自然语言查询"},
-                "max_results": {"type": "integer", "default": 10, "minimum": 1, "description": "最多返回条数"},
+                "max_results": {"type": "integer", "default": 10, "minimum": 1, "description": "最大返回结果数"},
             },
             required=["query"],
         ),
@@ -634,7 +655,10 @@ def _spec_display() -> ToolSpec:
     """ToolSpec：display（只读）。"""
     return ToolSpec(
         name="display",
-        summary="向用户输出信息（进度、分析结果、说明等，只读）。",
+        summary="向用户展示进度或状态信息（进度、分析结果、说明等，只读）。",
+		description=( "典型场景：\n"
+					  "- 长任务中提示当前阶段"
+		),
         args_schema=_obj_schema(
             properties={
                 "content": {"type": "string", "description": "要显示的内容（支持 Markdown）"},
@@ -792,7 +816,7 @@ def _spec_question() -> ToolSpec:
     """ToolSpec：question（向用户提问）。"""
     return ToolSpec(
         name="question",
-        summary="向用户提问并获取回答。",
+        summary="向用户提出结构化问题并提供选项",
         description=(
             "向用户提问并获取回答（Question）。\n"
             "- 适合：需要用户选择或确认的场景。\n"
@@ -802,7 +826,9 @@ def _spec_question() -> ToolSpec:
             "  - `multiple`: 是否允许多选（默认 false）\n"
             "  - `header`: 问题标题（可选）\n"
             "- 示例：从文件列表中选择：`question(question=\"请选择一个文件\", options=[\"file1.h\", \"file2.h\"])`\n"
-            "- 注意：不支持 `file_list` 参数，请使用 `options` 参数传递文件列表。"
+            "- 注意：不支持 `file_list` 参数，请使用 `options` 参数传递文件列表。\n"
+			"典型场景：\n"
+			"- 需要用户决策（如删除/保留文件）"
         ),
         args_schema=_obj_schema(
             properties={
@@ -848,7 +874,7 @@ def _spec_webfetch() -> ToolSpec:
     """ToolSpec：webfetch（获取网页内容，支持本地 Markdown 缓存）。"""
     return ToolSpec(
         name="webfetch",
-        summary="抓取网页内容并缓存为 Markdown（支持 7 天本地缓存）。",
+        summary="抓取网页内容并缓存为 Markdown(在本地缓存7天)",
         description=(
             "用于把指定 URL 的网页内容抓取为 Markdown 格式（Web Fetch）。\n"
             "- 特性：自动缓存到 .clude/markdown/ 目录，文件名以文档标题命名。\n"
@@ -856,11 +882,14 @@ def _spec_webfetch() -> ToolSpec:
             "- 适合：抓官网文档/博客/FAQ，然后结合内容回答或写代码。\n"
             "- 注意：只支持 http/https；内容会按配置的 max_content_length 截断。\n"
             "- 提示：如果只是需要【找资料】，先用 websearch 再 webfetch 关键页面。\n"
-            "- force_refresh=true 可强制忽略缓存重新抓取。"
+            "- force_refresh=true 可强制忽略缓存重新抓取。\n"
+			"典型场景：\n"
+			"- 拉取官方文档\n"
+			"- 构建本地知识上下文"
         ),
         args_schema=_obj_schema(
             properties={
-                "url": {"type": "string", "description": "要获取的 URL"},
+                "url": {"type": "string", "description": "目标网址"},
                 "format": {"type": "string", "enum": ["markdown", "text"], "default": "markdown", "description": "返回格式（markdown 或纯文本）"},
                 "timeout": {"type": "integer", "default": 30, "minimum": 1, "description": "请求超时时间（秒）"},
                 "use_cache": {"type": "boolean", "default": True, "description": "是否使用本地缓存（推荐 true）"},
@@ -891,6 +920,8 @@ def _spec_load_skill() -> ToolSpec:
     return ToolSpec(
         name="load_skill",
         summary="加载和执行预定义的技能。",
+		description=("典型场景：\n"
+					 "- 启用特定高阶能力（重构、审计等）"),
         args_schema=_obj_schema(
             properties={
                 "skill_name": {"type": "string", "description": "技能名称（文件名，不含扩展名）"}

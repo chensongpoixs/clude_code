@@ -59,9 +59,16 @@ def handle_tool_call_in_step(
     _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload, "step_id": step.id})
 
     result_msg = _tool_result_to_message(name, result, keywords=keywords)
-    loop.messages.append(ChatMessage(role="user", content=result_msg))
-    loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name} [步骤] {step.id} [result_msg: {result_msg[:10]}{'...' if len(result_msg) > 10 else ''}]")
-    loop.file_only_logger.debug(f"工具结果回喂 [step={step.id}] [tool={name}] [result_msg={result_msg}]")
+    if name != "display":
+        # 文件搜索工具结果较长时，截断日志输出
+        # loop.logger.info(f"[dim]工具结果长度: {len(result_msg)} 字符[/dim]") 
+
+        loop.messages.append(ChatMessage(role="user", content=result_msg))
+        loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name} [步骤] {step.id} [result_msg: {result_msg[:10]}{'...' if len(result_msg) > 10 else ''}]")
+        loop.file_only_logger.debug(f"工具结果回喂 [step={step.id}] [tool={name}] [result_msg={result_msg}]")
+    else:
+        loop.logger.debug(f"[dim]跳过 display 工具结果回喂[/dim] [步骤] {step.id}");
+
     _ev("tool_result_fed_back", {"tool": name, "step_id": step.id})
     loop._trim_history(max_messages=30)
 

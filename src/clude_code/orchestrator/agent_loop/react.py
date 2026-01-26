@@ -103,9 +103,15 @@ def execute_react_fallback_loop(
         _ev("tool_result", {"tool": name, "ok": result.ok, "error": result.error, "payload": result.payload})
 
         result_msg = _tool_result_to_message(name, result, keywords=keywords)
-        loop.messages.append(ChatMessage(role="user", content=result_msg))
-        loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name}")
-        loop.file_only_logger.debug(f"工具结果回喂 [tool={name}] [len={len(result_msg)}]")
+        if name != "display":
+            # 文件搜索工具结果较长时，截断日志输出
+            # loop.logger.info(f"[dim]工具结果长度: {len(result_msg)} 字符[/dim]")
+            loop.messages.append(ChatMessage(role="user", content=result_msg))
+            loop.logger.debug(f"[dim]工具结果已回喂[/dim] [工具] {name}")
+            loop.file_only_logger.debug(f"工具结果回喂 [tool={name}] [len={len(result_msg)}]")
+        else:
+            loop.logger.debug(f"[dim]跳过 display 工具结果回喂[/dim] [工具] {name}");
+
         _ev("tool_result_fed_back", {"tool": name})
         loop._trim_history(max_messages=30)
 
